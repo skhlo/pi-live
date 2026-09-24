@@ -1,0 +1,7 @@
+/**
+ * @file Justfile grammar for tree-sitter
+ * @author Anshuman Medhi <amedhi@connect.ust.uk>
+ * @author Trevor Gross <tmgross@umich.edu>
+ * @author Amaan Qureshi <amaanq12@gmail.com>
+ * @license Apache-2.0
+ */

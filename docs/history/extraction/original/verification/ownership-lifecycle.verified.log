@@ -1,0 +1,50 @@
+{
+  "source": {
+    "root": "/tmp/pi-better-openai.qnz8hk",
+    "head": "39171682343754366439b2c0890f5b0f4c3ed891"
+  },
+  "fakesOnly": true,
+  "afterHandoffDeactivation": {
+    "firstSessionMuted": true,
+    "firstStopCalled": true,
+    "firstStopResolved": false
+  },
+  "whileSecondSessionRuns": {
+    "firstStopStillPending": true,
+    "secondSessionMutedInitially": false,
+    "sessionsCreated": 2
+  },
+  "afterCommandReturns": {
+    "secondStopCalled": true,
+    "secondStopResolved": false,
+    "events": [
+      "join",
+      "create:session-1",
+      "start:session-1",
+      "mute:session-1:true",
+      "stop-called:session-1",
+      "create:session-2",
+      "start:session-2",
+      "leave-start",
+      "stop-called:session-2",
+      "leave-end"
+    ],
+    "registrationStillActive": false
+  },
+  "finalSessionStates": [
+    {
+      "id": "session-1",
+      "muted": true,
+      "started": true,
+      "stopCalled": true,
+      "stopResolved": true
+    },
+    {
+      "id": "session-2",
+      "muted": false,
+      "started": true,
+      "stopCalled": true,
+      "stopResolved": true
+    }
+  ]
+}

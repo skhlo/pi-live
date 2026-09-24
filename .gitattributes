@@ -1,0 +1,7 @@
+# Preserve exact upstream, notice, and historical evidence bytes.
+upstream/pi-live/** -text -whitespace
+upstream/pi-live.lock.json -text -whitespace
+notices/** -text -whitespace
+docs/history/extraction/original/** -text -whitespace
+LICENSE -text -whitespace
+UPSTREAM_THIRD_PARTY_NOTICES.md -text -whitespace

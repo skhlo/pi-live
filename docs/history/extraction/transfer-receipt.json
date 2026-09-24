@@ -1,0 +1,1504 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Initial standalone extraction byte/mode receipt, not runtime readiness or a legal-clearance claim.",
+  "source": {
+    "repository": "https://github.com/skhlo/dotfiles",
+    "commit": "db2c57f13c274d66d79287fda8de177c016f0c02",
+    "commitAvailability": "retained local source branch; unpublished"
+  },
+  "privateEvidenceDirectory": "~/.local/share/pi-live-transfer/evidence",
+  "files": [
+    {
+      "source": "config/pi-live/LICENSE",
+      "destination": "LICENSE",
+      "sourceSha256": "1126322e2cc8d165adc4c792eeb195717de2bcc7b39be1ce77959d78e87ef685",
+      "bytes": 1056,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "1126322e2cc8d165adc4c792eeb195717de2bcc7b39be1ce77959d78e87ef685",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/PROVENANCE.md",
+      "destination": "PROVENANCE.md",
+      "sourceSha256": "80fd0c1ed5c89713ffa6c82075783e433d46aab64220629acf984553b86a7f5c",
+      "bytes": 8839,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "0321610b69850e8b7ab237d0d1d18c2980033df75b1f3e0035ee8c88c6624dc3",
+      "treatment": "adapted",
+      "reason": "Update ownership, paths, current status, and evidence limitations for the standalone repository; preserve provenance and attribution."
+    },
+    {
+      "source": "config/pi-live/THIRD_PARTY_NOTICES.md",
+      "destination": "THIRD_PARTY_NOTICES.md",
+      "sourceSha256": "b5122f464e6edf9aa5dd8edfa5804b78ebbb1cd2604db03703e589b23fa6287f",
+      "bytes": 8096,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "b5122f464e6edf9aa5dd8edfa5804b78ebbb1cd2604db03703e589b23fa6287f",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/UPSTREAM_THIRD_PARTY_NOTICES.md",
+      "destination": "UPSTREAM_THIRD_PARTY_NOTICES.md",
+      "sourceSha256": "58f8d237355fafb7832f9ad4e418aacd248223fd7818c36c00111da48caa279a",
+      "bytes": 1351,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "58f8d237355fafb7832f9ad4e418aacd248223fd7818c36c00111da48caa279a",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/index.ts",
+      "destination": "index.ts",
+      "sourceSha256": "1b0642cbbf4334392e999e194bc47dfe9d1a83441844b0b2281bfcadee27e92d",
+      "bytes": 332,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "1b0642cbbf4334392e999e194bc47dfe9d1a83441844b0b2281bfcadee27e92d",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/NOTICE-MANIFEST.json",
+      "destination": "notices/NOTICE-MANIFEST.json",
+      "sourceSha256": "3a674e1b218af8db3630e85dd0c468cdd39f09b4832010ee76e65f811b2bbdf2",
+      "bytes": 11108,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "3a674e1b218af8db3630e85dd0c468cdd39f09b4832010ee76e65f811b2bbdf2",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/audio/audiopus_sys.LICENSE",
+      "destination": "notices/audio/audiopus_sys.LICENSE",
+      "sourceSha256": "a6c8bb45880edc99bb13feb04d69fb2f0f73b565dfe209affa60414d2aa4c1a7",
+      "bytes": 740,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "a6c8bb45880edc99bb13feb04d69fb2f0f73b565dfe209affa60414d2aa4c1a7",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/audio/maudio-sys.LICENSE",
+      "destination": "notices/audio/maudio-sys.LICENSE",
+      "sourceSha256": "dbbd6dba7b96c24529612797ad21d2ed24f067a679fd9fe38a63e0a6b7bc675c",
+      "bytes": 1092,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "dbbd6dba7b96c24529612797ad21d2ed24f067a679fd9fe38a63e0a6b7bc675c",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/audio/maudio.LICENSE",
+      "destination": "notices/audio/maudio.LICENSE",
+      "sourceSha256": "dbbd6dba7b96c24529612797ad21d2ed24f067a679fd9fe38a63e0a6b7bc675c",
+      "bytes": 1092,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "dbbd6dba7b96c24529612797ad21d2ed24f067a679fd9fe38a63e0a6b7bc675c",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/audio/miniaudio.LICENSE",
+      "destination": "notices/audio/miniaudio.LICENSE",
+      "sourceSha256": "457f1b500e0adf6bc059edddfa78a2f62012e7c3bb43476c20e0bd23b25ba0eb",
+      "bytes": 2597,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "457f1b500e0adf6bc059edddfa78a2f62012e7c3bb43476c20e0bd23b25ba0eb",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/audio/opus-wrapper.LICENSE-APACHE",
+      "destination": "notices/audio/opus-wrapper.LICENSE-APACHE",
+      "sourceSha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "bytes": 10847,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/audio/opus-wrapper.LICENSE-MIT",
+      "destination": "notices/audio/opus-wrapper.LICENSE-MIT",
+      "sourceSha256": "6b3b465fa69075348ee5ffc9ba6afa93402743a4a942a463404fac25257bd3ed",
+      "bytes": 1057,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "6b3b465fa69075348ee5ffc9ba6afa93402743a4a942a463404fac25257bd3ed",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/audio/opus.COPYING",
+      "destination": "notices/audio/opus.COPYING",
+      "sourceSha256": "8338ce8d922bb4416ce3dd1e5680173332435e3f0755007ac7801ccd674fe682",
+      "bytes": 1928,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "8338ce8d922bb4416ce3dd1e5680173332435e3f0755007ac7801ccd674fe682",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/audio/opus.LICENSE_PLEASE_READ",
+      "destination": "notices/audio/opus.LICENSE_PLEASE_READ",
+      "sourceSha256": "7efb4989e0cd1b256229bdf2f09300c5d14e35db0e7476bfb87fac243498273d",
+      "bytes": 703,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "7efb4989e0cd1b256229bdf2f09300c5d14e35db0e7476bfb87fac243498273d",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/crypto/ring-fiat.LICENSE",
+      "destination": "notices/crypto/ring-fiat.LICENSE",
+      "sourceSha256": "9eacbcb81be660840c714a560a9d65ba07913db98dd4baf969f78dd499fdd60f",
+      "bytes": 638,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "9eacbcb81be660840c714a560a9d65ba07913db98dd4baf969f78dd499fdd60f",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/crypto/ring-once-cell.LICENSE-APACHE",
+      "destination": "notices/crypto/ring-once-cell.LICENSE-APACHE",
+      "sourceSha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "bytes": 10847,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/crypto/ring-once-cell.LICENSE-MIT",
+      "destination": "notices/crypto/ring-once-cell.LICENSE-MIT",
+      "sourceSha256": "6ee2ed6c77710de911761acd5fc1ad1da00f476beb1a7ef27e78c2d1858deafc",
+      "bytes": 1022,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "6ee2ed6c77710de911761acd5fc1ad1da00f476beb1a7ef27e78c2d1858deafc",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/crypto/ring.LICENSE",
+      "destination": "notices/crypto/ring.LICENSE",
+      "sourceSha256": "b3d734001a94efff3579978d953391aa7115f877657d25eb54037a43875d078a",
+      "bytes": 499,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "b3d734001a94efff3579978d953391aa7115f877657d25eb54037a43875d078a",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/crypto/ring.LICENSE-BoringSSL",
+      "destination": "notices/crypto/ring.LICENSE-BoringSSL",
+      "sourceSha256": "005fc765ddc5115da796cca915baa9557abae13ff35e0a47c47affc56f6c414d",
+      "bytes": 14870,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "005fc765ddc5115da796cca915baa9557abae13ff35e0a47c47affc56f6c414d",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/crypto/ring.LICENSE-other-bits",
+      "destination": "notices/crypto/ring.LICENSE-other-bits",
+      "sourceSha256": "f025ccfb7dfb6bdfedc75ca0f67acc69e6fb4998143d834f7c2f38a29989680f",
+      "bytes": 731,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "f025ccfb7dfb6bdfedc75ca0f67acc69e6fb4998143d834f7c2f38a29989680f",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/fonts/CC-BY-4.0.txt",
+      "destination": "notices/fonts/CC-BY-4.0.txt",
+      "sourceSha256": "9ba9550ad48438d0836ddab3da480b3b69ffa0aac7b7878b5a0039e7ab429411",
+      "bytes": 18657,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "9ba9550ad48438d0836ddab3da480b3b69ffa0aac7b7878b5a0039e7ab429411",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/fonts/Silver.LICENSE",
+      "destination": "notices/fonts/Silver.LICENSE",
+      "sourceSha256": "b2b97a7c88214ea92e60c3a5d2c43da59a8e552507a89330c78d9f4c0160cdfd",
+      "bytes": 565,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "b2b97a7c88214ea92e60c3a5d2c43da59a8e552507a89330c78d9f4c0160cdfd",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/grammar/tree-sitter-just.LICENSE",
+      "destination": "notices/grammar/tree-sitter-just.LICENSE",
+      "sourceSha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "bytes": 11357,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/grammar/tree-sitter-just.header.txt",
+      "destination": "notices/grammar/tree-sitter-just.header.txt",
+      "sourceSha256": "fa4da7f0ee7ec05469b70bc64b44da79eb4f16a0ca00670c63186103f7d13f10",
+      "bytes": 213,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "fa4da7f0ee7ec05469b70bc64b44da79eb4f16a0ca00670c63186103f7d13f10",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/highlight/sublime-csharp.header.txt",
+      "destination": "notices/highlight/sublime-csharp.header.txt",
+      "sourceSha256": "9dd596cd04701b0bc0d91117d8c026f355eb1a8d8be6dedd8c2113feb649e2ca",
+      "bytes": 215,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "9dd596cd04701b0bc0d91117d8c026f355eb1a8d8be6dedd8c2113feb649e2ca",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/highlight/sublime-packages.LICENSE",
+      "destination": "notices/highlight/sublime-packages.LICENSE",
+      "sourceSha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+      "bytes": 671,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/highlight/sublime-rust.LICENSE",
+      "destination": "notices/highlight/sublime-rust.LICENSE",
+      "sourceSha256": "89807acf2309bd285f033404ee78581602f3cd9b819a16ac2f0e5f60ff4a473e",
+      "bytes": 1023,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "89807acf2309bd285f033404ee78581602f3cd9b819a16ac2f0e5f60ff4a473e",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/highlight/sublime-yaml.header.txt",
+      "destination": "notices/highlight/sublime-yaml.header.txt",
+      "sourceSha256": "de73217c58ff5d16b24365b43b8d67d725611d9f80dd5c1c1e10e05e4eed5107",
+      "bytes": 1610,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "de73217c58ff5d16b24365b43b8d67d725611d9f80dd5c1c1e10e05e4eed5107",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/highlight/syntect.LICENSE",
+      "destination": "notices/highlight/syntect.LICENSE",
+      "sourceSha256": "c695a20d7feb2463ecc9f0a966c88ed1581e364e1e22796e0ded020b571fa43b",
+      "bytes": 1116,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "c695a20d7feb2463ecc9f0a966c88ed1581e364e1e22796e0ded020b571fa43b",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/objc2/LICENSE-APACHE-current.txt",
+      "destination": "notices/objc2/LICENSE-APACHE-current.txt",
+      "sourceSha256": "0c9a5f6fe28e27015e12506ffe58c9e007cead169af9670ec15c1df0d14e4f2a",
+      "bytes": 10204,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "0c9a5f6fe28e27015e12506ffe58c9e007cead169af9670ec15c1df0d14e4f2a",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/objc2/LICENSE-MIT-current.txt",
+      "destination": "notices/objc2/LICENSE-MIT-current.txt",
+      "sourceSha256": "f6a2e783669a0dd7a2c3b8a4f76db40ae49033e66e1bdc30f3aa25fe5577b070",
+      "bytes": 1053,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "f6a2e783669a0dd7a2c3b8a4f76db40ae49033e66e1bdc30f3aa25fe5577b070",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/objc2/LICENSE-Steven-Sheldon-historical.txt",
+      "destination": "notices/objc2/LICENSE-Steven-Sheldon-historical.txt",
+      "sourceSha256": "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5",
+      "bytes": 1066,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/objc2/LICENSE-ZLIB-current.txt",
+      "destination": "notices/objc2/LICENSE-ZLIB-current.txt",
+      "sourceSha256": "fced3e7fedc235fa83ed0108b0df74d86b435d06436356f46917a903cbadd80a",
+      "bytes": 838,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "fced3e7fedc235fa83ed0108b0df74d86b435d06436356f46917a903cbadd80a",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/objc2/LICENSE-pinned.md",
+      "destination": "notices/objc2/LICENSE-pinned.md",
+      "sourceSha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
+      "bytes": 1339,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/oh-my-pi/LICENSE",
+      "destination": "notices/oh-my-pi/LICENSE",
+      "sourceSha256": "545636e19386d3d4e0ae6d77354527499999c3ebfbca61b9fa5aa4ead7c0b308",
+      "bytes": 1106,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "545636e19386d3d4e0ae6d77354527499999c3ebfbca61b9fa5aa4ead7c0b308",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/pi-shell/NOTICE",
+      "destination": "notices/pi-shell/NOTICE",
+      "sourceSha256": "351dbfd4c2a9774ce0fd9bcc896f77ffa020da01afe25b976ca806e7bedecbde",
+      "bytes": 1879,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "351dbfd4c2a9774ce0fd9bcc896f77ffa020da01afe25b976ca806e7bedecbde",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/rust/Rust-library.COPYRIGHT.html",
+      "destination": "notices/rust/Rust-library.COPYRIGHT.html",
+      "sourceSha256": "98811f00ad5cf5c8690dc770ba421b488bb0c5bb051cd2affd995b75f49edb75",
+      "bytes": 425861,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "98811f00ad5cf5c8690dc770ba421b488bb0c5bb051cd2affd995b75f49edb75",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/rust/Rust-std.COPYRIGHT",
+      "destination": "notices/rust/Rust-std.COPYRIGHT",
+      "sourceSha256": "172020dbfd5b53a226dfde77616190a48dcff519b0bc0e6deb91a8450782c4af",
+      "bytes": 1571,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "172020dbfd5b53a226dfde77616190a48dcff519b0bc0e6deb91a8450782c4af",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/rust/Rust-std.LICENSE-APACHE",
+      "destination": "notices/rust/Rust-std.LICENSE-APACHE",
+      "sourceSha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "bytes": 9723,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/rust/Rust-std.LICENSE-MIT",
+      "destination": "notices/rust/Rust-std.LICENSE-MIT",
+      "sourceSha256": "b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1",
+      "bytes": 1068,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/rust/Unicode-3.0.txt",
+      "destination": "notices/rust/Unicode-3.0.txt",
+      "sourceSha256": "f5062c9a188d81dfe66b56db4182dcf9e4b17c0d9b0d311a8e20b3a1b075c443",
+      "bytes": 1995,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "f5062c9a188d81dfe66b56db4182dcf9e4b17c0d9b0d311a8e20b3a1b075c443",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/rust/compiler-builtins.LICENSE.txt",
+      "destination": "notices/rust/compiler-builtins.LICENSE.txt",
+      "sourceSha256": "ab6eec6caf0fa5775e411c7a8bc6a45c4ef2956b0980b157ab74fc5cd62a928b",
+      "bytes": 15078,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "ab6eec6caf0fa5775e411c7a8bc6a45c4ef2956b0980b157ab74fc5cd62a928b",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/rust/libm.LICENSE.txt",
+      "destination": "notices/rust/libm.LICENSE.txt",
+      "sourceSha256": "3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7",
+      "bytes": 14088,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/rust/libunwind.LICENSE.txt",
+      "destination": "notices/rust/libunwind.LICENSE.txt",
+      "sourceSha256": "b5efebcaca80879234098e52d1725e6d9eb8fb96a19fce625d39184b705f7b6d",
+      "bytes": 16706,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "b5efebcaca80879234098e52d1725e6d9eb8fb96a19fce625d39184b705f7b6d",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/search/PCRE2-Cambridge-BSD3.header.txt",
+      "destination": "notices/search/PCRE2-Cambridge-BSD3.header.txt",
+      "sourceSha256": "b5af5a2c86e27565eb5a2083c5418e3297d5a280ff0a2e9536e1ae5bc3789f8b",
+      "bytes": 1973,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "b5af5a2c86e27565eb5a2083c5418e3297d5a280ff0a2e9536e1ae5bc3789f8b",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/search/SLJIT-Herczeg-BSD2.header.txt",
+      "destination": "notices/search/SLJIT-Herczeg-BSD2.header.txt",
+      "sourceSha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb",
+      "bytes": 1444,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/search/onig_sys.LICENSE",
+      "destination": "notices/search/onig_sys.LICENSE",
+      "sourceSha256": "71f321038b088358004bee991635ac09e4c703bec467d3c30c06992c0595f189",
+      "bytes": 1511,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "71f321038b088358004bee991635ac09e4c703bec467d3c30c06992c0595f189",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/search/oniguruma.COPYING",
+      "destination": "notices/search/oniguruma.COPYING",
+      "sourceSha256": "70ba5469ea0bab6e18a32d7009068f996503168d27be57747e08da34337ff26f",
+      "bytes": 1340,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "70ba5469ea0bab6e18a32d7009068f996503168d27be57747e08da34337ff26f",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/search/pcre2-sys.COPYING",
+      "destination": "notices/search/pcre2-sys.COPYING",
+      "sourceSha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f",
+      "bytes": 126,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/search/pcre2-sys.LICENSE-MIT",
+      "destination": "notices/search/pcre2-sys.LICENSE-MIT",
+      "sourceSha256": "cb3c929a05e6cbc9de9ab06a4c57eeb60ca8c724bef6c138c87d3a577e27aa14",
+      "bytes": 1081,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "cb3c929a05e6cbc9de9ab06a4c57eeb60ca8c724bef6c138c87d3a577e27aa14",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/search/pcre2-sys.UNLICENSE",
+      "destination": "notices/search/pcre2-sys.UNLICENSE",
+      "sourceSha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c",
+      "bytes": 1211,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/syntax/julia.LICENSE",
+      "destination": "notices/syntax/julia.LICENSE",
+      "sourceSha256": "b8a3a4021a4f2cc820b9853c0af603f20260c8541cebb153172838fcad89dbcb",
+      "bytes": 1157,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "b8a3a4021a4f2cc820b9853c0af603f20260c8541cebb153172838fcad89dbcb",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/syntax/mermaid.LICENSE",
+      "destination": "notices/syntax/mermaid.LICENSE",
+      "sourceSha256": "67cab231f9572e10bf6259bf99954920fb5ed38aa0918d45c1e9398dffd703ad",
+      "bytes": 1074,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "67cab231f9572e10bf6259bf99954920fb5ed38aa0918d45c1e9398dffd703ad",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/syntax/nix.LICENSE",
+      "destination": "notices/syntax/nix.LICENSE",
+      "sourceSha256": "1cb5064b01955e4c356b66ab02a410b250d86060ad8afc57cb1ee05d515c12ee",
+      "bytes": 1078,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "1cb5064b01955e4c356b66ab02a410b250d86060ad8afc57cb1ee05d515c12ee",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/tokenizer/openai-tiktoken.LICENSE",
+      "destination": "notices/tokenizer/openai-tiktoken.LICENSE",
+      "sourceSha256": "418cb499b436128d653d79941333a5437b7be2ea9213dcc2f04d15d5d2c51d86",
+      "bytes": 1078,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "418cb499b436128d653d79941333a5437b7be2ea9213dcc2f04d15d5d2c51d86",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/tokenizer/tiktoken-rs.LICENSE",
+      "destination": "notices/tokenizer/tiktoken-rs.LICENSE",
+      "sourceSha256": "f7c6ddf9d84fd7b8ad5917e4074d4c05e4c1dfb752a28a0058f06bd0f5e2edcc",
+      "bytes": 1072,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "f7c6ddf9d84fd7b8ad5917e4074d4c05e4c1dfb752a28a0058f06bd0f5e2edcc",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/utilities/uutils-coreutils.LICENSE",
+      "destination": "notices/utilities/uutils-coreutils.LICENSE",
+      "sourceSha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
+      "bytes": 1056,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/notices/utilities/uutils-findutils.LICENSE",
+      "destination": "notices/utilities/uutils-findutils.LICENSE",
+      "sourceSha256": "b2888851106d2281b01ff2b807b4950463725c39895dd064770c43d28d419a71",
+      "bytes": 1051,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "b2888851106d2281b01ff2b807b4950463725c39895dd064770c43d28d419a71",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/package.json",
+      "destination": "package.json",
+      "sourceSha256": "efecf34b662d3c1d6afdb662bc379a256540570a663cbf1a0b0a043dca1e6802",
+      "bytes": 748,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "375d1573ff8f75c5255bbc82c29274bb2ca3c146a481d2d1f84d3241728ea276",
+      "treatment": "adapted",
+      "reason": "Add standalone development commands and existing exact tooling pins; runtime/native/peer identities unchanged."
+    },
+    {
+      "source": "config/pi-live/pnpm-lock.yaml",
+      "destination": "pnpm-lock.yaml",
+      "sourceSha256": "5592ea11b80d66ef9d230b021903458d2de8360c28461d4a9a1b220bce0770ba",
+      "bytes": 44201,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "7230a1cf633b74dc0fe3d7b6ec014f66edb636623a92e060dd75d0adf9d9e597",
+      "treatment": "adapted",
+      "reason": "Regenerated by pnpm 11.8.0 for standalone development tooling, with automatic peers disabled; production closure unchanged."
+    },
+    {
+      "source": "config/pi-live/src/compatibility.ts",
+      "destination": "src/compatibility.ts",
+      "sourceSha256": "e8cdebed4e89e0a824915e06c9fd803285d866801794ea6105d23c0dc8ada5cf",
+      "bytes": 3569,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "e8cdebed4e89e0a824915e06c9fd803285d866801794ea6105d23c0dc8ada5cf",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/src/live.ts",
+      "destination": "src/live.ts",
+      "sourceSha256": "b1095bfa5cff5c17ba1d8e3bd8cd5eb726c6a3a313c9fdfad33121de9a3728e6",
+      "bytes": 6396,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "b1095bfa5cff5c17ba1d8e3bd8cd5eb726c6a3a313c9fdfad33121de9a3728e6",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/src/pi-tui.d.ts",
+      "destination": "src/pi-tui.d.ts",
+      "sourceSha256": "a37b0a5adc861bcbd7d046cf64ed55383aaf0e65e4a27e2cdff3fde1244d907a",
+      "bytes": 153,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "a37b0a5adc861bcbd7d046cf64ed55383aaf0e65e4a27e2cdff3fde1244d907a",
+      "treatment": "exact"
+    },
+    {
+      "source": "config/pi-live/src/preferences.ts",
+      "destination": "src/preferences.ts",
+      "sourceSha256": "c5a5a97c3e3d12053f201bc450211ec768bc81149756faeddf887b02381dc90a",
+      "bytes": 12256,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "c5a5a97c3e3d12053f201bc450211ec768bc81149756faeddf887b02381dc90a",
+      "treatment": "exact"
+    },
+    {
+      "source": "scripts/check-pi-live-loader.ts",
+      "destination": "scripts/check-pi-live-loader.ts",
+      "sourceSha256": "06e223d60fe4356408f0d558b3b9898cd66c2705cefcacd7be4c91c419bd0c7e",
+      "bytes": 8100,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "a213351b27ea0acac226da470ec10bb377a171d3af6e96ca32f8aecbd72bf052",
+      "treatment": "adapted",
+      "reason": "Adapt package-owned payload, loader, and dependency verification for the standalone root; remove dotfiles installer coupling."
+    },
+    {
+      "source": "scripts/check-pi-live.test.ts",
+      "destination": "scripts/check-pi-live.test.ts",
+      "sourceSha256": "9087994d89f0e162f49f727ad9d5e23f92b2f0e42bc2c37720679d2bf28f4f3d",
+      "bytes": 10616,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "5233ca0790fdead194bd14c4b5fe1773c2f8d37b66718958d0ea20cf36b6155c",
+      "treatment": "adapted",
+      "reason": "Adapt executable tests and fixtures for the root package, remove dotfiles installer coupling, and narrow parsed fixture data."
+    },
+    {
+      "source": "scripts/check-pi-live.ts",
+      "destination": "scripts/check-pi-live.ts",
+      "sourceSha256": "4aa3c4ef5ac9e7a2b2d45652858fd98a0bce77e37c94b439ef65768e10548fdc",
+      "bytes": 7300,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "ca1cf4fd8719f385da51f82fae62f6c2169fded342c03bf9b6c43098c0cb81ac",
+      "treatment": "adapted",
+      "reason": "Adapt package-owned payload, loader, and dependency verification for the standalone root; remove dotfiles installer coupling."
+    },
+    {
+      "source": "scripts/import-pi-live.test.ts",
+      "destination": "scripts/import-pi-live.test.ts",
+      "sourceSha256": "b81f4156d992cc5978cf95dd9f92f498696a75482fd5f171f278034b3de5db7b",
+      "bytes": 22773,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "3ff7dea8d9f03822fb6261e65b924743c744bc6e71cd05c6526f7f35a3634659",
+      "treatment": "adapted",
+      "reason": "Narrow parsed fixture data; preserve importer behavior and all original test scenarios."
+    },
+    {
+      "source": "scripts/import-pi-live.ts",
+      "destination": "scripts/import-pi-live.ts",
+      "sourceSha256": "66e21da1163b74d78c93635c5be7c5e94a7dd8d44a83b6a692265ead5cc584d1",
+      "bytes": 21936,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "66e21da1163b74d78c93635c5be7c5e94a7dd8d44a83b6a692265ead5cc584d1",
+      "treatment": "exact"
+    },
+    {
+      "source": "scripts/pi-live-compatibility.test.ts",
+      "destination": "scripts/pi-live-compatibility.test.ts",
+      "sourceSha256": "4e673df983233d899682e2e00e17746dbcb47e8a43a2dae4996400bdee4a866d",
+      "bytes": 2185,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "4d408ab264f24ccc3453b717b5975aba833ce21f954e52a272e390e5fcf5e882",
+      "treatment": "adapted",
+      "reason": "Adapt executable tests and fixtures for the root package, remove dotfiles installer coupling, and narrow parsed fixture data."
+    },
+    {
+      "source": "scripts/pi-live-loader-probe.ts",
+      "destination": "scripts/pi-live-loader-probe.ts",
+      "sourceSha256": "0739288f232edd3fdb98a65f6a03a0439f42cbfc0582429200da58c895237159",
+      "bytes": 6970,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "b3208c24b8763cf052d4c76e008ecb03e98425f23963cb29ec2e3c5130be151f",
+      "treatment": "adapted",
+      "reason": "Adapt package-owned payload, loader, and dependency verification for the standalone root; remove dotfiles installer coupling."
+    },
+    {
+      "source": "scripts/pi-live-package.ts",
+      "destination": "scripts/pi-live-package.ts",
+      "sourceSha256": "eab07f494a43531d4c4606df248c0935c11d2669da6812c1b6d402b973b0900e",
+      "bytes": 30913,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "b2bd4549b2452cbbdcbc43f8d1a4b4a4ec7ea2b05afcb07001541906721acdbf",
+      "treatment": "adapted",
+      "reason": "Adapt package-owned payload, loader, and dependency verification for the standalone root; remove dotfiles installer coupling."
+    },
+    {
+      "source": "scripts/pi-live-preferences.test.ts",
+      "destination": "scripts/pi-live-preferences.test.ts",
+      "sourceSha256": "efa8c3dff279708b3567e4f2eb390fc8329ccbbb7fe227a94af10cdc736e48e9",
+      "bytes": 14495,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "e8dee0cb43de7c12e41afe6268d9aa92224982171bfc0d8e94188401456bb538",
+      "treatment": "adapted",
+      "reason": "Relocate imports, narrow parsed fixture data, and add deterministic public-store observed-conflict retry coverage; runtime semantics unchanged."
+    },
+    {
+      "source": "scripts/pi-live.test.ts",
+      "destination": "scripts/pi-live.test.ts",
+      "sourceSha256": "a11d110e6ef5605ac5f3a62d4138cd454a5885ac35354f2ef497eaf56a60b9c8",
+      "bytes": 17451,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "256839cf2cc91c818665fb7fcb7fcc6c72d65349d19706973d9d4b733afe9794",
+      "treatment": "adapted",
+      "reason": "Adapt executable tests and fixtures for the root package, remove dotfiles installer coupling, and narrow parsed fixture data."
+    },
+    {
+      "source": "upstream/pi-live.lock.json",
+      "destination": "upstream/pi-live.lock.json",
+      "sourceSha256": "dd62eacdd676fc42dc134a688bdba436e711c9805999732f0f3db777f6ec2d16",
+      "bytes": 8875,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "dd62eacdd676fc42dc134a688bdba436e711c9805999732f0f3db777f6ec2d16",
+      "treatment": "exact"
+    },
+    {
+      "source": "upstream/pi-live/LICENSE",
+      "destination": "upstream/pi-live/LICENSE",
+      "sourceSha256": "1126322e2cc8d165adc4c792eeb195717de2bcc7b39be1ce77959d78e87ef685",
+      "bytes": 1056,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "1126322e2cc8d165adc4c792eeb195717de2bcc7b39be1ce77959d78e87ef685",
+      "treatment": "exact"
+    },
+    {
+      "source": "upstream/pi-live/THIRD_PARTY_NOTICES.md",
+      "destination": "upstream/pi-live/THIRD_PARTY_NOTICES.md",
+      "sourceSha256": "58f8d237355fafb7832f9ad4e418aacd248223fd7818c36c00111da48caa279a",
+      "bytes": 1351,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "58f8d237355fafb7832f9ad4e418aacd248223fd7818c36c00111da48caa279a",
+      "treatment": "exact"
+    },
+    {
+      "source": "upstream/pi-live/package.json",
+      "destination": "upstream/pi-live/package.json",
+      "sourceSha256": "fb4f4a7b4e302bafd614da3c2c15c5499c8799e074c8765931b84edb4a5dd440",
+      "bytes": 2660,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "fb4f4a7b4e302bafd614da3c2c15c5499c8799e074c8765931b84edb4a5dd440",
+      "treatment": "exact"
+    },
+    {
+      "source": "upstream/pi-live/src/codex-auth.ts",
+      "destination": "upstream/pi-live/src/codex-auth.ts",
+      "sourceSha256": "f87effd043dc7e8722be4e36866d5fee32a8e9bba23ac0d3f788932eb370989e",
+      "bytes": 5546,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "f87effd043dc7e8722be4e36866d5fee32a8e9bba23ac0d3f788932eb370989e",
+      "treatment": "exact"
+    },
+    {
+      "source": "upstream/pi-live/src/format.ts",
+      "destination": "upstream/pi-live/src/format.ts",
+      "sourceSha256": "c3c9ed1db3a6cb8503cf69d7505d22cc5883f6e33aabff90d8a6cec8e912ca44",
+      "bytes": 3440,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "c3c9ed1db3a6cb8503cf69d7505d22cc5883f6e33aabff90d8a6cec8e912ca44",
+      "treatment": "exact"
+    },
+    {
+      "source": "upstream/pi-live/src/live/attestation.ts",
+      "destination": "upstream/pi-live/src/live/attestation.ts",
+      "sourceSha256": "3ed2019a00207c5547e6fbe4f31b20ac93e34523e99ba0fb78c863e76b85edbb",
+      "bytes": 3195,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "3ed2019a00207c5547e6fbe4f31b20ac93e34523e99ba0fb78c863e76b85edbb",
+      "treatment": "exact"
+    },
+    {
+      "source": "upstream/pi-live/src/live/controller.ts",
+      "destination": "upstream/pi-live/src/live/controller.ts",
+      "sourceSha256": "2a556fd6ab0b180638d985edbc5f481fc1928c7ff0b90184efe42516a981f0c2",
+      "bytes": 17734,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "2a556fd6ab0b180638d985edbc5f481fc1928c7ff0b90184efe42516a981f0c2",
+      "treatment": "exact"
+    },
+    {
+      "source": "upstream/pi-live/src/live/focus.ts",
+      "destination": "upstream/pi-live/src/live/focus.ts",
+      "sourceSha256": "113943933134f45c364ef6c99685865b7abea1fce31285a479682ea54a670cbc",
+      "bytes": 3121,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "113943933134f45c364ef6c99685865b7abea1fce31285a479682ea54a670cbc",
+      "treatment": "exact"
+    },
+    {
+      "source": "upstream/pi-live/src/live/index.ts",
+      "destination": "upstream/pi-live/src/live/index.ts",
+      "sourceSha256": "680ffb60ba8ed876086225075557a24c21338d67c5dbc323d81386f8babb6564",
+      "bytes": 11893,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "680ffb60ba8ed876086225075557a24c21338d67c5dbc323d81386f8babb6564",
+      "treatment": "exact"
+    },
+    {
+      "source": "upstream/pi-live/src/live/native.ts",
+      "destination": "upstream/pi-live/src/live/native.ts",
+      "sourceSha256": "147b082066ca103ae5abf70b5e4f0fbd0c22696f206e55e41035a1dcbe854b54",
+      "bytes": 3431,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "147b082066ca103ae5abf70b5e4f0fbd0c22696f206e55e41035a1dcbe854b54",
+      "treatment": "exact"
+    },
+    {
+      "source": "upstream/pi-live/src/live/protocol.ts",
+      "destination": "upstream/pi-live/src/live/protocol.ts",
+      "sourceSha256": "563b00d6bf9e78e098d901c4abab2054929b999030e98014d9f541c52b3f4bfe",
+      "bytes": 7024,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "563b00d6bf9e78e098d901c4abab2054929b999030e98014d9f541c52b3f4bfe",
+      "treatment": "exact"
+    },
+    {
+      "source": "upstream/pi-live/src/live/queue.ts",
+      "destination": "upstream/pi-live/src/live/queue.ts",
+      "sourceSha256": "f414227c50fcfc86d2afd0ce95a087df72f37359b5e332c76c78da4cf68ae0f2",
+      "bytes": 11051,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "f414227c50fcfc86d2afd0ce95a087df72f37359b5e332c76c78da4cf68ae0f2",
+      "treatment": "exact"
+    },
+    {
+      "source": "upstream/pi-live/src/live/transport.ts",
+      "destination": "upstream/pi-live/src/live/transport.ts",
+      "sourceSha256": "b951dab46d776444fae54f15f042ed78fc5a81ab88fd99f27d2bae78c5f4bc9f",
+      "bytes": 15186,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "b951dab46d776444fae54f15f042ed78fc5a81ab88fd99f27d2bae78c5f4bc9f",
+      "treatment": "exact"
+    },
+    {
+      "source": "upstream/pi-live/src/live/visualizer.ts",
+      "destination": "upstream/pi-live/src/live/visualizer.ts",
+      "sourceSha256": "b4039c73977d691c67af05e5930b50b5745e2e146a2a8961f5f5289ca7256afa",
+      "bytes": 9234,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "b4039c73977d691c67af05e5930b50b5745e2e146a2a8961f5f5289ca7256afa",
+      "treatment": "exact"
+    },
+    {
+      "source": "upstream/pi-live/src/live/voices.ts",
+      "destination": "upstream/pi-live/src/live/voices.ts",
+      "sourceSha256": "5fa1da362e46ee3955a3d9f8b96fe40d8e14e4aa7939d10314a2190d249f12b6",
+      "bytes": 759,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "5fa1da362e46ee3955a3d9f8b96fe40d8e14e4aa7939d10314a2190d249f12b6",
+      "treatment": "exact"
+    },
+    {
+      "source": "upstream/pi-live/src/paths.ts",
+      "destination": "upstream/pi-live/src/paths.ts",
+      "sourceSha256": "8528aaec2f3b2278d516ee286dbc3805a30ef6a4b72ad23b6b0c292589ae2c72",
+      "bytes": 660,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "8528aaec2f3b2278d516ee286dbc3805a30ef6a4b72ad23b6b0c292589ae2c72",
+      "treatment": "exact"
+    },
+    {
+      "source": "upstream/pi-live/tests/live-controller.test.ts",
+      "destination": "upstream/pi-live/tests/live-controller.test.ts",
+      "sourceSha256": "62d6bb78767cbbd4f558349e99e34807fd535b4b18d0ec5d8bcf2682771f56b0",
+      "bytes": 8397,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "62d6bb78767cbbd4f558349e99e34807fd535b4b18d0ec5d8bcf2682771f56b0",
+      "treatment": "exact"
+    },
+    {
+      "source": "upstream/pi-live/tests/live-focus.test.ts",
+      "destination": "upstream/pi-live/tests/live-focus.test.ts",
+      "sourceSha256": "76f3853dcb16edc8fe86b0d34214d539b40779519f94d462c74e5bed3caf58cc",
+      "bytes": 4411,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "76f3853dcb16edc8fe86b0d34214d539b40779519f94d462c74e5bed3caf58cc",
+      "treatment": "exact"
+    },
+    {
+      "source": "upstream/pi-live/tests/live-native.test.ts",
+      "destination": "upstream/pi-live/tests/live-native.test.ts",
+      "sourceSha256": "0e895ace7d6485a95c45ab3cb62d1dc14b762114a14c3a98774b36c1873f7667",
+      "bytes": 1766,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "0e895ace7d6485a95c45ab3cb62d1dc14b762114a14c3a98774b36c1873f7667",
+      "treatment": "exact"
+    },
+    {
+      "source": "upstream/pi-live/tests/live-protocol.test.ts",
+      "destination": "upstream/pi-live/tests/live-protocol.test.ts",
+      "sourceSha256": "e567b2d32d67c7d42d44a145100031672af185cae4a67f4f8ba7a5ec6a18ead3",
+      "bytes": 4294,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "e567b2d32d67c7d42d44a145100031672af185cae4a67f4f8ba7a5ec6a18ead3",
+      "treatment": "exact"
+    },
+    {
+      "source": "upstream/pi-live/tests/live-queue.test.ts",
+      "destination": "upstream/pi-live/tests/live-queue.test.ts",
+      "sourceSha256": "f32bfdd82cf720437a8f13c7c6745c354dd06ea115b313e9d54ad217cfd8cbf3",
+      "bytes": 7532,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "f32bfdd82cf720437a8f13c7c6745c354dd06ea115b313e9d54ad217cfd8cbf3",
+      "treatment": "exact"
+    },
+    {
+      "source": "upstream/pi-live/tests/live-registration.test.ts",
+      "destination": "upstream/pi-live/tests/live-registration.test.ts",
+      "sourceSha256": "1169b20274950219d684c7c77b2a88398820b5e18c1444b9141a0f3cbb965167",
+      "bytes": 11324,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "1169b20274950219d684c7c77b2a88398820b5e18c1444b9141a0f3cbb965167",
+      "treatment": "exact"
+    },
+    {
+      "source": "upstream/pi-live/tests/live-transport.test.ts",
+      "destination": "upstream/pi-live/tests/live-transport.test.ts",
+      "sourceSha256": "86516a9a34130c80b4d5554112af671bc0d7f0160971a04bdcecf2aa20076595",
+      "bytes": 1187,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "86516a9a34130c80b4d5554112af671bc0d7f0160971a04bdcecf2aa20076595",
+      "treatment": "exact"
+    },
+    {
+      "source": "upstream/pi-live/tests/live-visualizer.test.ts",
+      "destination": "upstream/pi-live/tests/live-visualizer.test.ts",
+      "sourceSha256": "d3672ed51cb256ca1be3765e973aab29ff3aa19c987df0c60c58c88e29675c5b",
+      "bytes": 2518,
+      "mode": 420,
+      "origin": "git",
+      "destinationSha256": "d3672ed51cb256ca1be3765e973aab29ff3aa19c987df0c60c58c88e29675c5b",
+      "treatment": "exact"
+    }
+  ],
+  "research": [
+    {
+      "source": "evidence/objc2-apple-sdk/FRAMEWORKS_CHANGELOG-7b1ab.md",
+      "sha256": "5e986ec64679e0a75cde76a4761b082087adb696e72b170d037fa37b9009888f",
+      "custody": "private-local",
+      "destination": "objc2-apple-sdk/FRAMEWORKS_CHANGELOG-7b1ab.md",
+      "mode": 384,
+      "reason": "Unnecessary original fetched payload retained byte-for-byte in private custody to minimize republication of raw API/source metadata; current reports and the notice corpus preserve source-backed facts, author credits, and notice obligations."
+    },
+    {
+      "source": "evidence/objc2-apple-sdk/header-translator-README-7b1ab.md",
+      "sha256": "d91b6d6c06870aff03582328312fbada59b82098cf20c38eb307227d613942e7",
+      "custody": "private-local",
+      "destination": "objc2-apple-sdk/header-translator-README-7b1ab.md",
+      "mode": 384,
+      "reason": "Unnecessary original fetched payload retained byte-for-byte in private custody to minimize republication of raw API/source metadata; current reports and the notice corpus preserve source-backed facts, author credits, and notice obligations."
+    },
+    {
+      "source": "evidence/objc2-apple-sdk/issue-23-comments.json",
+      "sha256": "ed62d6cd1d43c6f75ac27aa1f143a7d8e9d43d429cd4c2292489ba92cd1fb40c",
+      "custody": "private-local",
+      "destination": "objc2-apple-sdk/issue-23-comments.json",
+      "mode": 384,
+      "reason": "Unnecessary original fetched payload retained byte-for-byte in private custody to minimize republication of raw API/source metadata; current reports and the notice corpus preserve source-backed facts, author credits, and notice obligations."
+    },
+    {
+      "source": "evidence/objc2-apple-sdk/issue-23.json",
+      "sha256": "5c8cf530c8adac81ed82466be311cb465505e279fceefb4a223bc05e65b53b63",
+      "custody": "private-local",
+      "destination": "objc2-apple-sdk/issue-23.json",
+      "mode": 384,
+      "reason": "Unnecessary original fetched payload retained byte-for-byte in private custody to minimize republication of raw API/source metadata; current reports and the notice corpus preserve source-backed facts, author credits, and notice obligations."
+    },
+    {
+      "source": "evidence/objc2-apple-sdk/issue-826-comments.json",
+      "sha256": "b62cd5a6e0e282d2ab00871202aa7aef4517135e47c983026064dd39e171b2f1",
+      "custody": "private-local",
+      "destination": "objc2-apple-sdk/issue-826-comments.json",
+      "mode": 384,
+      "reason": "Unnecessary original fetched payload retained byte-for-byte in private custody to minimize republication of raw API/source metadata; current reports and the notice corpus preserve source-backed facts, author credits, and notice obligations."
+    },
+    {
+      "source": "evidence/objc2-apple-sdk/issue-826.json",
+      "sha256": "da1b18cbf645f89642cee7bff02bb280768c76000368e91d2ef36afac2f5e91b",
+      "custody": "private-local",
+      "destination": "objc2-apple-sdk/issue-826.json",
+      "mode": 384,
+      "reason": "Unnecessary original fetched payload retained byte-for-byte in private custody to minimize republication of raw API/source metadata; current reports and the notice corpus preserve source-backed facts, author credits, and notice obligations."
+    },
+    {
+      "source": "evidence/objc2-apple-sdk/LICENSE-APACHE-ee9a7.txt",
+      "sha256": "0c9a5f6fe28e27015e12506ffe58c9e007cead169af9670ec15c1df0d14e4f2a",
+      "custody": "private-local",
+      "destination": "objc2-apple-sdk/LICENSE-APACHE-ee9a7.txt",
+      "mode": 384,
+      "reason": "Unnecessary original fetched payload retained byte-for-byte in private custody to minimize republication of raw API/source metadata; current reports and the notice corpus preserve source-backed facts, author credits, and notice obligations."
+    },
+    {
+      "source": "evidence/objc2-apple-sdk/license-bundle-commit-ee9a7.json",
+      "sha256": "07351d5acd5ecad319b1ea8055de2d8f3de8bbe61387735748f6c14caa8572f4",
+      "custody": "private-local",
+      "destination": "objc2-apple-sdk/license-bundle-commit-ee9a7.json",
+      "mode": 384,
+      "reason": "Unnecessary original fetched payload retained byte-for-byte in private custody to minimize republication of raw API/source metadata; current reports and the notice corpus preserve source-backed facts, author credits, and notice obligations."
+    },
+    {
+      "source": "evidence/objc2-apple-sdk/LICENSE-ee9a7.md",
+      "sha256": "e489d07e5496be274efcbeaa31ce7267779e3fe3fbf2d6195d74750d7e9ac288",
+      "custody": "private-local",
+      "destination": "objc2-apple-sdk/LICENSE-ee9a7.md",
+      "mode": 384,
+      "reason": "Unnecessary original fetched payload retained byte-for-byte in private custody to minimize republication of raw API/source metadata; current reports and the notice corpus preserve source-backed facts, author credits, and notice obligations."
+    },
+    {
+      "source": "evidence/objc2-apple-sdk/LICENSE-MIT-ee9a7.txt",
+      "sha256": "f6a2e783669a0dd7a2c3b8a4f76db40ae49033e66e1bdc30f3aa25fe5577b070",
+      "custody": "private-local",
+      "destination": "objc2-apple-sdk/LICENSE-MIT-ee9a7.txt",
+      "mode": 384,
+      "reason": "Unnecessary original fetched payload retained byte-for-byte in private custody to minimize republication of raw API/source metadata; current reports and the notice corpus preserve source-backed facts, author credits, and notice obligations."
+    },
+    {
+      "source": "evidence/objc2-apple-sdk/LICENSE-pinned-7b1ab.md",
+      "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
+      "custody": "private-local",
+      "destination": "objc2-apple-sdk/LICENSE-pinned-7b1ab.md",
+      "mode": 384,
+      "reason": "Unnecessary original fetched payload retained byte-for-byte in private custody to minimize republication of raw API/source metadata; current reports and the notice corpus preserve source-backed facts, author credits, and notice obligations."
+    },
+    {
+      "source": "evidence/objc2-apple-sdk/LICENSE-Steven-Sheldon-757cd.txt",
+      "sha256": "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5",
+      "custody": "private-local",
+      "destination": "objc2-apple-sdk/LICENSE-Steven-Sheldon-757cd.txt",
+      "mode": 384,
+      "reason": "Unnecessary original fetched payload retained byte-for-byte in private custody to minimize republication of raw API/source metadata; current reports and the notice corpus preserve source-backed facts, author credits, and notice obligations."
+    },
+    {
+      "source": "evidence/objc2-apple-sdk/LICENSE-ZLIB-ee9a7.txt",
+      "sha256": "fced3e7fedc235fa83ed0108b0df74d86b435d06436356f46917a903cbadd80a",
+      "custody": "private-local",
+      "destination": "objc2-apple-sdk/LICENSE-ZLIB-ee9a7.txt",
+      "mode": 384,
+      "reason": "Unnecessary original fetched payload retained byte-for-byte in private custody to minimize republication of raw API/source metadata; current reports and the notice corpus preserve source-backed facts, author credits, and notice obligations."
+    },
+    {
+      "source": "evidence/objc2-apple-sdk/objc2-lib-7b1ab.rs",
+      "sha256": "f991783f61ee116a12487b861faab96c85a3c734b928eaf843a978f175cfa3dc",
+      "custody": "private-local",
+      "destination": "objc2-apple-sdk/objc2-lib-7b1ab.rs",
+      "mode": 384,
+      "reason": "Unnecessary original fetched payload retained byte-for-byte in private custody to minimize republication of raw API/source metadata; current reports and the notice corpus preserve source-backed facts, author credits, and notice obligations."
+    },
+    {
+      "source": "evidence/objc2-apple-sdk/receipt.json",
+      "sha256": "133e9828c93352773d22ef972c2c0d698c4fc0fb2eb3e32505088248f57d9322",
+      "custody": "private-local",
+      "destination": "objc2-apple-sdk/receipt.json",
+      "mode": 384,
+      "reason": "Unnecessary original fetched payload retained byte-for-byte in private custody to minimize republication of raw API/source metadata; current reports and the notice corpus preserve source-backed facts, author credits, and notice obligations."
+    },
+    {
+      "source": "evidence/objc2-apple-sdk/Xcode-15.4-release.json",
+      "sha256": "5d41e222eb22444c5361ac894ce85a38666cfb9992d522032393d06034dded2c",
+      "custody": "private-local",
+      "destination": "objc2-apple-sdk/Xcode-15.4-release.json",
+      "mode": 384,
+      "reason": "Unnecessary original fetched payload retained byte-for-byte in private custody to minimize republication of raw API/source metadata; current reports and the notice corpus preserve source-backed facts, author credits, and notice obligations."
+    },
+    {
+      "source": "evidence/objc2-apple-sdk/Xcode-SLA-EA1863.pdf",
+      "sha256": "040163ca824cc1a1d45f1b90d56114bc546903074a3082a29b4edf0461ab3fb8",
+      "custody": "private-local",
+      "destination": "objc2-apple-sdk/Xcode-SLA-EA1863.pdf",
+      "mode": 384,
+      "reason": "Apple agreement raw capture retained byte-for-byte in private custody; the source research found no affirmative redistribution grant for the captured agreement, so it is not published."
+    },
+    {
+      "source": "evidence/objc2-apple-sdk/Xcode-SLA-EA1863.txt",
+      "sha256": "482eca72d96a3776d1bcdf8888cace6a9ed75fd7ebc4cfa1310eb021f93268f6",
+      "custody": "private-local",
+      "destination": "objc2-apple-sdk/Xcode-SLA-EA1863.txt",
+      "mode": 384,
+      "reason": "Apple agreement raw capture retained byte-for-byte in private custody; the source research found no affirmative redistribution grant for the captured agreement, so it is not published."
+    },
+    {
+      "source": "evidence/objc2-apple-sdk/Xcode-SLA-EA1879.pdf",
+      "sha256": "27c4f7023b30c84b98438baf21743c82efe72deaa6fbc568c2979233fac56e17",
+      "custody": "private-local",
+      "destination": "objc2-apple-sdk/Xcode-SLA-EA1879.pdf",
+      "mode": 384,
+      "reason": "Apple agreement raw capture retained byte-for-byte in private custody; the source research found no affirmative redistribution grant for the captured agreement, so it is not published."
+    },
+    {
+      "source": "evidence/objc2-apple-sdk/Xcode-SLA-EA1879.txt",
+      "sha256": "c5a1086b27df63e518ff153e0dd5572cccf301013204ee20cf7cfeea1497cd09",
+      "custody": "private-local",
+      "destination": "objc2-apple-sdk/Xcode-SLA-EA1879.txt",
+      "mode": 384,
+      "reason": "Apple agreement raw capture retained byte-for-byte in private custody; the source research found no affirmative redistribution grant for the captured agreement, so it is not published."
+    },
+    {
+      "source": "evidence/objc2-apple-sdk/Xcode-SLA-EA2002.pdf",
+      "sha256": "5e6bd16bcba3dd591bde1c57f7c6f19f08a194c84cdc54485c4660f90e2a26ec",
+      "custody": "private-local",
+      "destination": "objc2-apple-sdk/Xcode-SLA-EA2002.pdf",
+      "mode": 384,
+      "reason": "Apple agreement raw capture retained byte-for-byte in private custody; the source research found no affirmative redistribution grant for the captured agreement, so it is not published."
+    },
+    {
+      "source": "evidence/objc2-apple-sdk/Xcode-SLA-EA2002.txt",
+      "sha256": "0ab35ecb70098112a140f9917871d2d2b4f81f0e94df1f4f06ed52eadd50952d",
+      "custody": "private-local",
+      "destination": "objc2-apple-sdk/Xcode-SLA-EA2002.txt",
+      "mode": 384,
+      "reason": "Apple agreement raw capture retained byte-for-byte in private custody; the source research found no affirmative redistribution grant for the captured agreement, so it is not published."
+    },
+    {
+      "source": "evidence/tiktoken-table-rights/comment-1497875652.json",
+      "sha256": "06b23410ed5b8a2ea83b69818a56c050b017879ddaa3dc1d63d000c9d6b326fc",
+      "custody": "private-local",
+      "destination": "tiktoken-table-rights/comment-1497875652.json",
+      "mode": 384,
+      "reason": "Unnecessary original fetched payload retained byte-for-byte in private custody to minimize republication of raw API/source metadata; current reports and the notice corpus preserve source-backed facts, author credits, and notice obligations."
+    },
+    {
+      "source": "evidence/tiktoken-table-rights/issue-92-events.json",
+      "sha256": "0d504623d1ba494afcb406253cc04e69b2438519410326c6a9a89afa4ddaf296",
+      "custody": "private-local",
+      "destination": "tiktoken-table-rights/issue-92-events.json",
+      "mode": 384,
+      "reason": "Unnecessary original fetched payload retained byte-for-byte in private custody to minimize republication of raw API/source metadata; current reports and the notice corpus preserve source-backed facts, author credits, and notice obligations."
+    },
+    {
+      "source": "evidence/tiktoken-table-rights/issue-92.json",
+      "sha256": "eae82c7732618b30f8ac608210aef152f6f5700f68994950af2043a6999ef788",
+      "custody": "private-local",
+      "destination": "tiktoken-table-rights/issue-92.json",
+      "mode": 384,
+      "reason": "Unnecessary original fetched payload retained byte-for-byte in private custody to minimize republication of raw API/source metadata; current reports and the notice corpus preserve source-backed facts, author credits, and notice obligations."
+    },
+    {
+      "source": "evidence/tiktoken-table-rights/LICENSE-bfe00ad1",
+      "sha256": "418cb499b436128d653d79941333a5437b7be2ea9213dcc2f04d15d5d2c51d86",
+      "custody": "private-local",
+      "destination": "tiktoken-table-rights/LICENSE-bfe00ad1",
+      "mode": 384,
+      "reason": "Unnecessary original fetched payload retained byte-for-byte in private custody to minimize republication of raw API/source metadata; current reports and the notice corpus preserve source-backed facts, author credits, and notice obligations."
+    },
+    {
+      "source": "evidence/tiktoken-table-rights/o200k-commit-9d01e567.json",
+      "sha256": "3ca79a5a4af1082aed0f18ba92e60b4dd10cc0ff6187d808a58b6a00b8afc85f",
+      "custody": "private-local",
+      "destination": "tiktoken-table-rights/o200k-commit-9d01e567.json",
+      "mode": 384,
+      "reason": "Unnecessary original fetched payload retained byte-for-byte in private custody to minimize republication of raw API/source metadata; current reports and the notice corpus preserve source-backed facts, author credits, and notice obligations."
+    },
+    {
+      "source": "evidence/tiktoken-table-rights/openai_public-9d01e567.py",
+      "sha256": "de072453eecbaad8e4c0a6d5a7933a664b4408576bed3c39222f1a0e21502ada",
+      "custody": "private-local",
+      "destination": "tiktoken-table-rights/openai_public-9d01e567.py",
+      "mode": 384,
+      "reason": "Unnecessary original fetched payload retained byte-for-byte in private custody to minimize republication of raw API/source metadata; current reports and the notice corpus preserve source-backed facts, author credits, and notice obligations."
+    },
+    {
+      "source": "evidence/tiktoken-table-rights/receipt.json",
+      "sha256": "2805633188952bc3f854cfc1257cb0c6ff66a34c1bc441a612085bab3055d404",
+      "custody": "private-local",
+      "destination": "tiktoken-table-rights/receipt.json",
+      "mode": 384,
+      "reason": "Unnecessary original fetched payload retained byte-for-byte in private custody to minimize republication of raw API/source metadata; current reports and the notice corpus preserve source-backed facts, author credits, and notice obligations."
+    },
+    {
+      "source": "FEASIBILITY.md",
+      "sha256": "6bc058d4331480d3b32b91ff35d3ef05543eeee4b66d6880b3c115d057abd4c3",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/FEASIBILITY.md",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "harnesses/lifecycle/lifecycle-probe.ts",
+      "sha256": "4896955a9faf1150da75a5b832674af205255caa833e7bca1337f527be1e0c1a",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/harnesses/lifecycle/lifecycle-probe.ts",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "harnesses/ownership/filesystem-probe.ts",
+      "sha256": "07db3dd4b303f1cba3b34c3c6b86ed77013a21973ea8f58776d69a6996d7dd3f",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/harnesses/ownership/filesystem-probe.ts",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "harnesses/ownership/lifecycle-probe.ts",
+      "sha256": "431a99789ae855b47fc2b4fbebf4125c52850dc9795ea401dcf72f13fd1722c4",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/harnesses/ownership/lifecycle-probe.ts",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "harnesses/ownership/queue-probe.ts",
+      "sha256": "b4600295f8e4d6e07b06e5b8df709b57679836db928443bddb401ebe0f78dabe",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/harnesses/ownership/queue-probe.ts",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "harnesses/transport/fake-undici.ts",
+      "sha256": "0ad5bbe89d5b5de1955bc7ab077fd2f18de58791973e1cdb37df10fc8c9a6f6d",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/harnesses/transport/fake-undici.ts",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "harnesses/transport/fake-ws.ts",
+      "sha256": "a12227fc3039b5f5094208579feeb14b45a749d33228f2232e12ab19bc39dcb6",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/harnesses/transport/fake-ws.ts",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "harnesses/transport/probe.test.ts",
+      "sha256": "a208bb47f4dffde735404703579edeced211b310bf3894c5560a0011bb631600",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/harnesses/transport/probe.test.ts",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "harnesses/transport/vitest.config.ts",
+      "sha256": "914bfc5a5b6b4069bab795a3e498fa2977e4eca58eed2fbdcfa9240bfb8612ff",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/harnesses/transport/vitest.config.ts",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "NATIVE-AUDIT.md",
+      "sha256": "681e38d636cd6312c9e02e8873599540cc185b0273248f0ad0105ae8b92a283a",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/NATIVE-AUDIT.md",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "OBJC2-APPLE-SDK-RIGHTS-RESEARCH.md",
+      "sha256": "5b9e22f277035889281cce2215228e5a4c80ba6520df2e7082d613644b52013a",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/OBJC2-APPLE-SDK-RIGHTS-RESEARCH.md",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "probes/integration.md",
+      "sha256": "e26f146a4f7fbc34ddb5cdba22a3bb985259b7153b50c282b8e74b7ae029aa51",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/probes/integration.md",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "probes/lifecycle.md",
+      "sha256": "136ab3511158d02ff94d1cf5e6a7f9fc4cfdd8691304c2ca84f236d2eb8f1c92",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/probes/lifecycle.md",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "probes/ownership.md",
+      "sha256": "246659b0bf24f89b3b57a526ee2ed8a3c2af8b98137dd8dbd5259711b707ee23",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/probes/ownership.md",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "probes/pi-contracts.md",
+      "sha256": "d7792f832de82fd9124f9c2aea1d2875c34352d61a49b670dc3fb1d0e20363ed",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/probes/pi-contracts.md",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "probes/transport.md",
+      "sha256": "6d5faa2fcea232902f0aaf27ef04dba47d7cd8a8114b10b2ffb064c8f5e4a1ad",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/probes/transport.md",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "README.md",
+      "sha256": "0c088f4d79b601947aa8fd54bf398767e245fb54a7ef85b6b5d8e536a97ab0cc",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/README.md",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "reviews/independent-final.md",
+      "sha256": "86553392ccb085893981f9a51cda965dcbd6700ce391fcbb02249413690daef0",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/reviews/independent-final.md",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "reviews/independent-review.md",
+      "sha256": "5676f051743e8c963f4aa244b2492cdddb9417ff287a9f2552a2eae2a7d4957b",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/reviews/independent-review.md",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "reviews/luna-challenge.md",
+      "sha256": "034b71739dcedd92d58ac850fa62f109e2baef47b3932bbc843e37747c0976c9",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/reviews/luna-challenge.md",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "reviews/luna-final.md",
+      "sha256": "3c2a3340abca4e85c72a1c4bd9fc10dec72d256e10cf05af725d17fb8c7e6965",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/reviews/luna-final.md",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "SPEC.md",
+      "sha256": "e270d1fc1e5142899c08fb346480da196bcfbef20d8d6e6e12cfcdb31d6be963",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/SPEC.md",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "TICKETS.md",
+      "sha256": "5a638d450907689d70ce134654ddc5061da6d504789838f08d9641b0ee7d60be",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/TICKETS.md",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "TIKTOKEN-TABLE-RIGHTS-RESEARCH.md",
+      "sha256": "60b72f73117904693bc33d14f03cd9cd996baebdd52b62b67e540e47b66d479c",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/TIKTOKEN-TABLE-RIGHTS-RESEARCH.md",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "verification/lifecycle.verified.log",
+      "sha256": "ba2d9eafd04edbc7c60f34fffa18483adec093e8855236c9bf880d75aa8ec0ca",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/verification/lifecycle.verified.log",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "verification/network-denial-guard.verified.log",
+      "sha256": "223036dad0eae25fa9f0f26be0972ca38fddeba3038a316621cc779689cb9d28",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/verification/network-denial-guard.verified.log",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "verification/ownership-filesystem.verified.log",
+      "sha256": "4694795116de449a3699b15d7614f34b8d1bdaac66d325f5ca0fc051a1dd24ce",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/verification/ownership-filesystem.verified.log",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "verification/ownership-lifecycle.verified.log",
+      "sha256": "71695bcd436ae987c1d0a969fa0af2830012be676642828016712a9e19e06dfe",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/verification/ownership-lifecycle.verified.log",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "verification/ownership-queue.verified.log",
+      "sha256": "8836bf7a853d813c04db73970f81cad2152d939056727a0f245dca0cc41d8be9",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/verification/ownership-queue.verified.log",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "verification/receipt.json",
+      "sha256": "1421204d041d1dec3e9dd51d2fbef67c6d1e3454c59b64162782f4292b3ca816",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/verification/receipt.json",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "verification/transport.verified.log",
+      "sha256": "734d44477ea5c9dd524a26d087c1bd407c63e6428615e632fd8d8178da87b7aa",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/verification/transport.verified.log",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    },
+    {
+      "source": "verification/verify-probes.ts",
+      "sha256": "c62eee669e2912b4aa89852954ef456625f6892aed1a839813bc30a2533bbc7c",
+      "custody": "repository",
+      "destination": "docs/history/extraction/original/verification/verify-probes.ts",
+      "mode": 420,
+      "reason": "Authored historical research, probe, review, harness, or verification artifact retained byte-for-byte as archival context; review found no credential or private authentication material. Historical absolute paths and synthetic identifiers remain unchanged and are labeled non-runnable by the archive index."
+    }
+  ]
+}
