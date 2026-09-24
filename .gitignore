@@ -1,0 +1,8 @@
+node_modules/
+.pnpm-store/
+preview/
+*.node
+*.tgz
+*.tar
+*.tar.gz
+.DS_Store

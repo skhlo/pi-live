@@ -1,0 +1,53 @@
+{
+  "source": {
+    "root": "/tmp/pi-better-openai.qnz8hk",
+    "head": "39171682343754366439b2c0890f5b0f4c3ed891"
+  },
+  "partialNonPreemptClaim": {
+    "whileWriterHasFile": {
+      "fileExists": true,
+      "bytes": 0,
+      "candidateHasFloor": false
+    },
+    "afterWriterCompletes": {
+      "parsedClaimBeforeCandidateTick": {
+        "holderId": "2500-owner",
+        "pid": 2500,
+        "token": "complete",
+        "claimedAt": 1000000
+      },
+      "candidateHasFloorAfterTick": true,
+      "finalFloor": {
+        "holderId": "2501-candidate",
+        "pid": 2501,
+        "token": "2501-9bfa1237e11f",
+        "claimedAt": 1000000
+      }
+    }
+  },
+  "compareDeleteInterleaving": {
+    "operationLevelOnly": true,
+    "claimReadByStaleEvaluator": {
+      "holderId": "old",
+      "pid": 2600,
+      "token": "old-token",
+      "claimedAt": 1
+    },
+    "claimAfterPeerAtomicReplace": {
+      "holderId": "fresh",
+      "pid": 2601,
+      "token": "fresh-token",
+      "claimedAt": 2
+    },
+    "floorExistsAfterStaleEvaluatorDelete": false,
+    "interpretation": "A read-old / peer-replace / unconditional-delete sequence loses the fresh claim."
+  },
+  "atomicReplacement": {
+    "finalJson": {
+      "writer": "B",
+      "token": "b"
+    },
+    "temporaryFilesLeft": [],
+    "note": "Sequentially exercising the same temp-write/rename primitive leaves one complete JSON value; it does not prove a concurrent read/rename protocol."
+  }
+}

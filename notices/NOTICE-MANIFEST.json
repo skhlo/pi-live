@@ -1,0 +1,266 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Exact full texts and source headers gathered for byte-proved resources, direct native components, the pinned Rust runtime, and accepted residuals. This is not a target-specific SBOM or legal-clearance claim.",
+  "files": {
+    "audio/audiopus_sys.LICENSE": {
+      "source": "audiopus_sys@0.2.2/LICENSE.md",
+      "bytes": 740,
+      "sha256": "a6c8bb45880edc99bb13feb04d69fb2f0f73b565dfe209affa60414d2aa4c1a7"
+    },
+    "audio/maudio-sys.LICENSE": {
+      "source": "maudio-sys@0.1.6/LICENSE",
+      "bytes": 1092,
+      "sha256": "dbbd6dba7b96c24529612797ad21d2ed24f067a679fd9fe38a63e0a6b7bc675c"
+    },
+    "audio/maudio.LICENSE": {
+      "source": "maudio@0.1.8/LICENSE",
+      "bytes": 1092,
+      "sha256": "dbbd6dba7b96c24529612797ad21d2ed24f067a679fd9fe38a63e0a6b7bc675c"
+    },
+    "audio/miniaudio.LICENSE": {
+      "source": "maudio-sys@0.1.6/native/miniaudio/LICENSE",
+      "bytes": 2597,
+      "sha256": "457f1b500e0adf6bc059edddfa78a2f62012e7c3bb43476c20e0bd23b25ba0eb"
+    },
+    "audio/opus-wrapper.LICENSE-APACHE": {
+      "source": "opus@0.3.1/LICENSE-APACHE",
+      "bytes": 10847,
+      "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+    },
+    "audio/opus-wrapper.LICENSE-MIT": {
+      "source": "opus@0.3.1/LICENSE-MIT",
+      "bytes": 1057,
+      "sha256": "6b3b465fa69075348ee5ffc9ba6afa93402743a4a942a463404fac25257bd3ed"
+    },
+    "audio/opus.COPYING": {
+      "source": "audiopus_sys@0.2.2/opus/COPYING",
+      "bytes": 1928,
+      "sha256": "8338ce8d922bb4416ce3dd1e5680173332435e3f0755007ac7801ccd674fe682"
+    },
+    "audio/opus.LICENSE_PLEASE_READ": {
+      "source": "audiopus_sys@0.2.2/opus/LICENSE_PLEASE_READ.txt",
+      "bytes": 703,
+      "sha256": "7efb4989e0cd1b256229bdf2f09300c5d14e35db0e7476bfb87fac243498273d"
+    },
+    "crypto/ring-fiat.LICENSE": {
+      "source": "ring@0.17.14/third_party/fiat/LICENSE",
+      "bytes": 638,
+      "sha256": "9eacbcb81be660840c714a560a9d65ba07913db98dd4baf969f78dd499fdd60f"
+    },
+    "crypto/ring-once-cell.LICENSE-APACHE": {
+      "source": "ring@0.17.14/src/polyfill/once_cell/LICENSE-APACHE",
+      "bytes": 10847,
+      "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+    },
+    "crypto/ring-once-cell.LICENSE-MIT": {
+      "source": "ring@0.17.14/src/polyfill/once_cell/LICENSE-MIT",
+      "bytes": 1022,
+      "sha256": "6ee2ed6c77710de911761acd5fc1ad1da00f476beb1a7ef27e78c2d1858deafc"
+    },
+    "crypto/ring.LICENSE": {
+      "source": "ring@0.17.14/LICENSE",
+      "bytes": 499,
+      "sha256": "b3d734001a94efff3579978d953391aa7115f877657d25eb54037a43875d078a"
+    },
+    "crypto/ring.LICENSE-BoringSSL": {
+      "source": "ring@0.17.14/LICENSE-BoringSSL",
+      "bytes": 14870,
+      "sha256": "005fc765ddc5115da796cca915baa9557abae13ff35e0a47c47affc56f6c414d"
+    },
+    "crypto/ring.LICENSE-other-bits": {
+      "source": "ring@0.17.14/LICENSE-other-bits",
+      "bytes": 731,
+      "sha256": "f025ccfb7dfb6bdfedc75ca0f67acc69e6fb4998143d834f7c2f38a29989680f"
+    },
+    "fonts/CC-BY-4.0.txt": {
+      "source": "creativecommons.org/licenses/by/4.0/legalcode.txt",
+      "bytes": 18657,
+      "sha256": "9ba9550ad48438d0836ddab3da480b3b69ffa0aac7b7878b5a0039e7ab429411"
+    },
+    "fonts/Silver.LICENSE": {
+      "source": "can1357/oh-my-pi@f7f8e040/crates/pi-natives/src/fonts/Silver.LICENSE",
+      "bytes": 565,
+      "sha256": "b2b97a7c88214ea92e60c3a5d2c43da59a8e552507a89330c78d9f4c0160cdfd"
+    },
+    "grammar/tree-sitter-just.header.txt": {
+      "source": "casey/tree-sitter-just@5685543/grammar.js header",
+      "bytes": 213,
+      "sha256": "fa4da7f0ee7ec05469b70bc64b44da79eb4f16a0ca00670c63186103f7d13f10"
+    },
+    "grammar/tree-sitter-just.LICENSE": {
+      "source": "casey/tree-sitter-just@5685543/LICENSE",
+      "bytes": 11357,
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    "highlight/sublime-csharp.header.txt": {
+      "source": "sublimehq/Packages@fa6b862/C#/C#.sublime-syntax header",
+      "bytes": 215,
+      "sha256": "9dd596cd04701b0bc0d91117d8c026f355eb1a8d8be6dedd8c2113feb649e2ca"
+    },
+    "highlight/sublime-packages.LICENSE": {
+      "source": "sublimehq/Packages@fa6b862/LICENSE",
+      "bytes": 671,
+      "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7"
+    },
+    "highlight/sublime-rust.LICENSE": {
+      "source": "sublimehq/Packages@fa6b862/Rust/LICENSE.txt",
+      "bytes": 1023,
+      "sha256": "89807acf2309bd285f033404ee78581602f3cd9b819a16ac2f0e5f60ff4a473e"
+    },
+    "highlight/sublime-yaml.header.txt": {
+      "source": "sublimehq/Packages@fa6b862/YAML/YAML.sublime-syntax header",
+      "bytes": 1610,
+      "sha256": "de73217c58ff5d16b24365b43b8d67d725611d9f80dd5c1c1e10e05e4eed5107"
+    },
+    "highlight/syntect.LICENSE": {
+      "source": "syntect@5.3.0/LICENSE.txt",
+      "bytes": 1116,
+      "sha256": "c695a20d7feb2463ecc9f0a966c88ed1581e364e1e22796e0ded020b571fa43b"
+    },
+    "objc2/LICENSE-APACHE-current.txt": {
+      "source": "madsmtm/objc2@ee9a7ad/LICENSE-APACHE.txt (later clarification)",
+      "bytes": 10204,
+      "sha256": "0c9a5f6fe28e27015e12506ffe58c9e007cead169af9670ec15c1df0d14e4f2a"
+    },
+    "objc2/LICENSE-MIT-current.txt": {
+      "source": "madsmtm/objc2@ee9a7ad/LICENSE-MIT.txt (later clarification)",
+      "bytes": 1053,
+      "sha256": "f6a2e783669a0dd7a2c3b8a4f76db40ae49033e66e1bdc30f3aa25fe5577b070"
+    },
+    "objc2/LICENSE-pinned.md": {
+      "source": "madsmtm/objc2@7b1abfd/LICENSE.md",
+      "bytes": 1339,
+      "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+    },
+    "objc2/LICENSE-Steven-Sheldon-historical.txt": {
+      "source": "madsmtm/objc2@757cd84/LICENSE.txt (historical pinned-core attribution)",
+      "bytes": 1066,
+      "sha256": "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5"
+    },
+    "objc2/LICENSE-ZLIB-current.txt": {
+      "source": "madsmtm/objc2@ee9a7ad/LICENSE-ZLIB.txt (later clarification)",
+      "bytes": 838,
+      "sha256": "fced3e7fedc235fa83ed0108b0df74d86b435d06436356f46917a903cbadd80a"
+    },
+    "oh-my-pi/LICENSE": {
+      "source": "can1357/oh-my-pi@f7f8e040/LICENSE",
+      "bytes": 1106,
+      "sha256": "545636e19386d3d4e0ae6d77354527499999c3ebfbca61b9fa5aa4ead7c0b308"
+    },
+    "pi-shell/NOTICE": {
+      "source": "can1357/oh-my-pi@f7f8e040/crates/pi-shell/NOTICE",
+      "bytes": 1879,
+      "sha256": "351dbfd4c2a9774ce0fd9bcc896f77ffa020da01afe25b976ca806e7bedecbde"
+    },
+    "rust/compiler-builtins.LICENSE.txt": {
+      "source": "rust-src nightly/2026-04-29 compiler-builtins license",
+      "bytes": 15078,
+      "sha256": "ab6eec6caf0fa5775e411c7a8bc6a45c4ef2956b0980b157ab74fc5cd62a928b"
+    },
+    "rust/libm.LICENSE.txt": {
+      "source": "rust-src nightly/2026-04-29 libm license",
+      "bytes": 14088,
+      "sha256": "3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7"
+    },
+    "rust/libunwind.LICENSE.txt": {
+      "source": "rust-src nightly/2026-04-29 libunwind license",
+      "bytes": 16706,
+      "sha256": "b5efebcaca80879234098e52d1725e6d9eb8fb96a19fce625d39184b705f7b6d"
+    },
+    "rust/Rust-library.COPYRIGHT.html": {
+      "source": "rust nightly/2026-04-29 rustc library COPYRIGHT",
+      "bytes": 425861,
+      "sha256": "98811f00ad5cf5c8690dc770ba421b488bb0c5bb051cd2affd995b75f49edb75"
+    },
+    "rust/Rust-std.COPYRIGHT": {
+      "source": "rust nightly/2026-04-29 rust-std COPYRIGHT",
+      "bytes": 1571,
+      "sha256": "172020dbfd5b53a226dfde77616190a48dcff519b0bc0e6deb91a8450782c4af"
+    },
+    "rust/Rust-std.LICENSE-APACHE": {
+      "source": "rust nightly/2026-04-29 rust-std LICENSE-APACHE",
+      "bytes": 9723,
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+    },
+    "rust/Rust-std.LICENSE-MIT": {
+      "source": "rust nightly/2026-04-29 rust-std LICENSE-MIT",
+      "bytes": 1068,
+      "sha256": "b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1"
+    },
+    "rust/Unicode-3.0.txt": {
+      "source": "rust@37d85e5 library/core unicode license",
+      "bytes": 1995,
+      "sha256": "f5062c9a188d81dfe66b56db4182dcf9e4b17c0d9b0d311a8e20b3a1b075c443"
+    },
+    "search/onig_sys.LICENSE": {
+      "source": "onig_sys@69.9.3/LICENSE.md",
+      "bytes": 1511,
+      "sha256": "71f321038b088358004bee991635ac09e4c703bec467d3c30c06992c0595f189"
+    },
+    "search/oniguruma.COPYING": {
+      "source": "onig_sys@69.9.3/oniguruma/COPYING",
+      "bytes": 1340,
+      "sha256": "70ba5469ea0bab6e18a32d7009068f996503168d27be57747e08da34337ff26f"
+    },
+    "search/PCRE2-Cambridge-BSD3.header.txt": {
+      "source": "pcre2-sys@0.2.10/upstream/src/pcre2_compile.c header",
+      "bytes": 1973,
+      "sha256": "b5af5a2c86e27565eb5a2083c5418e3297d5a280ff0a2e9536e1ae5bc3789f8b"
+    },
+    "search/pcre2-sys.COPYING": {
+      "source": "pcre2-sys@0.2.10/COPYING",
+      "bytes": 126,
+      "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f"
+    },
+    "search/pcre2-sys.LICENSE-MIT": {
+      "source": "pcre2-sys@0.2.10/LICENSE-MIT",
+      "bytes": 1081,
+      "sha256": "cb3c929a05e6cbc9de9ab06a4c57eeb60ca8c724bef6c138c87d3a577e27aa14"
+    },
+    "search/pcre2-sys.UNLICENSE": {
+      "source": "pcre2-sys@0.2.10/UNLICENSE",
+      "bytes": 1211,
+      "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c"
+    },
+    "search/SLJIT-Herczeg-BSD2.header.txt": {
+      "source": "pcre2-sys@0.2.10/upstream/deps/sljit/sljitLir.c header",
+      "bytes": 1444,
+      "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb"
+    },
+    "syntax/julia.LICENSE": {
+      "source": "JuliaEditorSupport/Julia-sublime@3366b10/LICENSE",
+      "bytes": 1157,
+      "sha256": "b8a3a4021a4f2cc820b9853c0af603f20260c8541cebb153172838fcad89dbcb"
+    },
+    "syntax/mermaid.LICENSE": {
+      "source": "SublimeText/Mermaid@a5c6d45/LICENSE",
+      "bytes": 1074,
+      "sha256": "67cab231f9572e10bf6259bf99954920fb5ed38aa0918d45c1e9398dffd703ad"
+    },
+    "syntax/nix.LICENSE": {
+      "source": "wmertens/sublime-nix@48c497c/LICENSE",
+      "bytes": 1078,
+      "sha256": "1cb5064b01955e4c356b66ab02a410b250d86060ad8afc57cb1ee05d515c12ee"
+    },
+    "tokenizer/openai-tiktoken.LICENSE": {
+      "source": "openai/tiktoken@3591ff/LICENSE",
+      "bytes": 1078,
+      "sha256": "418cb499b436128d653d79941333a5437b7be2ea9213dcc2f04d15d5d2c51d86"
+    },
+    "tokenizer/tiktoken-rs.LICENSE": {
+      "source": "zurawiki/tiktoken-rs@b115197/LICENSE",
+      "bytes": 1072,
+      "sha256": "f7c6ddf9d84fd7b8ad5917e4074d4c05e4c1dfb752a28a0058f06bd0f5e2edcc"
+    },
+    "utilities/uutils-coreutils.LICENSE": {
+      "source": "uutils/coreutils@c409373/LICENSE",
+      "bytes": 1056,
+      "sha256": "29953405eaa3dcc41c37d1621d55b6a47eee93e05613e439e73295029740b10c"
+    },
+    "utilities/uutils-findutils.LICENSE": {
+      "source": "uutils/findutils@b94b5f0/LICENSE",
+      "bytes": 1051,
+      "sha256": "b2888851106d2281b01ff2b807b4950463725c39895dd064770c43d28d419a71"
+    }
+  }
+}

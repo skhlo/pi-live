@@ -1,0 +1,48 @@
+{
+  "name": "pi-live",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Experimental standalone Pi Live extension; currently setup-only",
+  "type": "module",
+  "packageManager": "pnpm@11.8.0",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test scripts/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check:source": "node scripts/import-pi-live.ts check",
+    "check:package": "node scripts/check-pi-live.ts",
+    "check:loader": "node scripts/check-pi-live-loader.ts",
+    "check:production": "node scripts/check-pi-live-production.ts",
+    "check:transfer": "node scripts/check-transfer.ts"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dependencies": {
+    "https-proxy-agent": "9.1.0",
+    "proxy-from-env": "2.1.0",
+    "undici": "8.10.0",
+    "ws": "8.21.2"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.87.1",
+    "@earendil-works/pi-tui": "0.87.1",
+    "@types/node": "22.19.19",
+    "prettier": "3.9.6",
+    "typescript": "5.9.3"
+  },
+  "optionalDependencies": {
+    "@oh-my-pi/pi-natives-darwin-arm64": "17.2.9"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+node_modules/
+preview/
+upstream/
+notices/
+docs/history/extraction/original/
+docs/history/extraction/transfer-receipt.json
+pnpm-lock.yaml
+LICENSE
+UPSTREAM_THIRD_PARTY_NOTICES.md

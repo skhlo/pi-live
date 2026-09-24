@@ -1,0 +1,37 @@
+
+ RUN  v4.1.11 /private/tmp/dotfiles-pi-live-spec/preview/live-spec/transport
+
+stdout | probe.test.ts > Luna transport bounded probes > accepts megabyte delegation and transcript text; only outgoing context is chunked
+{"probe":"oversized-text","inputBytes":1048576,"chunks":2098,"maxChunkBytes":500}
+
+stdout | probe.test.ts > Luna transport bounded probes > delivers the same delegation id twice instead of deduplicating it
+{"probe":"duplicate-delegation","delegateCalls":2}
+
+stdout | probe.test.ts > Luna transport bounded probes > shows sanitizer coverage and synthetic credential parsing boundaries
+{"probe":"sanitizer-auth","rawJwtLeaks":true,"bearerJwtRedacted":true,"accountMasked":true,"uuidLeaks":true,"proxyPasswordLeaks":true,"selectedSource":"multiprovider"}
+
+stdout | probe.test.ts > Luna transport bounded probes > abort does not settle a native createOffer that never resolves
+{"probe":"abort-createOffer","connectAfterAbort":"pending","peerCloseCalls":1}
+
+stdout | probe.test.ts > Luna transport bounded probes > abort does not settle a native waitForOpen that never resolves
+{"probe":"abort-waitForOpen","connectAfterAbort":"pending","peerCloseCalls":1}
+
+ ✓ probe.test.ts > Luna transport bounded probes > accepts megabyte delegation and transcript text; only outgoing context is chunked 7ms
+ ✓ probe.test.ts > Luna transport bounded probes > delivers the same delegation id twice instead of deduplicating it 1ms
+ ✓ probe.test.ts > Luna transport bounded probes > shows sanitizer coverage and synthetic credential parsing boundaries 1ms
+ ✓ probe.test.ts > Luna transport bounded probes > abort does not settle a native createOffer that never resolves 44ms
+ ✓ probe.test.ts > Luna transport bounded probes > abort does not settle a native waitForOpen that never resolves 44ms
+stdout | probe.test.ts > Luna transport bounded probes > a DeviceCheck promise has no abort or time bound
+{"probe":"abort-deviceCheck","resultAfterTimeout":"pending","acceptsAbortSignal":false}
+
+stdout | probe.test.ts > Luna transport bounded probes > sends while fake WebSocket bufferedAmount is high because no backpressure gate exists
+{"probe":"websocket-backpressure","bufferedAmount":16777216,"sends":32}
+
+ ✓ probe.test.ts > Luna transport bounded probes > a DeviceCheck promise has no abort or time bound 43ms
+ ✓ probe.test.ts > Luna transport bounded probes > sends while fake WebSocket bufferedAmount is high because no backpressure gate exists 1ms
+
+ Test Files  1 passed (1)
+      Tests  7 passed (7)
+   Start at  08:35:23
+   Duration  296ms (transform 39ms, setup 0ms, import 92ms, tests 141ms, environment 0ms)
+

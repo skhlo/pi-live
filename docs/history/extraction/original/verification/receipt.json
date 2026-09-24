@@ -1,0 +1,138 @@
+{
+  "createdAt": "2026-09-23T23:35:22.435Z",
+  "sourceCommit": "39171682343754366439b2c0890f5b0f4c3ed891",
+  "description": "Parent verification of upstream behavior probes. Not extraction acceptance tests.",
+  "runnerSha256": "c62eee669e2912b4aa89852954ef456625f6892aed1a839813bc30a2533bbc7c",
+  "environmentOverrides": {
+    "HOME": "/tmp/dotfiles-pi-live-spec/preview/live-spec/verification/empty-home",
+    "PI_CODING_AGENT_DIR": "/tmp/dotfiles-pi-live-spec/preview/live-spec/verification/empty-agent",
+    "NO_PROXY": "*",
+    "proxyVariablesRemoved": true
+  },
+  "results": [
+    {
+      "name": "network-denial-guard",
+      "argv": [
+        "/usr/bin/sandbox-exec",
+        "-p",
+        "(version 1) (allow default) (deny network*)",
+        "perl",
+        "-e",
+        "alarm 45; exec @ARGV",
+        "--",
+        "node",
+        "--input-type=module",
+        "-e",
+        "import net from 'node:net';const s=net.connect({host:'127.0.0.1',port:9});s.on('connect',()=>{s.destroy();process.exitCode=1});s.on('error',e=>{console.log(e.code);if(e.code!=='EPERM')process.exitCode=1});setTimeout(()=>{s.destroy();process.exitCode=1},2000).unref();"
+      ],
+      "status": 0,
+      "signal": null,
+      "log": "network-denial-guard.verified.log",
+      "logSha256": "223036dad0eae25fa9f0f26be0972ca38fddeba3038a316621cc779689cb9d28",
+      "durationMs": 47
+    },
+    {
+      "name": "lifecycle",
+      "argv": [
+        "/usr/bin/sandbox-exec",
+        "-p",
+        "(version 1) (allow default) (deny network*)",
+        "perl",
+        "-e",
+        "alarm 45; exec @ARGV",
+        "--",
+        "node",
+        "--experimental-strip-types",
+        "/tmp/dotfiles-pi-live-spec/preview/live-spec/lifecycle/lifecycle-probe.ts"
+      ],
+      "status": 0,
+      "signal": null,
+      "log": "lifecycle.verified.log",
+      "logSha256": "ba2d9eafd04edbc7c60f34fffa18483adec093e8855236c9bf880d75aa8ec0ca",
+      "durationMs": 424
+    },
+    {
+      "name": "ownership-queue",
+      "argv": [
+        "/usr/bin/sandbox-exec",
+        "-p",
+        "(version 1) (allow default) (deny network*)",
+        "perl",
+        "-e",
+        "alarm 45; exec @ARGV",
+        "--",
+        "bun",
+        "/tmp/dotfiles-pi-live-spec/preview/live-spec/ownership/queue-probe.ts"
+      ],
+      "status": 0,
+      "signal": null,
+      "log": "ownership-queue.verified.log",
+      "logSha256": "8836bf7a853d813c04db73970f81cad2152d939056727a0f245dca0cc41d8be9",
+      "durationMs": 50
+    },
+    {
+      "name": "ownership-filesystem",
+      "argv": [
+        "/usr/bin/sandbox-exec",
+        "-p",
+        "(version 1) (allow default) (deny network*)",
+        "perl",
+        "-e",
+        "alarm 45; exec @ARGV",
+        "--",
+        "bun",
+        "/tmp/dotfiles-pi-live-spec/preview/live-spec/ownership/filesystem-probe.ts"
+      ],
+      "status": 0,
+      "signal": null,
+      "log": "ownership-filesystem.verified.log",
+      "logSha256": "4694795116de449a3699b15d7614f34b8d1bdaac66d325f5ca0fc051a1dd24ce",
+      "durationMs": 34
+    },
+    {
+      "name": "ownership-lifecycle",
+      "argv": [
+        "/usr/bin/sandbox-exec",
+        "-p",
+        "(version 1) (allow default) (deny network*)",
+        "perl",
+        "-e",
+        "alarm 45; exec @ARGV",
+        "--",
+        "bun",
+        "/tmp/dotfiles-pi-live-spec/preview/live-spec/ownership/lifecycle-probe.ts"
+      ],
+      "status": 0,
+      "signal": null,
+      "log": "ownership-lifecycle.verified.log",
+      "logSha256": "71695bcd436ae987c1d0a969fa0af2830012be676642828016712a9e19e06dfe",
+      "durationMs": 53
+    },
+    {
+      "name": "transport",
+      "argv": [
+        "/usr/bin/sandbox-exec",
+        "-p",
+        "(version 1) (allow default) (deny network*)",
+        "perl",
+        "-e",
+        "alarm 45; exec @ARGV",
+        "--",
+        "/tmp/pi-better-openai.qnz8hk/node_modules/.bin/vitest",
+        "run",
+        "--root",
+        "/tmp/dotfiles-pi-live-spec/preview/live-spec/transport",
+        "--config",
+        "/tmp/dotfiles-pi-live-spec/preview/live-spec/transport/vitest.config.ts",
+        "probe.test.ts",
+        "--reporter",
+        "verbose"
+      ],
+      "status": 0,
+      "signal": null,
+      "log": "transport.verified.log",
+      "logSha256": "734d44477ea5c9dd524a26d087c1bd407c63e6428615e632fd8d8178da87b7aa",
+      "durationMs": 445
+    }
+  ]
+}

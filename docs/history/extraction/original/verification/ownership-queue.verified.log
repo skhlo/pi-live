@@ -1,0 +1,297 @@
+{
+  "source": {
+    "root": "/tmp/pi-better-openai.qnz8hk",
+    "head": "39171682343754366439b2c0890f5b0f4c3ed891"
+  },
+  "queueDirectoryFormula": {
+    "agentA": "/tmp/luna-agent-a/live-queue",
+    "agentB": "/tmp/luna-agent-b/live-queue"
+  },
+  "focusPreemption": {
+    "beforeDisplacedTick": {
+      "hasFloor": [
+        {
+          "id": "2101-session-alpha",
+          "value": true
+        },
+        {
+          "id": "2102-session-beta",
+          "value": true
+        }
+      ],
+      "floorFileHolder": "2102-session-beta",
+      "deactivations": [
+        {
+          "id": "2101-session-alpha",
+          "value": 0
+        },
+        {
+          "id": "2102-session-beta",
+          "value": 0
+        }
+      ]
+    },
+    "afterDisplacedTick": {
+      "hasFloor": [
+        {
+          "id": "2101-session-alpha",
+          "value": false
+        },
+        {
+          "id": "2102-session-beta",
+          "value": true
+        }
+      ],
+      "floorFileHolder": "2102-session-beta",
+      "deactivations": [
+        {
+          "id": "2101-session-alpha",
+          "value": 1
+        },
+        {
+          "id": "2102-session-beta",
+          "value": 0
+        }
+      ]
+    },
+    "activationCauses": [
+      {
+        "id": "2101-session-alpha",
+        "values": [
+          "background"
+        ]
+      },
+      {
+        "id": "2102-session-beta",
+        "values": [
+          "focus"
+        ]
+      }
+    ]
+  },
+  "focusedChallengerPingPong": {
+    "bothRemainFocused": true,
+    "states": [
+      {
+        "step": "B preempts A",
+        "snapshot": {
+          "hasFloor": [
+            {
+              "id": "2202-session-a",
+              "value": true
+            },
+            {
+              "id": "2203-session-b",
+              "value": true
+            }
+          ],
+          "floorFileHolder": "2203-session-b",
+          "deactivations": [
+            {
+              "id": "2202-session-a",
+              "value": 0
+            },
+            {
+              "id": "2203-session-b",
+              "value": 0
+            }
+          ]
+        }
+      },
+      {
+        "step": "A's first tick steps down",
+        "snapshot": {
+          "hasFloor": [
+            {
+              "id": "2202-session-a",
+              "value": false
+            },
+            {
+              "id": "2203-session-b",
+              "value": true
+            }
+          ],
+          "floorFileHolder": "2203-session-b",
+          "deactivations": [
+            {
+              "id": "2202-session-a",
+              "value": 1
+            },
+            {
+              "id": "2203-session-b",
+              "value": 0
+            }
+          ]
+        }
+      },
+      {
+        "step": "A's next tick preempts B",
+        "snapshot": {
+          "hasFloor": [
+            {
+              "id": "2202-session-a",
+              "value": true
+            },
+            {
+              "id": "2203-session-b",
+              "value": true
+            }
+          ],
+          "floorFileHolder": "2202-session-a",
+          "deactivations": [
+            {
+              "id": "2202-session-a",
+              "value": 1
+            },
+            {
+              "id": "2203-session-b",
+              "value": 0
+            }
+          ]
+        }
+      },
+      {
+        "step": "B's first tick steps down",
+        "snapshot": {
+          "hasFloor": [
+            {
+              "id": "2202-session-a",
+              "value": true
+            },
+            {
+              "id": "2203-session-b",
+              "value": false
+            }
+          ],
+          "floorFileHolder": "2202-session-a",
+          "deactivations": [
+            {
+              "id": "2202-session-a",
+              "value": 1
+            },
+            {
+              "id": "2203-session-b",
+              "value": 1
+            }
+          ]
+        }
+      },
+      {
+        "step": "B's next tick preempts A",
+        "snapshot": {
+          "hasFloor": [
+            {
+              "id": "2202-session-a",
+              "value": true
+            },
+            {
+              "id": "2203-session-b",
+              "value": true
+            }
+          ],
+          "floorFileHolder": "2203-session-b",
+          "deactivations": [
+            {
+              "id": "2202-session-a",
+              "value": 1
+            },
+            {
+              "id": "2203-session-b",
+              "value": 1
+            }
+          ]
+        }
+      }
+    ],
+    "activationCauses": [
+      {
+        "id": "2202-session-a",
+        "values": [
+          "focus",
+          "focus"
+        ]
+      },
+      {
+        "id": "2203-session-b",
+        "values": [
+          "focus",
+          "focus"
+        ]
+      }
+    ]
+  },
+  "staleButLiveOwnerTakeover": {
+    "staleThresholdMs": 8000,
+    "beforeOwnerResumes": {
+      "ownerProcessReportedAlive": true,
+      "ownerHasFloor": true,
+      "takerHasFloor": true,
+      "floorFileHolder": "2302-session-taker",
+      "memberFiles": [
+        "2302-session-taker.json"
+      ]
+    },
+    "afterOwnerResumes": {
+      "ownerHasFloor": false,
+      "ownerDeactivations": 1,
+      "takerHasFloor": true,
+      "floorFileHolder": "2302-session-taker",
+      "memberFiles": [
+        "2301-session-live-owner.json",
+        "2302-session-taker.json"
+      ]
+    }
+  },
+  "malformedFloor": [
+    {
+      "raw": "",
+      "hasFloor": false,
+      "activations": [],
+      "floorStillExists": true,
+      "rawAfter": "",
+      "memberFiles": [
+        "2401-session-candidate.json"
+      ]
+    },
+    {
+      "raw": "{not json",
+      "hasFloor": false,
+      "activations": [],
+      "floorStillExists": true,
+      "rawAfter": "{not json",
+      "memberFiles": [
+        "2401-session-candidate.json"
+      ]
+    },
+    {
+      "raw": "null",
+      "hasFloor": false,
+      "activations": [],
+      "floorStillExists": true,
+      "rawAfter": "null",
+      "memberFiles": [
+        "2401-session-candidate.json"
+      ]
+    },
+    {
+      "raw": "{}",
+      "hasFloor": false,
+      "activations": [],
+      "floorStillExists": true,
+      "rawAfter": "{}",
+      "memberFiles": [
+        "2401-session-candidate.json"
+      ]
+    },
+    {
+      "raw": "{\"holderId\":\"owner\",\"pid\":\"not-a-number\",\"token\":\"old\",\"claimedAt\":1}",
+      "hasFloor": false,
+      "activations": [],
+      "floorStillExists": true,
+      "rawAfter": "{\"holderId\":\"owner\",\"pid\":\"not-a-number\",\"token\":\"old\",\"claimedAt\":1}",
+      "memberFiles": [
+        "2401-session-candidate.json"
+      ]
+    }
+  ]
+}

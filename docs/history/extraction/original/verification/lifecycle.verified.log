@@ -1,0 +1,126 @@
+{
+  "sourceHead": "39171682343754366439b2c0890f5b0f4c3ed891",
+  "fakesOnly": true,
+  "results": {
+    "parkedCallbacks": {
+      "callOrder": [
+        "tui.requestRender",
+        "arbiter.join",
+        "session.create:session-1",
+        "session.start:session-1",
+        "tui.requestRender",
+        "tui.requestRender",
+        "session.stop:session-1",
+        "session.create:session-2",
+        "session.start:session-2",
+        "tui.requestRender",
+        "tui.requestRender",
+        "tui.requestRender",
+        "arbiter.leave",
+        "session.stop:session-2"
+      ],
+      "staleRenderObserved": true,
+      "commandResult": "resolved",
+      "notification": {
+        "message": "late parked terminal",
+        "type": "error"
+      }
+    },
+    "unresolvedDisposal": {
+      "callOrder": [
+        "tui.requestRender",
+        "arbiter.join",
+        "session.create:session-1",
+        "session.start:session-1",
+        "tui.requestRender",
+        "arbiter.leave",
+        "session.stop:session-1:pending",
+        "session.stop:session-1:released"
+      ],
+      "beforeRelease": "timeout",
+      "activeBeforeRelease": true,
+      "afterRelease": "resolved"
+    },
+    "delegationReplacement": {
+      "delegated": [
+        "first request",
+        "second request"
+      ],
+      "contextMessages": [
+        {
+          "type": "delegation.context.append",
+          "delegation_item_id": "delegation-b",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "\"Agent Final Message\":\n\nresult after the second delegation"
+            }
+          ]
+        }
+      ],
+      "activeDelegationId": null
+    },
+    "pendingConnect": {
+      "callOrder": [
+        "phase:connecting",
+        "transcript:clear",
+        "transport.connect",
+        "recorder.stop",
+        "transport.send:session.close",
+        "transport.close",
+        "terminal:none"
+      ],
+      "stopResult": "resolved",
+      "startBeforeConnectRelease": "timeout",
+      "startAfterConnectRelease": "rejected:The live session stopped while connecting."
+    },
+    "busyCommand": {
+      "idleChecks": 0,
+      "sessionStarted": 1,
+      "sentMessages": [
+        {
+          "message": {
+            "customType": "better-openai-live-delegation",
+            "content": "busy-agent request",
+            "display": true,
+            "details": {
+              "source": "live"
+            }
+          },
+          "options": {
+            "triggerTurn": true,
+            "deliverAs": "steer"
+          }
+        }
+      ],
+      "commandResult": "resolved"
+    },
+    "muteReactivation": {
+      "callOrder": [
+        "tui.requestRender",
+        "arbiter.join",
+        "session.create:session-1",
+        "session.start:session-1",
+        "tui.requestRender",
+        "session.mute:session-1:true",
+        "tui.requestRender",
+        "tui.requestRender",
+        "session.stop:session-1",
+        "session.create:session-2",
+        "session.start:session-2",
+        "tui.requestRender",
+        "arbiter.leave",
+        "session.stop:session-2"
+      ],
+      "firstSession": {
+        "muted": true,
+        "toggleMuteCalls": 1
+      },
+      "secondSession": {
+        "muted": false,
+        "toggleMuteCalls": 0
+      },
+      "commandResult": "resolved"
+    }
+  }
+}
