@@ -99,3 +99,32 @@ macOS-only loader checks explicitly skip in the portable suite on other hosts;
 the production check refuses unsupported hosts. No remote CI or publication was
 performed. Real speech, authentication, transport, ownership/lifecycle, and
 native shutdown behavior remain future work requiring separate scope and tests.
+
+## Command-policy follow-up
+
+A later check of issue #2 reproduced a development-command failure before any
+script ran: pnpm attempted to replace `node_modules`, then refused without a
+TTY. With `verify-deps-before-run=error`, it identified the mismatch as
+`enableGlobalVirtualStore`; the existing dependency tree records that setting
+as false.
+
+The root README now keeps the local virtual-store policy explicit for both
+restoration and checks, and makes checks refuse dependency drift rather than
+implicitly reinstalling. The runtime, manifest, frozen lock, dependency pins,
+and initial extraction receipt are unchanged. No persistent pnpm configuration
+was added.
+
+Verification on macOS arm64 with Node 26.6.0 and pnpm 11.8.0:
+
+- The seven README check commands other than `check:production` were read
+  directly from the document and executed successfully: source, package,
+  isolated loader, transfer, all 73 tests, typecheck, and formatting.
+- Changing only the source-check command's virtual-store flag to true produced
+  `ERR_PNPM_VERIFY_DEPS_BEFORE_RUN` for the expected setting mismatch, before
+  the source checker or an install ran.
+- The manifest, lock, and `node_modules/.modules.yaml` hashes were unchanged
+  across the rejection probe and successful checks.
+
+This follow-up did not repeat a dependency installation, production fetch,
+private-evidence check, or interactive TUI exercise. Their earlier results above
+remain historical evidence, not fresh results from this follow-up.

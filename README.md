@@ -37,23 +37,31 @@ peers and exact development dependencies.
 Restore dependencies with the pinned policy:
 
 ```sh
-pnpm install --frozen-lockfile --ignore-scripts --config.auto-install-peers=false
+pnpm install --frozen-lockfile --ignore-scripts --config.auto-install-peers=false --config.enable-global-virtual-store=false
 ```
 
-Use these flags for development commands too. pnpm 11.8 can reconcile dependencies
-before running a script; bare `pnpm` can rewrite the lock with automatic peers
-enabled. No extra workspace or npmrc policy layer is required.
+Keep the same peer, script, and local virtual-store policy for development
+commands. pnpm 11.8 can reconcile dependencies before running a script: bare
+`pnpm` can rewrite the lock with automatic peers enabled, and a virtual-store
+policy mismatch can trigger replacement of `node_modules`. Use
+`verify-deps-before-run=error` so checks refuse dependency drift instead of
+implicitly installing. No extra workspace or npmrc policy layer is required.
 
 ```sh
-pnpm --config.auto-install-peers=false --config.ignore-scripts=true check:source
-pnpm --config.auto-install-peers=false --config.ignore-scripts=true check:package
-pnpm --config.auto-install-peers=false --config.ignore-scripts=true check:loader
-pnpm --config.auto-install-peers=false --config.ignore-scripts=true check:production
-pnpm --config.auto-install-peers=false --config.ignore-scripts=true check:transfer
-pnpm --config.auto-install-peers=false --config.ignore-scripts=true test
-pnpm --config.auto-install-peers=false --config.ignore-scripts=true typecheck
-pnpm --config.auto-install-peers=false --config.ignore-scripts=true format:check
+pnpm --config.auto-install-peers=false --config.ignore-scripts=true --config.enable-global-virtual-store=false --config.verify-deps-before-run=error check:source
+pnpm --config.auto-install-peers=false --config.ignore-scripts=true --config.enable-global-virtual-store=false --config.verify-deps-before-run=error check:package
+pnpm --config.auto-install-peers=false --config.ignore-scripts=true --config.enable-global-virtual-store=false --config.verify-deps-before-run=error check:loader
+pnpm --config.auto-install-peers=false --config.ignore-scripts=true --config.enable-global-virtual-store=false --config.verify-deps-before-run=error check:production
+pnpm --config.auto-install-peers=false --config.ignore-scripts=true --config.enable-global-virtual-store=false --config.verify-deps-before-run=error check:transfer
+pnpm --config.auto-install-peers=false --config.ignore-scripts=true --config.enable-global-virtual-store=false --config.verify-deps-before-run=error test
+pnpm --config.auto-install-peers=false --config.ignore-scripts=true --config.enable-global-virtual-store=false --config.verify-deps-before-run=error typecheck
+pnpm --config.auto-install-peers=false --config.ignore-scripts=true --config.enable-global-virtual-store=false --config.verify-deps-before-run=error format:check
 ```
+
+If a check reports `ERR_PNPM_VERIFY_DEPS_BEFORE_RUN`, inspect the mismatch and,
+when dependency restoration is intended, run the explicit frozen install above.
+Do not suppress the refusal with `CI=true`, automatic purge confirmation, or a
+lockfile rewrite.
 
 `check:loader` and `check:production` require macOS arm64; the production check
 fetches the pinned packages into a disposable fixture. Neither imports the native
