@@ -25,6 +25,7 @@ import {
   LIVE_VOICE_VALUES,
   PreferenceError,
 } from "../src/preferences.ts";
+import { jsonObject, parseJsonObject } from "./test-json.ts";
 
 async function isMissing(target: string): Promise<boolean> {
   try {
@@ -85,12 +86,11 @@ test("the real store resolves config.json beneath getAgentDir", async (t) => {
 
   await createFilePreferenceStore().setVoice("arbor");
 
-  assert.equal(
-    JSON.parse(
-      await readFile(path.join(agentDir, "pi-live/config.json"), "utf8"),
-    ).voice,
-    "arbor",
+  const config = parseJsonObject(
+    await readFile(path.join(agentDir, "pi-live/config.json"), "utf8"),
+    "stored preferences",
   );
+  assert.equal(config.voice, "arbor");
 });
 
 test("valid preferences use the upstream voice enum and retain unknown fields", async (t) => {
@@ -339,11 +339,18 @@ for(;;){
   await fixture.store.setVoice("maple");
   await changed;
 
-  const result = JSON.parse(await readFile(fixture.configPath, "utf8"));
+  const result = parseJsonObject(
+    await readFile(fixture.configPath, "utf8"),
+    "stored preferences",
+  );
+  const cooperating =
+    result.cooperating === undefined
+      ? undefined
+      : jsonObject(result.cooperating, "cooperating preference fields");
   assert.ok(
     (result.voice === "maple" && result.before === true) ||
-      (result.voice === "maple" && result.cooperating?.kept === true) ||
-      (result.voice === "vale" && result.cooperating?.kept === true),
+      (result.voice === "maple" && cooperating?.kept === true) ||
+      (result.voice === "vale" && cooperating?.kept === true),
   );
   assert.equal((await stat(fixture.configPath)).mode & 0o777, 0o600);
   assert.deepEqual(await readdir(fixture.configDir), ["config.json"]);
@@ -362,7 +369,10 @@ test("concurrent stores leave one valid private update and no task artifacts", a
     second.setVoice("spruce"),
   ]);
 
-  const result = JSON.parse(await readFile(fixture.configPath, "utf8"));
+  const result = parseJsonObject(
+    await readFile(fixture.configPath, "utf8"),
+    "stored preferences",
+  );
   assert.ok(result.voice === "arbor" || result.voice === "spruce");
   assert.equal(result.retained, 3);
   assert.equal((await stat(fixture.configPath)).mode & 0o777, 0o600);

@@ -669,9 +669,9 @@
       "bytes": 10616,
       "mode": 420,
       "origin": "git",
-      "destinationSha256": "c352a7ee99be0a1613f618fd93ba3ec55ea29fd5e63349024c1fc318d9f994c5",
+      "destinationSha256": "5233ca0790fdead194bd14c4b5fe1773c2f8d37b66718958d0ea20cf36b6155c",
       "treatment": "adapted",
-      "reason": "Adapt executable tests and fixtures for the root package and removal of dotfiles installer coupling."
+      "reason": "Adapt executable tests and fixtures for the root package, remove dotfiles installer coupling, and narrow parsed fixture data."
     },
     {
       "source": "scripts/check-pi-live.ts",
@@ -691,8 +691,9 @@
       "bytes": 22773,
       "mode": 420,
       "origin": "git",
-      "destinationSha256": "b81f4156d992cc5978cf95dd9f92f498696a75482fd5f171f278034b3de5db7b",
-      "treatment": "exact"
+      "destinationSha256": "3ff7dea8d9f03822fb6261e65b924743c744bc6e71cd05c6526f7f35a3634659",
+      "treatment": "adapted",
+      "reason": "Narrow parsed fixture data; preserve importer behavior and all original test scenarios."
     },
     {
       "source": "scripts/import-pi-live.ts",
@@ -713,7 +714,7 @@
       "origin": "git",
       "destinationSha256": "4d408ab264f24ccc3453b717b5975aba833ce21f954e52a272e390e5fcf5e882",
       "treatment": "adapted",
-      "reason": "Adapt executable tests and fixtures for the root package and removal of dotfiles installer coupling."
+      "reason": "Adapt executable tests and fixtures for the root package, remove dotfiles installer coupling, and narrow parsed fixture data."
     },
     {
       "source": "scripts/pi-live-loader-probe.ts",
@@ -744,9 +745,9 @@
       "bytes": 14495,
       "mode": 420,
       "origin": "git",
-      "destinationSha256": "191f15ad1ccd3c81f118b8d5d51321b0364ed5f1897675ced5677492145fd5f5",
+      "destinationSha256": "e8dee0cb43de7c12e41afe6268d9aa92224982171bfc0d8e94188401456bb538",
       "treatment": "adapted",
-      "reason": "Relocate imports and add deterministic public-store observed-conflict retry coverage; runtime semantics unchanged."
+      "reason": "Relocate imports, narrow parsed fixture data, and add deterministic public-store observed-conflict retry coverage; runtime semantics unchanged."
     },
     {
       "source": "scripts/pi-live.test.ts",
@@ -757,7 +758,7 @@
       "origin": "git",
       "destinationSha256": "256839cf2cc91c818665fb7fcb7fcc6c72d65349d19706973d9d4b733afe9794",
       "treatment": "adapted",
-      "reason": "Adapt executable tests and fixtures for the root package and removal of dotfiles installer coupling."
+      "reason": "Adapt executable tests and fixtures for the root package, remove dotfiles installer coupling, and narrow parsed fixture data."
     },
     {
       "source": "upstream/pi-live.lock.json",

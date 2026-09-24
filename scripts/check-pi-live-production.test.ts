@@ -6,6 +6,7 @@ import { test } from "node:test";
 
 import { checkPiLiveProduction } from "./check-pi-live-production.ts";
 import { PI_LIVE_PRODUCTION_INSTALL_ARGS } from "./pi-live-package.ts";
+import { isJsonObject, parseJsonObject } from "./test-json.ts";
 
 const root = path.resolve(import.meta.dirname, "..");
 const supportedHost = process.platform === "darwin" && process.arch === "arm64";
@@ -65,7 +66,7 @@ if (process.argv[2] === "--version") process.stdout.write("11.8.0\\n");
     const calls = (await readFile(log, "utf8"))
       .trim()
       .split("\n")
-      .map((line) => JSON.parse(line) as Record<string, unknown>);
+      .map((line) => parseJsonObject(line, "pnpm call log entry"));
     assert.equal(calls.length, 2);
     assert.deepEqual(
       calls.map(({ args }) => args),
@@ -95,12 +96,8 @@ if (process.argv[2] === "--version") process.stdout.write("11.8.0\\n");
       });
       assert.equal(call.userNpmrc, "");
       assert.equal(call.globalNpmrc, "");
-      assert.ok(
-        call.env !== null &&
-          typeof call.env === "object" &&
-          !Array.isArray(call.env),
-      );
-      const env = call.env as Record<string, unknown>;
+      const env = call.env;
+      assert.ok(isJsonObject(env));
       assert.equal(env.NODE_OPTIONS, undefined);
       assert.equal(env.npm_config_script_shell, undefined);
       assert.equal(env.npm_config_registry, "https://registry.npmjs.org/");

@@ -8,8 +8,8 @@ no-mistakes run were not resumed or changed.
 ## Result
 
 - All five runtime files remain byte-identical to the extraction source.
-- The transfer receipt accounts for 99 selected source files: 88 exact copies
-  and 11 declared adaptations. It also accounts for 61 historical research files:
+- The transfer receipt accounts for 99 selected source files: 87 exact copies
+  and 12 declared adaptations. It also accounts for 61 historical research files:
   32 exact repository copies and 29 private local captures.
 - The 24-file upstream snapshot and 52-file notice corpus retain their exact
   original bytes. Private raw evidence is not claimed to be available to readers
@@ -73,6 +73,13 @@ following were exercised and captured:
 
 The transfer made no model turn, native import, audio/device operation,
 authentication, provider call, real-home registration, or dotfiles change.
+
+## Local review
+
+A read-only spec review found no transfer gaps. The standards review found
+unchecked JSON property access in test fixtures. A test-only correction narrows
+that data before access while retaining every test scenario and leaving the
+runtime unchanged. The cancelled dotfiles pipeline was not used for this review.
 
 ## Receipts and limits
 

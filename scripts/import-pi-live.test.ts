@@ -18,6 +18,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
 
+import { jsonObject, parseJsonObject } from "./test-json.ts";
+
 const root = path.resolve(import.meta.dirname, "..");
 const canonicalScript = path.join(root, "scripts/import-pi-live.ts");
 const canonicalSnapshot = path.join(root, "upstream/pi-live");
@@ -222,10 +224,18 @@ async function exactSourceFixture(t: TestContext): Promise<string> {
   const source = await mkdtemp(path.join(tmpdir(), "pi-live-source-test-"));
   t.after(async () => rm(source, { recursive: true }));
   runGit(source, ["init", "--quiet"]);
+  const lock = parseJsonObject(
+    await readFile(canonicalLock, "utf8"),
+    "canonical lock",
+  );
+  const files = jsonObject(lock.files, "canonical lock files");
   for (const relative of await snapshotFiles(canonicalSnapshot)) {
-    const expected = JSON.parse(await readFile(canonicalLock, "utf8")).files[
-      relative
-    ].gitBlobSha1;
+    const record = jsonObject(
+      files[relative],
+      `canonical lock entry for ${relative}`,
+    );
+    const expected = record.gitBlobSha1;
+    assert.ok(typeof expected === "string");
     const actual = runGit(source, [
       "hash-object",
       "-w",
@@ -329,8 +339,15 @@ test("offline check rejects a one-byte pinned-file hash mutation", async (t) => 
 test("offline check rejects changed lock fields", async (t) => {
   const fixtureRoot = await fixture(t);
   const lockPath = path.join(fixtureRoot, "upstream/pi-live.lock.json");
-  const lock = JSON.parse(await readFile(lockPath, "utf8"));
-  lock.nativeReceipt.version = "17.2.10";
+  const lock = parseJsonObject(
+    await readFile(lockPath, "utf8"),
+    "fixture lock",
+  );
+  const nativeReceipt = jsonObject(
+    lock.nativeReceipt,
+    "fixture native receipt",
+  );
+  nativeReceipt.version = "17.2.10";
   await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`);
   const result = invoke(fixtureRoot, "check");
   assert.notEqual(result.status, 0);
@@ -596,27 +613,53 @@ test("every pinned Git object read disables lazy fetch and terminal prompts", as
 });
 
 test("lock records exact modes and tree and limits ideas-only and provenance-only sources", async () => {
-  const lock = JSON.parse(await readFile(canonicalLock, "utf8"));
-  assert.equal(lock.snapshot.runtimeLoaded, false);
-  for (const record of Object.values(lock.files) as Array<{
-    mode?: string;
-  }>)
+  const lock = parseJsonObject(
+    await readFile(canonicalLock, "utf8"),
+    "canonical lock",
+  );
+  const snapshot = jsonObject(lock.snapshot, "canonical lock snapshot");
+  assert.equal(snapshot.runtimeLoaded, false);
+
+  const files = jsonObject(lock.files, "canonical lock files");
+  for (const [relative, value] of Object.entries(files)) {
+    const record = jsonObject(value, `canonical lock entry for ${relative}`);
     assert.equal(record.mode, "100644");
-  assert.equal(lock.source.commit, commit);
-  assert.equal(lock.source.tree, tree);
+  }
+
+  const source = jsonObject(lock.source, "canonical lock source");
+  assert.equal(source.commit, commit);
+  assert.equal(source.tree, tree);
   for (const selected of ["src/codex-auth.ts", "src/format.ts", "src/paths.ts"])
-    assert.equal(lock.files[selected].role, "ideas-only");
+    assert.equal(
+      jsonObject(files[selected], `canonical lock entry for ${selected}`).role,
+      "ideas-only",
+    );
   for (const selected of [
     "src/live/focus.ts",
     "src/live/queue.ts",
     "tests/live-focus.test.ts",
     "tests/live-queue.test.ts",
   ])
-    assert.equal(lock.files[selected].role, "provenance-only");
-  assert.deepEqual(lock.nativeReceipt.disposition.distribution, {
-    provisionFromPinnedNpmTarball: true,
-    commitBinary: false,
-    commitTarball: false,
-    mirrorOrRepublish: false,
-  });
+    assert.equal(
+      jsonObject(files[selected], `canonical lock entry for ${selected}`).role,
+      "provenance-only",
+    );
+
+  const nativeReceipt = jsonObject(
+    lock.nativeReceipt,
+    "canonical native receipt",
+  );
+  const disposition = jsonObject(
+    nativeReceipt.disposition,
+    "canonical native receipt disposition",
+  );
+  assert.deepEqual(
+    jsonObject(disposition.distribution, "canonical native distribution"),
+    {
+      provisionFromPinnedNpmTarball: true,
+      commitBinary: false,
+      commitTarball: false,
+      mirrorOrRepublish: false,
+    },
+  );
 });

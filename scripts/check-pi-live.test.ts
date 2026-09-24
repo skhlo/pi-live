@@ -20,6 +20,7 @@ import {
   copyPiLivePayloadFixture,
   inspectPiLivePackagePayload,
 } from "./pi-live-package.ts";
+import { jsonObject, parseJsonObject } from "./test-json.ts";
 
 const root = path.resolve(import.meta.dirname, "..");
 const checker = path.join(root, "scripts/check-pi-live.ts");
@@ -81,8 +82,12 @@ test("the package checker rejects payload, policy, lock, and notice mutations", 
   await t.test("manifest lifecycle script", async (t) => {
     const fixtureRoot = await fixture(t);
     const manifestPath = path.join(fixtureRoot, "package.json");
-    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-    manifest.scripts.postinstall = "node install.js";
+    const manifest = parseJsonObject(
+      await readFile(manifestPath, "utf8"),
+      "package manifest",
+    );
+    const scripts = jsonObject(manifest.scripts, "package manifest scripts");
+    scripts.postinstall = "node install.js";
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
     const result = invoke(fixtureRoot);
     assert.notEqual(result.status, 0);
@@ -92,7 +97,10 @@ test("the package checker rejects payload, policy, lock, and notice mutations", 
   await t.test("package manager pin", async (t) => {
     const fixtureRoot = await fixture(t);
     const manifestPath = path.join(fixtureRoot, "package.json");
-    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    const manifest = parseJsonObject(
+      await readFile(manifestPath, "utf8"),
+      "package manifest",
+    );
     manifest.packageManager = "pnpm@11.9.0";
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
     const result = invoke(fixtureRoot);
@@ -154,8 +162,18 @@ test("the package checker rejects payload, policy, lock, and notice mutations", 
   await t.test("notice manifest metadata", async (t) => {
     const fixtureRoot = await fixture(t);
     const manifestPath = path.join(fixtureRoot, "notices/NOTICE-MANIFEST.json");
-    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-    manifest.files["audio/audiopus_sys.LICENSE"].bytes += 1;
+    const manifest = parseJsonObject(
+      await readFile(manifestPath, "utf8"),
+      "notice manifest",
+    );
+    const files = jsonObject(manifest.files, "notice manifest files");
+    const notice = jsonObject(
+      files["audio/audiopus_sys.LICENSE"],
+      "audio notice manifest entry",
+    );
+    const bytes = notice.bytes;
+    assert.ok(typeof bytes === "number");
+    notice.bytes = bytes + 1;
     const manifestBytes = `${JSON.stringify(manifest, null, 2)}\n`;
     await writeFile(manifestPath, manifestBytes);
     const policyPath = path.join(fixtureRoot, "scripts/pi-live-package.ts");
@@ -208,8 +226,15 @@ test("the package checker rejects payload, policy, lock, and notice mutations", 
   await t.test("extra native target", async (t) => {
     const fixtureRoot = await fixture(t);
     const manifestPath = path.join(fixtureRoot, "package.json");
-    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-    manifest.optionalDependencies["@oh-my-pi/pi-natives-linux-x64"] = "17.2.9";
+    const manifest = parseJsonObject(
+      await readFile(manifestPath, "utf8"),
+      "package manifest",
+    );
+    const optionalDependencies = jsonObject(
+      manifest.optionalDependencies,
+      "package manifest optional dependencies",
+    );
+    optionalDependencies["@oh-my-pi/pi-natives-linux-x64"] = "17.2.9";
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
     const result = invoke(fixtureRoot);
     assert.notEqual(result.status, 0);
