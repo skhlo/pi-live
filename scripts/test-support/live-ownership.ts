@@ -80,7 +80,11 @@ export function eventually(
   check: () => boolean,
   queue: "microtask" | "task" = "microtask",
 ): Promise<void> {
-  return waitForCondition(check, `condition did not settle within 10 seconds`, queue);
+  return waitForCondition(
+    check,
+    `condition did not settle within 10 seconds`,
+    queue,
+  );
 }
 
 export interface ChildExit {

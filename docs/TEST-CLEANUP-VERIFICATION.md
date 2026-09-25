@@ -136,9 +136,9 @@ queue polling in lifecycle/SDK and the ownership helper's microtask default
 and explicit task option. No runtime files changed.
 
 Current inventory by `wc -l`: lifecycle 1,670; SDK scenario 878; ownership
-scenario 1,353; child 270; fixture 336; SDK helper 511; ownership helper 669;
-shared wait helper 15. All eight files total 5,702 lines versus baseline
-6,070 (368 fewer, 6.1%); the three scenarios total 3,901 versus 5,761.
+scenario 1,353; child 270; fixture 336; SDK helper 511; ownership helper 673;
+shared wait helper 15. All eight files total 5,706 lines versus baseline
+6,070 (364 fewer, 6.0%); the three scenarios total 3,901 versus 5,761.
 The earlier seven-file figures and mutation results remain historical rather
 than evidence for these bytes. Fresh inventory and both mutations have not
 been repeated in this review phase; the outer validation must bind them to
