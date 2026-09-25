@@ -27,7 +27,8 @@ Issue #3 adds a dormant lifecycle module with fixture-tested ownership,
 cancellation, mute, deadlines, asynchronous release, and Pi lifecycle binding.
 The default factory does not construct it. Real media/transport, operational
 home certification, and enabling the call UI remain later work. See the
-[current lifecycle verification](docs/ISSUE-3-VERIFICATION.md).
+[lifecycle verification](docs/ISSUE-3-VERIFICATION.md) and the
+[current test-cleanup record](docs/TEST-CLEANUP-VERIFICATION.md).
 
 The preference writer uses an optimistic read/compare/retry sequence and atomic
 same-directory rename. That does **not** guarantee that every concurrent change
@@ -90,8 +91,9 @@ pnpm --config.auto-install-peers=false --config.ignore-scripts=true --config.ena
 ```
 
 These are development checks, not a real-home installer or extension
-registration. See [current lifecycle verification](docs/ISSUE-3-VERIFICATION.md)
-and [historical transfer verification](docs/VERIFICATION.md); receipts verify
+registration. See [lifecycle verification](docs/ISSUE-3-VERIFICATION.md), the
+[current test-cleanup record](docs/TEST-CLEANUP-VERIFICATION.md), and
+[historical transfer verification](docs/VERIFICATION.md); receipts verify
 only their recorded source and dependency identities.
 
 ## Continuous integration
@@ -107,11 +109,9 @@ disabled, then runs source/package checks, tests, typecheck and formatting with
 the same refusal-on-drift policy as local development. Native addons are
 disabled during verification. Full Git history makes the accepted historical
 snapshot available without lazy fetching. Transfer regression cases run within
-`test`; there is no additional standalone `check:transfer` step. The initial
-extraction's tests require exact working-tree bytes. Runtime development must
-replace that positive case with pinned historical-snapshot verification and
-explicit drift rejection, not weaken the receipt or drop coverage; lifecycle
-[PR #9](https://github.com/skhlo/pi-live/pull/9) carries that transition.
+`test`; there is no additional standalone `check:transfer` step. The initial extraction's working-tree-byte check has been replaced with pinned
+historical-snapshot verification and explicit developed-source drift rejection;
+see [lifecycle PR #9](https://github.com/skhlo/pi-live/pull/9).
 
 There are no dependency caches or artifact uploads. Linux skips the existing
 macOS-arm64-only tests; this workflow does not replace macOS loader/isolation
