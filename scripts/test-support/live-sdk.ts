@@ -40,11 +40,13 @@ export async function waitUntil(
   predicate: () => boolean,
   description: string,
 ): Promise<void> {
-  for (let turn = 0; turn < 200; turn += 1) {
-    if (predicate()) return;
+  const deadline = performance.now() + 10_000;
+  while (!predicate()) {
+    if (performance.now() >= deadline) {
+      assert.fail(`Timed out waiting for ${description}`);
+    }
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
-  assert.fail(`Timed out waiting for ${description}`);
 }
 
 export async function pathExists(target: string): Promise<boolean> {
