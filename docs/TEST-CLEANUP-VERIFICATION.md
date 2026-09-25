@@ -14,17 +14,18 @@ retain the production clock; formerly manual-clock cases select it explicitly.
 
 | File                                        |    Before |     After |
 | ------------------------------------------- | --------: | --------: |
-| `scripts/pi-live-lifecycle.test.ts`         |     2,222 |     1,673 |
+| `scripts/pi-live-lifecycle.test.ts`         |     2,222 |     1,670 |
 | `scripts/pi-live-lifecycle-sdk.test.ts`     |     1,469 |       878 |
 | `scripts/pi-live-ownership.test.ts`         |     2,070 |     1,353 |
 | `scripts/pi-live-lifecycle-child.ts`        |       309 |       270 |
 | `scripts/test-support/live-fixture.ts`      |         0 |       336 |
-| `scripts/test-support/live-sdk.ts`          |         0 |       516 |
-| `scripts/test-support/live-ownership.ts`    |         0 |       674 |
-| **Total, including every helper and child** | **6,070** | **5,700** |
+| `scripts/test-support/live-sdk.ts`          |         0 |       511 |
+| `scripts/test-support/live-ownership.ts`    |         0 |       673 |
+| `scripts/test-support/live-wait.ts`         |         0 |        15 |
+| **Total, including every helper and child** | **6,070** | **5,706** |
 
-The current net reduction is **370 lines (6.1%)**. The three scenario entrypoints shrink
-from 5,761 to 3,904 lines (32.2%); the difference is not all deletion. Real SDK
+The current net reduction is **364 lines (6.0%)**. The three scenario entrypoints shrink
+from 5,761 to 3,901 lines (32.3%); the difference is not all deletion. Real SDK
 construction, process control and filesystem fault injection still require
 substantial specialized support. The benefit is less repeated arrangement and
 clearer separation, not a claim that the test surface is now small.
@@ -58,10 +59,11 @@ local receipt's `inventory/` directory.
 
 ## Verification and identity
 
-The cleanup was checked at HEAD `905caae28365603e720430ab8661a51544e9a269`
-with uncommitted test changes; that commit preserves published history and brings
-in the merged portable CI workflow. The receipt binds the effective test/helper
-bytes separately from HEAD.
+The current test/helper snapshot was checked at HEAD
+`31dc89fbcce4b77c327756f651c69329e9b54874`. Earlier cleanup evidence
+was captured at HEAD `905caae28365603e720430ab8661a51544e9a269`
+with uncommitted test changes; that historical receipt binds its effective
+bytes separately from HEAD. The merged portable CI workflow is retained.
 
 `src/live.ts` is byte-identical at SHA-256
 `a1ff89bdbf1e7fea8cf6c15c6bda61e6e25e3b0090fa869a0db81fe5a2f3f072`.
@@ -87,23 +89,29 @@ The standard four pnpm refusal-policy flags were used throughout. No local
 install/fetch, production CLI, native/device/provider/audio, real-home or remote
 host operation was performed. The full suite's production test is stubbed.
 
-Receipt: `/tmp/pi-live-test-cleanup.LZsosU/final/MANIFEST.md`, with exact argv,
-environments, statuses, test/helper hashes, mutation diffs and retained copies.
-The implementation and failure-teardown probes are retained alongside that
-receipt. Earlier evidence was preserved.
+Current receipt: `/tmp/pi-live-test-cleanup.LZsosU/shared-wait-final/MANIFEST.md`,
+with exact argv, environments, statuses, all eight test/helper/child hashes,
+mutation diffs and retained copies. It records 259/259 passing tests at default
+concurrency, exact 259-event baseline inventory, and fresh behavioral failures
+for both mutations with all four current helpers copied. Direct probes of the
+shared wait show both false-predicate queue modes terminate after a monotonic
+deadline without background polling; the true predicate schedules no task.
+The earlier `/tmp/pi-live-test-cleanup.LZsosU/final/MANIFEST.md` and
+`/tmp/pi-live-test-cleanup.LZsosU/polling-fix/MANIFEST.md` are historical receipts,
+not proof for these helper bytes.
 
 Hosted Node 22.19.0 and 26.6.0 validation must be bound to the updated PR head;
 PR #10's earlier inert-package CI results are not evidence for this cleanup.
 Publication and those results are recorded on PR #9 rather than inferred here.
 
-## Subsequent SDK polling correction (test-phase evidence)
+## Historical polling corrections (superseded evidence)
 
 The preceding receipt is historical evidence for its original 5,698-line tree;
 its helper hashes and mutation copies do **not** describe the corrected head.
 At `52b02f8decdc909807c0438fd094db438099bc85`, the SDK polling helper
 uses a monotonic ten-second deadline instead of 200 `setImmediate` turns. This
 adds two lines to `scripts/test-support/live-sdk.ts` (516 rather than 514),
-producing the current seven-file totals shown above. The scenario files remain 3,904 lines. The corrected helper SHA-256
+producing the historical seven-file total of 5,700 lines. The scenario files then totaled 3,904 lines. The corrected helper SHA-256
 is `d4e1f8f4254850bb9b5ce212eb55a5d765638de3abc405966130cc5de930ddf9`.
 The other six file hashes remain those in the historical receipt. Runtime
 `src/live.ts` remains byte-identical to the SHA-256 recorded above.
@@ -125,21 +133,8 @@ copied. This supersedes the preceding local-only evidence for the corrected
 helper; the earlier receipts remain historical. No hosted CI evidence is
 claimed here.
 
-## Shared polling follow-up (current worktree)
-
-The `0a0d72c` receipt and its mutation copies are historical: they do not
-cover the later lifecycle test edit at `86d4f82` or this follow-up's helper
-bytes. The remaining ownership turn-count limit was subject to the same
-filesystem scheduling failure as the SDK and lifecycle polling loops. All
-three now use a single test-only monotonic ten-second wait, retaining task
-queue polling in lifecycle/SDK and the ownership helper's microtask default
-and explicit task option. No runtime files changed.
-
-Current inventory by `wc -l`: lifecycle 1,670; SDK scenario 878; ownership
-scenario 1,353; child 270; fixture 336; SDK helper 511; ownership helper 673;
-shared wait helper 15. All eight files total 5,706 lines versus baseline
-6,070 (364 fewer, 6.0%); the three scenarios total 3,901 versus 5,761.
-The earlier seven-file figures and mutation results remain historical rather
-than evidence for these bytes. Fresh inventory and both mutations have not
-been repeated in this review phase; the outer validation must bind them to
-its exact gate head before approval. No hosted CI result is claimed here.
+The `0a0d72c` receipt and its mutation copies do not cover the later lifecycle
+test edit at `86d4f82` or the shared-wait helper. The final shared wait retains
+task queue polling in lifecycle/SDK and the ownership helper's microtask default
+and explicit task option. Its fresh inventory and mutation proof are bound to
+`31dc89f` in the current receipt above. No hosted CI result is claimed here.
