@@ -117,6 +117,11 @@ clear their bounded watchdog' scripts/pi-live-ownership.test.ts` also passed
 (one passed, zero failed/cancelled/skipped); it exercises an actual failed child
 read, waits for the child exit and asserts that no child watchdog remains. These
 are focused local test results, not another full-suite or live-call result.
-The original mutation proofs have **not** been repeated against the corrected
-helper bytes and must not be presented as proofs bound to this head. No new
-mutation receipt or hosted CI evidence is claimed here.
+Fresh read-only validation of the corrected snapshot is recorded at
+`/tmp/pi-live-test-cleanup.LZsosU/polling-fix/MANIFEST.md` (HEAD
+`0a0d72cd340f9c270fc1852fca8e51370ceeeef7`). It records 259/259 tests
+at default concurrency, the 259-event baseline inventory, a bounded waitUntil
+probe, and two fresh behavioral mutation failures with all current helpers
+copied. This supersedes the preceding local-only evidence for the corrected
+helper; the earlier receipts remain historical. No hosted CI evidence is
+claimed here.
