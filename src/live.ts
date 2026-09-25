@@ -4878,14 +4878,9 @@ export function registerPiLive(
           > = {
             onRequest(request) {
               if (input.signal.aborted || activeSignal !== input.signal) return;
-              pi.sendMessage(
-                {
-                  customType: DELEGATION_MESSAGE_TYPE,
-                  content: `[Voice coding request]\n${request.text}`,
-                  display: true,
-                },
-                { triggerTurn: true },
-              );
+              pi.sendUserMessage(`[Voice]\n${request.text}`, {
+                deliverAs: "steer",
+              });
             },
             onTranscript(transcript) {
               if (input.signal.aborted || activeSignal !== input.signal) return;

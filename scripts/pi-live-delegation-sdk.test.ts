@@ -8,6 +8,49 @@ import { deferred } from "./test-support/live-fixture.ts";
 
 // Voice is ordinary Pi input. These tests exercise the complete bridge, not a
 // parallel task scheduler or a proof of exclusive ownership of model context.
+test("voice runs Pi input transformations and ordinary agent startup hooks", async (t) => {
+  const provider = fakeProvider();
+  const media = fakeMedia();
+  let inputCalls = 0;
+  let starts = 0;
+  const fixture = await createSdkFixture(t, {
+    controls: true,
+    resources: media.resources,
+    provider: provider.provider,
+    after: [
+      {
+        name: "normal-input-extension",
+        factory(pi) {
+          pi.on("input", (event) => {
+            if (event.source !== "extension") return;
+            inputCalls++;
+            return {
+              action: "transform",
+              text: "Pi input extension transformed the voice request",
+            };
+          });
+          pi.on("before_agent_start", () => {
+            starts++;
+          });
+        },
+      },
+    ],
+  });
+  await fixture.runtime.session.prompt("/live start");
+  media.request("one", "Inspect");
+  await waitUntil(
+    () => media.frames.some((frame) => frame.includes("Pi final reply")),
+    "ordinary Pi reply",
+  );
+  assert.equal(inputCalls, 1);
+  assert.equal(starts, 1);
+  assert.ok(
+    provider.contexts.some((context) =>
+      context.includes("Pi input extension transformed the voice request"),
+    ),
+  );
+});
+
 test("voice joins a busy Pi conversation alongside typed input", async (t) => {
   const held = deferred<void>();
   t.after(() => held.resolve());

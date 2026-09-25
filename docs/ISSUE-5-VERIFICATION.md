@@ -8,7 +8,7 @@ receipt, exclusive-result-ownership and context-audit requirements. The earlier
 SDK counterexample is now an extension-compatibility test: both load orders must
 work. The obsolete blocker document is removed; history retains that decision.
 
-Voice requests call `pi.sendMessage` directly, including while Pi is busy. Typed
+Voice requests call `pi.sendUserMessage` directly, including while Pi is busy. Typed
 input, installed extensions, tool execution, retries and context processing remain
 Pi's responsibility. When Pi settles, its reply returns through the upstream
 `Agent Final Message` protocol. An error/abort without a reply produces a short
@@ -28,7 +28,7 @@ or SDK extension is needed.
 
 ## Verification
 
-Current checks pass: **394 tests** (389 under OS network denial, four loader
+Current checks pass: **395 tests** (390 under OS network denial, four loader
 tests with their own sandbox, and the existing permission-bit case separately),
 typecheck, formatting, source/package checks and isolated real-Pi loading.
 All 18 PTY scenarios and the actual Paseo controls/conversation checks pass.
@@ -38,6 +38,7 @@ network denial, empty fixture homes and `--no-addons`. They cover:
 
 - starting voice while Pi is busy, multiple voice requests and typed clarification
   in one conversation, followed by Pi's reply;
+- Pi input transformations and ordinary agent-start extension hooks;
 - context enrichment by extensions loaded before and after Pi Live;
 - Pi-owned retry, error and abort handling, and unrelated typed work;
 - actual custom-tool execution, final reply frames and UTF-8 truncation;

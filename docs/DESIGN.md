@@ -130,8 +130,9 @@ Installed extensions, typed clarifications, retries and context processing are
 part of ordinary Pi execution and can influence the answer returned to voice.
 
 The bridge has one path in and one path out. A voice request calls
-`pi.sendMessage` with the existing visible custom-message type and a voice-origin
-label. Pi decides how input joins current work. `message_end` remembers the
+`pi.sendUserMessage` with a visible voice-origin label and Pi's normal steering
+delivery. Input and agent-start extensions run as they do for other Pi input.
+`message_end` remembers the
 assistant's reply; `agent_settled` sends it back to voice using the retained
 `Agent Final Message` convention. If Pi has no successful reply, a fixed notice
 directs the user to the terminal. Raw errors, thinking and tool output stay there.
