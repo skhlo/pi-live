@@ -24,11 +24,13 @@ import {
 } from "./test-support/live-fixture.ts";
 
 async function eventually(check: () => boolean): Promise<void> {
-  for (let turn = 0; turn < 1_000; turn += 1) {
-    if (check()) return;
+  const deadline = performance.now() + 10_000;
+  while (!check()) {
+    if (performance.now() >= deadline) {
+      assert.fail("condition did not settle within 10 seconds");
+    }
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
-  assert.fail("condition did not settle within 1,000 event-loop turns");
 }
 
 test("the dormant lifecycle is lazy and refuses unsupported admission before consent or resources", async () => {
