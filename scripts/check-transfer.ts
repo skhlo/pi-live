@@ -57,9 +57,19 @@ function verifyFile(
 
 function main(): void {
   const { values } = parseArgs({
-    options: { "private-evidence": { type: "string" } },
+    options: {
+      root: { type: "string" },
+      "private-evidence": { type: "string" },
+    },
   });
   const repository = realpathSync(root);
+  assert.notEqual(values.root, "", "Snapshot root must not be empty");
+  const snapshot =
+    values.root === undefined ? repository : realpathSync(values.root);
+  assert.ok(
+    lstatSync(snapshot).isDirectory(),
+    "Snapshot root is not a directory",
+  );
   const parsed: unknown = JSON.parse(
     readFileSync(path.join(repository, receiptPath), "utf8"),
   );
@@ -101,7 +111,7 @@ function main(): void {
       assert.ok(text(entry.reason).trim().length > 0);
       adapted += 1;
     }
-    verifyFile(repository, destination, extracted, entry.mode);
+    verifyFile(snapshot, destination, extracted, entry.mode);
   }
   assert.ok(Array.isArray(receipt.research));
   assert.equal(
@@ -134,7 +144,7 @@ function main(): void {
       );
       destinations.add(destination);
       assert.equal(entry.mode, 0o644);
-      verifyFile(repository, destination, expected, entry.mode);
+      verifyFile(snapshot, destination, expected, entry.mode);
       archived += 1;
     } else {
       assert.equal(entry.custody, "private-local");

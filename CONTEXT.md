@@ -33,10 +33,17 @@ microphone against other applications or users.
 An active voice call whose microphone capture and outgoing samples are stopped.
 Speaker playback can continue; muted does not mean silent.
 
+**Releasing call**:
+A call attempt whose voice resources are confirmed stopped but whose ownership
+release has not yet settled. New calls in the same Pi process remain refused
+until it settles, including after reload.
+_Avoid_: Blocked call, active voice call
+
 **Blocked call**:
-A call attempt whose cleanup or ownership release could not be established.
-Its Pi process cannot start another call, even if late cleanup later succeeds.
-_Avoid_: Off, retryable failure
+A call attempt with unconfirmed resource shutdown past its allowed wait,
+uncertain ownership acquisition, or a confirmed ownership failure. Its Pi process
+cannot start another call, even if late resource cleanup later succeeds.
+_Avoid_: Off, retryable failure, releasing call
 
 **Coding delegation**:
 One coding request admitted from voice into the existing Pi session. Stopping
