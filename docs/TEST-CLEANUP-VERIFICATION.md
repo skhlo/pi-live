@@ -95,3 +95,28 @@ receipt. Earlier evidence was preserved.
 Hosted Node 22.19.0 and 26.6.0 validation must be bound to the updated PR head;
 PR #10's earlier inert-package CI results are not evidence for this cleanup.
 Publication and those results are recorded on PR #9 rather than inferred here.
+
+## Subsequent SDK polling correction (test-phase evidence)
+
+The preceding receipt is historical evidence for its original 5,698-line tree;
+its helper hashes and mutation copies do **not** describe the corrected head.
+At `52b02f8decdc909807c0438fd094db438099bc85`, the SDK polling helper
+uses a monotonic ten-second deadline instead of 200 `setImmediate` turns. This
+adds two lines to `scripts/test-support/live-sdk.ts` (516 rather than 514),
+so the seven-file surface is **5,700 lines**, a **370-line (6.1%)** net reduction
+from 6,070. The scenario files remain 3,904 lines. The corrected helper SHA-256
+is `d4e1f8f4254850bb9b5ce212eb55a5d765638de3abc405966130cc5de930ddf9`.
+The other six file hashes remain those in the historical receipt. Runtime
+`src/live.ts` remains byte-identical to the SHA-256 recorded above.
+
+In this isolated worktree, `node --test scripts/pi-live-lifecycle-sdk.test.ts
+scripts/pi-live-ownership.test.ts scripts/pi-live-lifecycle.test.ts` passed at
+default concurrency (181 passed, zero failed/cancelled/skipped; 17.3 seconds).
+The focused `node --test --test-name-pattern='child failures are joined and
+clear their bounded watchdog' scripts/pi-live-ownership.test.ts` also passed
+(one passed, zero failed/cancelled/skipped); it exercises an actual failed child
+read, waits for the child exit and asserts that no child watchdog remains. These
+are focused local test results, not another full-suite or live-call result.
+The original mutation proofs have **not** been repeated against the corrected
+helper bytes and must not be presented as proofs bound to this head. No new
+mutation receipt or hosted CI evidence is claimed here.
