@@ -94,6 +94,33 @@ registration. See [current lifecycle verification](docs/ISSUE-3-VERIFICATION.md)
 and [historical transfer verification](docs/VERIFICATION.md); receipts verify
 only their recorded source and dependency identities.
 
+## Continuous integration
+
+[The portable CI workflow](.github/workflows/ci.yml) runs on pull requests to
+`main`, pushes to `main`, and manual dispatch. Its Ubuntu 24.04 matrix uses
+Node 22.19.0 (the supported minimum) and 26.6.0, with pnpm selected from the
+exact `packageManager` pin. Actions are pinned to commit SHAs; the token has
+read-only repository access and checkout does not persist its credentials.
+
+CI explicitly installs frozen dependencies with scripts and automatic peers
+disabled, then runs source/package checks, tests, typecheck and formatting with
+the same refusal-on-drift policy as local development. Native addons are
+disabled during verification. Full Git history makes the accepted historical
+snapshot available without lazy fetching. Transfer regression cases run within
+`test`; there is no additional standalone `check:transfer` step. The initial
+extraction's tests require exact working-tree bytes. Runtime development must
+replace that positive case with pinned historical-snapshot verification and
+explicit drift rejection, not weaken the receipt or drop coverage; lifecycle
+[PR #9](https://github.com/skhlo/pi-live/pull/9) carries that transition.
+
+There are no dependency caches or artifact uploads. Linux skips the existing
+macOS-arm64-only tests; this workflow does not replace macOS loader/isolation
+receipts. It does not run `check:production`, real provider/audio/native trials,
+or require secrets. Hosted runner tool/dependency downloads are part of CI
+bootstrap, not permission for local installs or real-home adoption. Branch
+protection and required-check policy are separate follow-ups. A configured
+workflow is not passing hosted evidence until its jobs have actually run.
+
 See [the current design](docs/DESIGN.md), [provenance](PROVENANCE.md), and
 [third-party notices](THIRD_PARTY_NOTICES.md). Historical research is archived
 behind [an explicit index](docs/history/extraction/README.md).
