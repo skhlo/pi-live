@@ -35,18 +35,13 @@ import {
   withFixtureWatchdog,
   type Deferred,
 } from "./live-fixture.ts";
+import { waitForCondition } from "./live-wait.ts";
 
-export async function waitUntil(
+export function waitUntil(
   predicate: () => boolean,
   description: string,
 ): Promise<void> {
-  const deadline = performance.now() + 10_000;
-  while (!predicate()) {
-    if (performance.now() >= deadline) {
-      assert.fail(`Timed out waiting for ${description}`);
-    }
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  }
+  return waitForCondition(predicate, `Timed out waiting for ${description}`);
 }
 
 export async function pathExists(target: string): Promise<boolean> {

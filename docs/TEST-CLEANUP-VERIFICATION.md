@@ -124,3 +124,22 @@ probe, and two fresh behavioral mutation failures with all current helpers
 copied. This supersedes the preceding local-only evidence for the corrected
 helper; the earlier receipts remain historical. No hosted CI evidence is
 claimed here.
+
+## Shared polling follow-up (current worktree)
+
+The `0a0d72c` receipt and its mutation copies are historical: they do not
+cover the later lifecycle test edit at `86d4f82` or this follow-up's helper
+bytes. The remaining ownership turn-count limit was subject to the same
+filesystem scheduling failure as the SDK and lifecycle polling loops. All
+three now use a single test-only monotonic ten-second wait, retaining task
+queue polling in lifecycle/SDK and the ownership helper's microtask default
+and explicit task option. No runtime files changed.
+
+Current inventory by `wc -l`: lifecycle 1,670; SDK scenario 878; ownership
+scenario 1,353; child 270; fixture 336; SDK helper 511; ownership helper 669;
+shared wait helper 15. All eight files total 5,702 lines versus baseline
+6,070 (368 fewer, 6.1%); the three scenarios total 3,901 versus 5,761.
+The earlier seven-file figures and mutation results remain historical rather
+than evidence for these bytes. Fresh inventory and both mutations have not
+been repeated in this review phase; the outer validation must bind them to
+its exact gate head before approval. No hosted CI result is claimed here.

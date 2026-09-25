@@ -22,15 +22,10 @@ import {
   ManualClock as TestClock,
   settledStart,
 } from "./test-support/live-fixture.ts";
+import { waitForCondition } from "./test-support/live-wait.ts";
 
-async function eventually(check: () => boolean): Promise<void> {
-  const deadline = performance.now() + 10_000;
-  while (!check()) {
-    if (performance.now() >= deadline) {
-      assert.fail("condition did not settle within 10 seconds");
-    }
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  }
+function eventually(check: () => boolean): Promise<void> {
+  return waitForCondition(check, "condition did not settle within 10 seconds");
 }
 
 test("the dormant lifecycle is lazy and refuses unsupported admission before consent or resources", async () => {

@@ -26,6 +26,7 @@ import {
   ManualClock,
   type FixtureHome,
 } from "./live-fixture.ts";
+import { waitForCondition } from "./live-wait.ts";
 
 export interface OwnershipFixture extends FixtureHome {
   agentA: string;
@@ -75,17 +76,11 @@ export async function createOwnershipFixture(
   };
 }
 
-export async function eventually(
+export function eventually(
   check: () => boolean,
   queue: "microtask" | "task" = "microtask",
 ): Promise<void> {
-  for (let turn = 0; turn < 100; turn += 1) {
-    if (check()) return;
-    if (queue === "task")
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    else await Promise.resolve();
-  }
-  assert.fail(`condition did not settle within 100 ${queue} turns`);
+  return waitForCondition(check, `condition did not settle within 10 seconds`, queue);
 }
 
 export interface ChildExit {
