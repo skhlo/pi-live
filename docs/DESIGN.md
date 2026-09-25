@@ -3,8 +3,10 @@
 ## Status
 
 Pi Live is a standalone, private, setup-only Pi extension. The repository owns
-its development now; dotfiles is only the retained extraction source. No voice
-runtime, installer, host adoption, or publication is part of the transfer.
+its development now; dotfiles is only the retained extraction source. Issue #3
+adds a dormant, fixture-tested call lifecycle, not an enabled voice runtime.
+The shipped factory stays setup-only. No installer, host adoption, or publication
+is implied.
 
 This document separates implemented behavior from accepted decisions and future
 proposals. Historical reports are evidence, not current instructions.
@@ -45,6 +47,38 @@ concurrent changes. The transfer restores deterministic coverage of an observed 
 final file or two concurrent successful writes alone does not prove no-lost-update
 semantics.
 
+## Dormant call lifecycle
+
+`src/live.ts` also contains `createLiveLifecycle` and `bindPiLiveLifecycle`.
+Neither is constructed by the default extension factory. Callers use controls,
+interruptions, generation-owned outgoing/settlement capabilities, and a read-only
+snapshot; ownership records and cleanup decisions stay inside the module.
+
+The approved plan and detailed contract live in
+[`ISSUE-3-PLAN.md`](ISSUE-3-PLAN.md). In brief:
+
+- Fresh consent precedes ownership and resource setup. The connection and call
+  budgets start at entry to acquiring; delegation expiry starts at admission.
+- Ownership uses exclusive mkdir under a certified canonical OS-account home,
+  independent of Pi agent directories. The default certifier refuses. Only
+  fixture homes have been used; #6 owns production certification and recovery.
+- Stop fences delivery before external callbacks. Unconfirmed resource shutdown
+  at the five-second observer deadline becomes process-sticky blocked, retaining
+  the lock. Confirmed shutdown permits asynchronous releasing; pending removal
+  reports release-pending and refuses same-process starts across reload. Only
+  successful final removal reports off. A timeout cannot cancel a deletion.
+- A stopped generation cannot send samples/data, adopt resources, or cancel a
+  later generation's work timer. Mute controls capture, not playback. Voice stop
+  does not call Pi abort or cancel admitted coding work.
+- The dormant Pi binding uses public 0.87.1 lifecycle operations, retires outgoing
+  bindings, and refuses observed conflicts. Discovery is limited to supplied
+  configured-source facts and command provenance, not a complete extension list.
+
+Tests use certified temporary homes, fake resources/clocks, real child contenders
+and real SDK operations. They do not prove native shutdown, transport behavior,
+UI readiness or suitability of this host's actual home. The default factory's
+inert registration and presentation remain unchanged.
+
 ## Accepted decisions
 
 - Pi Live is a standalone extension repository, not a standalone application,
@@ -67,17 +101,20 @@ semantics.
 The historical hardened spec proposes real speech, explicit microphone controls,
 a render-only widget, one idle-only coding delegation, final-only result sharing,
 Pi-owned credentials, bounded transport, and conservative ownership/cleanup.
-It also retains the accepted limitation that Pi 0.87.1 does not report dialogs
-opened through another extension's shortcut UI context. A future live runtime
-would have to disclose that limitation and tell users to stop voice first when
-capture and delivery must stop.
+Pi 0.87.1 reports only the outermost blocking prompt, with delayed notification;
+shortcut-opened dialogs and dialogs nested inside another prompt are not
+individually reported. The user accepted the nested-dialog limitation during
+#3 implementation. The dormant binding narrowly tracks its own confirm
+invocation, refuses ambiguous notification timing, and refuses startup if a
+reported prompt remains open after consent. It cannot immediately cancel for an
+unreported nested prompt. #5 must disclose these limits in the actual consent/UI;
+users needing guaranteed capture/delivery stoppage must stop voice first.
 
-None of that behavior is implemented or authorized by this transfer. In
-particular, historical requirements for microphone ownership, DeviceCheck,
-authentication, signaling, WebRTC, result correlation, lifecycle locks,
-provisioning, rollout, and a native/audio canary remain proposals. Implementing
-them requires separate scope and fresh tests rather than importing archived
-harnesses as production code.
+The dormant lifecycle above is implemented under separate #3 approval. Real
+microphone controls, DeviceCheck, authentication, signaling, WebRTC, result
+correlation, enabling the Pi UI, provisioning, rollout, and a native/audio canary
+remain later work requiring separate scope and fresh evidence. Archived harnesses
+are not production code.
 
 ## Historical statements that are superseded
 
@@ -102,7 +139,8 @@ The standalone commands are local development checks over the checkout or
 disposable fixtures, not a real-home installer. The explicit pnpm policy in the
 root README also applies to script invocation, not only dependency restoration.
 
-[The verification record](VERIFICATION.md) owns fresh results for this layout.
+[The lifecycle verification record](ISSUE-3-VERIFICATION.md) owns the current
+fake-resource results; [transfer verification](VERIFICATION.md) is historical.
 [The extraction receipt](history/extraction/transfer-receipt.json) owns copied
 source identity, adaptations, and historical evidence custody. Those are distinct
 from live-runtime or adoption evidence. No general native/audio/auth/provider

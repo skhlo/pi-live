@@ -1,5 +1,10 @@
 # Standalone transfer verification
 
+This is the historical #2 receipt. Current dormant lifecycle results are recorded
+in [issue #3 verification](ISSUE-3-VERIFICATION.md); later `src/live.ts` development
+is intentionally not byte-identical to this transfer. The receipt and archive
+remain unchanged, and current tests verify a pinned local-Git historical fixture.
+
 This records the local inert-package transfer, not a voice-runtime release or
 adoption decision. The source was dotfiles commit
 `db2c57f13c274d66d79287fda8de177c016f0c02`; old PR #522 and its cancelled
