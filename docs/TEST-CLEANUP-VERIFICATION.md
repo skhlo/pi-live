@@ -19,11 +19,11 @@ retain the production clock; formerly manual-clock cases select it explicitly.
 | `scripts/pi-live-ownership.test.ts`         |     2,070 |     1,353 |
 | `scripts/pi-live-lifecycle-child.ts`        |       309 |       270 |
 | `scripts/test-support/live-fixture.ts`      |         0 |       336 |
-| `scripts/test-support/live-sdk.ts`          |         0 |       514 |
+| `scripts/test-support/live-sdk.ts`          |         0 |       516 |
 | `scripts/test-support/live-ownership.ts`    |         0 |       674 |
-| **Total, including every helper and child** | **6,070** | **5,698** |
+| **Total, including every helper and child** | **6,070** | **5,700** |
 
-The net reduction is **372 lines (6.1%)**. The three scenario entrypoints shrink
+The current net reduction is **370 lines (6.1%)**. The three scenario entrypoints shrink
 from 5,761 to 3,904 lines (32.2%); the difference is not all deletion. Real SDK
 construction, process control and filesystem fault injection still require
 substantial specialized support. The benefit is less repeated arrangement and
@@ -103,8 +103,7 @@ its helper hashes and mutation copies do **not** describe the corrected head.
 At `52b02f8decdc909807c0438fd094db438099bc85`, the SDK polling helper
 uses a monotonic ten-second deadline instead of 200 `setImmediate` turns. This
 adds two lines to `scripts/test-support/live-sdk.ts` (516 rather than 514),
-so the seven-file surface is **5,700 lines**, a **370-line (6.1%)** net reduction
-from 6,070. The scenario files remain 3,904 lines. The corrected helper SHA-256
+producing the current seven-file totals shown above. The scenario files remain 3,904 lines. The corrected helper SHA-256
 is `d4e1f8f4254850bb9b5ce212eb55a5d765638de3abc405966130cc5de930ddf9`.
 The other six file hashes remain those in the historical receipt. Runtime
 `src/live.ts` remains byte-identical to the SHA-256 recorded above.
