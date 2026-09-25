@@ -1,5 +1,9 @@
 # Issue #3 - dormant lifecycle verification
 
+This records the original lifecycle implementation. The later
+[test-cleanup verification](TEST-CLEANUP-VERIFICATION.md) preserves the runtime
+but has new test/helper identities and fresh mutation evidence.
+
 ## Scope and effective revision
 
 This is a local implementation candidate for #3's fake-resource lifecycle and

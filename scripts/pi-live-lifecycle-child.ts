@@ -6,24 +6,18 @@ import {
   createIsolatedLiveCoordination,
   createLiveLifecycle,
   createNodeOwnershipFileSystem,
-  type HomeCertificationObservation,
-  type LiveCapture,
-  type LiveConnection,
   type LiveCoordination,
   type LiveLifecycle,
-  type LiveResourceStart,
   type OwnershipFileHandle,
   type OwnershipFileSystem,
 } from "../src/live.ts";
-
-function settledStart<T>(resource: T): LiveResourceStart<T> {
-  return {
-    result: Promise.resolve(resource),
-    async terminate(dispose) {
-      await dispose(resource);
-    },
-  };
-}
+import {
+  admitted,
+  approvingConsent,
+  certifiedHome,
+  createFakeConnection,
+  createFakeResources,
+} from "./test-support/live-fixture.ts";
 
 function output(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value)}\n`);
@@ -70,37 +64,26 @@ async function waitForCommand(
   });
 }
 
-type ExitBoundaryMode =
-  | "exit-before-mkdir"
-  | "exit-mkdir-submitted"
-  | "exit-mkdir-completed"
-  | "exit-owner-open"
-  | "exit-owner-write"
-  | "exit-owner-sync"
-  | "exit-owner-close"
-  | "exit-owner-verification"
-  | "exit-verified-ownership"
-  | "exit-unlink-complete"
-  | "exit-rmdir-pending"
-  | "exit-rmdir-complete-callback-parked";
+const exitBoundaryModes = [
+  "exit-before-mkdir",
+  "exit-mkdir-submitted",
+  "exit-mkdir-completed",
+  "exit-owner-open",
+  "exit-owner-write",
+  "exit-owner-sync",
+  "exit-owner-close",
+  "exit-owner-verification",
+  "exit-verified-ownership",
+  "exit-unlink-complete",
+  "exit-rmdir-pending",
+  "exit-rmdir-complete-callback-parked",
+] as const;
+type ExitBoundaryMode = (typeof exitBoundaryModes)[number];
 
 function isExitBoundaryMode(
   value: string | undefined,
 ): value is ExitBoundaryMode {
-  return (
-    value === "exit-before-mkdir" ||
-    value === "exit-mkdir-submitted" ||
-    value === "exit-mkdir-completed" ||
-    value === "exit-owner-open" ||
-    value === "exit-owner-write" ||
-    value === "exit-owner-sync" ||
-    value === "exit-owner-close" ||
-    value === "exit-owner-verification" ||
-    value === "exit-verified-ownership" ||
-    value === "exit-unlink-complete" ||
-    value === "exit-rmdir-pending" ||
-    value === "exit-rmdir-complete-callback-parked"
-  );
+  return exitBoundaryModes.some((mode) => mode === value);
 }
 
 function boundaryFileSystem(
@@ -216,13 +199,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const capture: LiveCapture = { stop: async () => undefined };
-  const connection: LiveConnection = {
-    startCapture: () => settledStart(capture),
-    sendSample: () => undefined,
-    closeSession: async () => undefined,
-    close: async () => undefined,
-  };
+  const connection = createFakeConnection();
   const exitMode = isExitBoundaryMode(mode) ? mode : undefined;
   const isolatedCoordination = exitMode
     ? undefined
@@ -250,29 +227,13 @@ async function main(): Promise<void> {
   };
 
   lifecycle = createLiveLifecycle({
-    admission: {
-      check: () => ({
-        tui: true,
-        compatible: true,
-        conflict: false,
-        dialog: false,
-        idle: true,
-        pendingWork: false,
-      }),
-    },
-    consent: { request: async () => true },
+    admission: { check: admitted },
+    consent: approvingConsent,
     home: {
-      accountHome: () => home,
+      ...certifiedHome(home),
       environmentHome: () => process.env.HOME,
-      async certify(observation: HomeCertificationObservation) {
-        return { certified: true, ...observation };
-      },
     },
-    resources: {
-      credentials: async () => undefined,
-      attestation: async () => undefined,
-      connect: () => settledStart(connection),
-    },
+    resources: createFakeResources(connection),
     ownershipFileSystem: exitMode
       ? boundaryFileSystem(exitMode, barrier)
       : undefined,

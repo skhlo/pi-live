@@ -1,135 +1,27 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { test, type TestContext } from "node:test";
+import { stat } from "node:fs/promises";
+import { test } from "node:test";
 
 import {
   createIsolatedLiveCoordination,
   createLiveLifecycle,
   createNodeOwnershipFileSystem,
-  type HomeCertificationObservation,
   type LiveCapture,
-  type LiveClock,
   type LiveConnection,
   type LiveMutationResult,
-  type LiveResourceStart,
-  type LiveTimer,
 } from "../src/live.ts";
-
-function deferred<T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise;
-    reject = rejectPromise;
-  });
-  return { promise, resolve, reject };
-}
-
-class TestClock implements LiveClock {
-  nowValue = 0;
-  onSet?: () => void;
-  onClear?: () => void;
-  readonly timers = new Set<
-    LiveTimer & { due: number; callback: () => void; cancelled: boolean }
-  >();
-
-  now(): number {
-    return this.nowValue;
-  }
-
-  setTimer(callback: () => void, delayMs: number): LiveTimer {
-    const timer = {
-      due: this.nowValue + delayMs,
-      callback,
-      cancelled: false,
-    };
-    this.timers.add(timer);
-    this.onSet?.();
-    return timer;
-  }
-
-  clearTimer(timer: LiveTimer): void {
-    const known = timer as LiveTimer & { cancelled?: boolean };
-    known.cancelled = true;
-    this.timers.delete(
-      timer as LiveTimer & {
-        due: number;
-        callback: () => void;
-        cancelled: boolean;
-      },
-    );
-    this.onClear?.();
-  }
-
-  advance(milliseconds: number): void {
-    this.nowValue += milliseconds;
-    for (;;) {
-      const ready = [...this.timers]
-        .filter((timer) => !timer.cancelled && timer.due <= this.nowValue)
-        .sort((left, right) => left.due - right.due)[0];
-      if (!ready) return;
-      this.timers.delete(ready);
-      ready.callback();
-    }
-  }
-
-  elapseWithoutTimers(milliseconds: number): void {
-    this.nowValue += milliseconds;
-  }
-
-  fireNextWithoutAdvancing(): void {
-    const next = [...this.timers]
-      .filter((timer) => !timer.cancelled)
-      .sort((left, right) => left.due - right.due)[0];
-    assert.ok(next);
-    this.timers.delete(next);
-    next.callback();
-  }
-}
-
-async function fixtureHome(t: TestContext) {
-  const root = await mkdtemp(path.join(tmpdir(), "pi-live-lifecycle-test-"));
-  const home = path.join(root, "home");
-  const stateParent = path.join(home, ".local/state/pi-live");
-  await mkdir(stateParent, { recursive: true, mode: 0o700 });
-  t.after(async () => rm(root, { recursive: true }));
-  return {
-    home,
-    lock: path.join(stateParent, "active.lock"),
-  };
-}
-
-function admitted() {
-  return {
-    tui: true,
-    compatible: true,
-    conflict: false,
-    dialog: false,
-    idle: true,
-    pendingWork: false,
-  };
-}
-
-function certifiedHome(home: string) {
-  return {
-    accountHome: () => home,
-    environmentHome: () => home,
-    async certify(observation: HomeCertificationObservation) {
-      return { certified: true as const, ...observation };
-    },
-  };
-}
-
-function settledStart<T>(resource: T): LiveResourceStart<T> {
-  return {
-    result: Promise.resolve(resource),
-    async terminate(dispose) {
-      await dispose(resource);
-    },
-  };
-}
+import {
+  admitted,
+  approvingConsent,
+  certifiedHome,
+  createFakeCapture,
+  createFakeConnection,
+  createFakeResources,
+  createLiveFixture,
+  deferred,
+  ManualClock as TestClock,
+  settledStart,
+} from "./test-support/live-fixture.ts";
 
 async function eventually(check: () => boolean): Promise<void> {
   for (let turn = 0; turn < 1_000; turn += 1) {
@@ -305,24 +197,12 @@ test("consent is single-flight, immediately cancellable, and late approval canno
 
 test("acquiring and connecting expose the complete pending-state command rows", async (t) => {
   await t.test("acquiring", async (t) => {
-    const fixture = await fixtureHome(t);
-    const clock = new TestClock();
+    const fixture = await createLiveFixture(t);
     const mkdirEntered = deferred<void>();
     const allowMkdir = deferred<void>();
     const baseFileSystem = createNodeOwnershipFileSystem();
-    const capture: LiveCapture = { stop: async () => undefined };
-    const connection: LiveConnection = {
-      startCapture: () => settledStart(capture),
-      sendSample: () => undefined,
-      closeSession: async () => undefined,
-      close: async () => undefined,
-    };
-    const lifecycle = createLiveLifecycle({
-      admission: { check: admitted },
-      consent: { request: async () => true },
-      home: certifiedHome(fixture.home),
-      clock,
-      coordination: createIsolatedLiveCoordination(),
+    const lifecycle = fixture.createLifecycle(approvingConsent, {
+      clock: fixture.clock,
       ownershipFileSystem: {
         ...baseFileSystem,
         async mkdirExclusive(target, mode) {
@@ -331,12 +211,8 @@ test("acquiring and connecting expose the complete pending-state command rows", 
           await baseFileSystem.mkdirExclusive(target, mode);
         },
       },
-      resources: {
-        credentials: async () => undefined,
-        attestation: async () => undefined,
-        connect: () => settledStart(connection),
-      },
     });
+    fixture.beforeRemoval(() => allowMkdir.resolve());
     const starting = lifecycle.start();
     await mkdirEntered.promise;
     assert.deepEqual(await lifecycle.start(), {
@@ -364,30 +240,21 @@ test("acquiring and connecting expose the complete pending-state command rows", 
   });
 
   await t.test("connecting", async (t) => {
-    const fixture = await fixtureHome(t);
-    const clock = new TestClock();
+    const fixture = await createLiveFixture(t);
     const connectEntered = deferred<void>();
     const connectionResult = deferred<LiveConnection>();
     let terminateCalls = 0;
-    const lifecycle = createLiveLifecycle({
-      admission: { check: admitted },
-      consent: { request: async () => true },
-      home: certifiedHome(fixture.home),
-      clock,
-      coordination: createIsolatedLiveCoordination(),
-      resources: {
-        credentials: async () => undefined,
-        attestation: async () => undefined,
-        connect() {
-          connectEntered.resolve();
-          return {
-            result: connectionResult.promise,
-            async terminate() {
-              terminateCalls += 1;
-            },
-          };
+    fixture.resources.connect = () => {
+      connectEntered.resolve();
+      return {
+        result: connectionResult.promise,
+        async terminate() {
+          terminateCalls += 1;
         },
-      },
+      };
+    };
+    const lifecycle = fixture.createLifecycle(approvingConsent, {
+      clock: fixture.clock,
     });
     const starting = lifecycle.start();
     await connectEntered.promise;
@@ -417,27 +284,15 @@ test("CORE: in-flight consent rechecks shared pending, blocked, and pooling stat
   await t.test(
     "pending release is projected before home or lock effects",
     async (t) => {
-      const fixture = await fixtureHome(t);
-      const coordination = createIsolatedLiveCoordination();
-      const clock = new TestClock();
+      const fixture = await createLiveFixture(t);
       const baseFileSystem = createNodeOwnershipFileSystem();
       const rmdirCompleted = deferred<void>();
       const allowRmdirCallback = deferred<void>();
       const approval = deferred<boolean>();
       const consentEntered = deferred<void>();
       let contenderHomeCalls = 0;
-      const connection: LiveConnection = {
-        startCapture: () => settledStart({ stop: async () => undefined }),
-        sendSample: () => undefined,
-        closeSession: async () => undefined,
-        close: async () => undefined,
-      };
-      const owner = createLiveLifecycle({
-        admission: { check: admitted },
-        consent: { request: async () => true },
-        home: certifiedHome(fixture.home),
-        coordination,
-        clock,
+      const owner = fixture.createLifecycle(approvingConsent, {
+        clock: fixture.clock,
         ownershipFileSystem: {
           ...baseFileSystem,
           async rmdir(target) {
@@ -446,34 +301,28 @@ test("CORE: in-flight consent rechecks shared pending, blocked, and pooling stat
             await allowRmdirCallback.promise;
           },
         },
-        resources: {
-          credentials: async () => undefined,
-          attestation: async () => undefined,
-          connect: () => settledStart(connection),
-        },
       });
-      const contender = createLiveLifecycle({
-        admission: { check: admitted },
-        consent: {
+      const contender = fixture.createLifecycle(
+        {
           request() {
             consentEntered.resolve();
             return approval.promise;
           },
         },
-        home: {
-          ...certifiedHome(fixture.home),
-          accountHome() {
-            contenderHomeCalls += 1;
-            return fixture.home;
+        {
+          clock: fixture.clock,
+          home: {
+            ...certifiedHome(fixture.home),
+            accountHome() {
+              contenderHomeCalls += 1;
+              return fixture.home;
+            },
           },
         },
-        coordination,
-        clock,
-        resources: {
-          credentials: async () => undefined,
-          attestation: async () => undefined,
-          connect: () => settledStart(connection),
-        },
+      );
+      fixture.beforeRemoval(() => {
+        approval.resolve(false);
+        allowRmdirCallback.resolve();
       });
 
       assert.equal((await owner.start()).kind, "started");
@@ -481,7 +330,7 @@ test("CORE: in-flight consent rechecks shared pending, blocked, and pooling stat
       await consentEntered.promise;
       const ownerStop = owner.stop();
       await rmdirCompleted.promise;
-      assert.equal(coordination.ownership.kind, "pending");
+      assert.equal(fixture.coordination.ownership.kind, "pending");
 
       approval.resolve(true);
       assert.equal((await contenderStart).kind, "cancelled");
@@ -499,49 +348,39 @@ test("CORE: in-flight consent rechecks shared pending, blocked, and pooling stat
     await t.test(
       `${sharedChange} invalidates late consent without effects`,
       async (t) => {
-        const fixture = await fixtureHome(t);
-        const coordination = createIsolatedLiveCoordination();
-        const clock = new TestClock();
+        const fixture = await createLiveFixture(t);
         const approval = deferred<boolean>();
         const consentEntered = deferred<void>();
         let homeCalls = 0;
-        const contender = createLiveLifecycle({
-          admission: { check: admitted },
-          consent: {
+        const contender = fixture.createLifecycle(
+          {
             request() {
               consentEntered.resolve();
               return approval.promise;
             },
           },
-          home: {
-            ...certifiedHome(fixture.home),
-            accountHome() {
-              homeCalls += 1;
-              return fixture.home;
+          {
+            clock: fixture.clock,
+            home: {
+              ...certifiedHome(fixture.home),
+              accountHome() {
+                homeCalls += 1;
+                return fixture.home;
+              },
             },
           },
-          coordination,
-          clock,
-          resources: {
-            credentials: async () => undefined,
-            attestation: async () => undefined,
-            connect: () =>
-              settledStart({
-                startCapture: () =>
-                  settledStart({ stop: async () => undefined }),
-                sendSample: () => undefined,
-                closeSession: async () => undefined,
-                close: async () => undefined,
-              }),
-          },
-        });
+        );
+        fixture.beforeRemoval(() => approval.resolve(false));
 
         const starting = contender.start();
         await consentEntered.promise;
         if (sharedChange === "blocked") {
-          coordination.ownership = { kind: "blocked" };
+          fixture.coordination.ownership = { kind: "blocked" };
         } else {
-          const observer = createLiveLifecycle({ coordination, clock });
+          const observer = createLiveLifecycle({
+            coordination: fixture.coordination,
+            clock: fixture.clock,
+          });
           assert.deepEqual(await observer.interrupt("pooling"), {
             status: "off",
           });
@@ -561,26 +400,8 @@ test("CORE: in-flight consent rechecks shared pending, blocked, and pooling stat
 });
 
 test("pooling interruption stops the current attempt and permanently refuses later starts without inventing blocked", async (t) => {
-  const fixture = await fixtureHome(t);
-  const coordination = createIsolatedLiveCoordination();
-  const capture: LiveCapture = { stop: async () => undefined };
-  const connection: LiveConnection = {
-    startCapture: () => settledStart(capture),
-    sendSample: () => undefined,
-    closeSession: async () => undefined,
-    close: async () => undefined,
-  };
-  const lifecycle = createLiveLifecycle({
-    admission: { check: admitted },
-    consent: { request: async () => true },
-    home: certifiedHome(fixture.home),
-    resources: {
-      credentials: async () => undefined,
-      attestation: async () => undefined,
-      connect: () => settledStart(connection),
-    },
-    coordination,
-  });
+  const fixture = await createLiveFixture(t);
+  const lifecycle = fixture.createLifecycle(approvingConsent);
   assert.equal((await lifecycle.start()).kind, "started");
   assert.deepEqual(await lifecycle.start(), {
     kind: "existing",
@@ -598,7 +419,7 @@ test("pooling interruption stops the current attempt and permanently refuses lat
   });
   assert.deepEqual(await lifecycle.interrupt("pooling"), { status: "off" });
   assert.equal(lifecycle.snapshot().state, "off");
-  assert.equal(coordination.poolingRefused, true);
+  assert.equal(fixture.coordination.poolingRefused, true);
   await assert.rejects(stat(fixture.lock), { code: "ENOENT" });
   assert.deepEqual(await lifecycle.start(), {
     kind: "refused",
@@ -665,12 +486,10 @@ test("pooling timing before active uses exact terminal diagnostics and leaves no
   });
 
   await t.test("acquiring", async (t) => {
-    const fixture = await fixtureHome(t);
+    const fixture = await createLiveFixture(t);
     const certificationEntered = deferred<void>();
     const allowCertification = deferred<void>();
-    const lifecycle = createLiveLifecycle({
-      admission: { check: admitted },
-      consent: { request: async () => true },
+    const lifecycle = fixture.createLifecycle(approvingConsent, {
       home: {
         ...certifiedHome(fixture.home),
         async certify(observation) {
@@ -679,8 +498,8 @@ test("pooling timing before active uses exact terminal diagnostics and leaves no
           return { certified: true as const, ...observation };
         },
       },
-      coordination: createIsolatedLiveCoordination(),
     });
+    fixture.beforeRemoval(() => allowCertification.resolve());
     const starting = lifecycle.start();
     await certificationEntered.promise;
     assert.deepEqual(await lifecycle.interrupt("pooling"), { status: "off" });
@@ -695,28 +514,19 @@ test("pooling timing before active uses exact terminal diagnostics and leaves no
   });
 
   await t.test("connecting", async (t) => {
-    const fixture = await fixtureHome(t);
+    const fixture = await createLiveFixture(t);
     const connectEntered = deferred<void>();
     let terminateCalls = 0;
-    const lifecycle = createLiveLifecycle({
-      admission: { check: admitted },
-      consent: { request: async () => true },
-      home: certifiedHome(fixture.home),
-      coordination: createIsolatedLiveCoordination(),
-      resources: {
-        credentials: async () => undefined,
-        attestation: async () => undefined,
-        connect() {
-          connectEntered.resolve();
-          return {
-            result: new Promise<LiveConnection>(() => undefined),
-            async terminate() {
-              terminateCalls += 1;
-            },
-          };
+    fixture.resources.connect = () => {
+      connectEntered.resolve();
+      return {
+        result: new Promise<LiveConnection>(() => undefined),
+        async terminate() {
+          terminateCalls += 1;
         },
-      },
-    });
+      };
+    };
+    const lifecycle = fixture.createLifecycle(approvingConsent);
     const starting = lifecycle.start();
     await connectEntered.promise;
     assert.deepEqual(await lifecycle.interrupt("pooling"), { status: "off" });
@@ -731,30 +541,15 @@ test("pooling timing before active uses exact terminal diagnostics and leaves no
   });
 
   await t.test("stopping", async (t) => {
-    const fixture = await fixtureHome(t);
+    const fixture = await createLiveFixture(t);
     const closeEntered = deferred<void>();
     const allowClose = deferred<void>();
-    const capture: LiveCapture = { stop: async () => undefined };
-    const lifecycle = createLiveLifecycle({
-      admission: { check: admitted },
-      consent: { request: async () => true },
-      home: certifiedHome(fixture.home),
-      coordination: createIsolatedLiveCoordination(),
-      resources: {
-        credentials: async () => undefined,
-        attestation: async () => undefined,
-        connect: () =>
-          settledStart({
-            startCapture: () => settledStart(capture),
-            sendSample: () => undefined,
-            closeSession: async () => undefined,
-            async close() {
-              closeEntered.resolve();
-              await allowClose.promise;
-            },
-          }),
-      },
-    });
+    fixture.connection.close = async () => {
+      closeEntered.resolve();
+      await allowClose.promise;
+    };
+    const lifecycle = fixture.createLifecycle(approvingConsent);
+    fixture.beforeRemoval(() => allowClose.resolve());
     assert.equal((await lifecycle.start()).kind, "started");
     const stopping = lifecycle.stop();
     await closeEntered.promise;
@@ -772,31 +567,17 @@ test("pooling timing before active uses exact terminal diagnostics and leaves no
 });
 
 test("data-only cancellation releases ownership, while an unquiet resource start becomes process-sticky blocked", async (t) => {
-  const fixture = await fixtureHome(t);
-  const clock = new TestClock();
+  const fixture = await createLiveFixture(t);
   const credentialEntered = deferred<void>();
   const neverData = deferred<void>();
-  const unusedCapture: LiveCapture = { stop: async () => undefined };
-  const unusedConnection: LiveConnection = {
-    startCapture: () => settledStart(unusedCapture),
-    sendSample: () => undefined,
-    closeSession: async () => undefined,
-    close: async () => undefined,
-  };
-  const dataOnly = createLiveLifecycle({
-    admission: { check: admitted },
-    consent: { request: async () => true },
-    home: certifiedHome(fixture.home),
-    clock,
-    coordination: createIsolatedLiveCoordination(),
-    resources: {
+  const dataOnly = fixture.createLifecycle(approvingConsent, {
+    clock: fixture.clock,
+    resources: createFakeResources(fixture.connection, {
       credentials() {
         credentialEntered.resolve();
         return neverData.promise;
       },
-      attestation: async () => undefined,
-      connect: () => settledStart(unusedConnection),
-    },
+    }),
   });
   const dataStarting = dataOnly.start();
   await credentialEntered.promise;
@@ -809,15 +590,10 @@ test("data-only cancellation releases ownership, while an unquiet resource start
   const connectEntered = deferred<void>();
   const allowTermination = deferred<void>();
   const neverConnection = deferred<LiveConnection>();
-  const resourceBearing = createLiveLifecycle({
-    admission: { check: admitted },
-    consent: { request: async () => true },
-    home: certifiedHome(fixture.home),
-    clock,
+  const resourceBearing = fixture.createLifecycle(approvingConsent, {
+    clock: fixture.clock,
     coordination: createIsolatedLiveCoordination(),
-    resources: {
-      credentials: async () => undefined,
-      attestation: async () => undefined,
+    resources: createFakeResources(fixture.connection, {
       connect() {
         connectEntered.resolve();
         return {
@@ -827,13 +603,14 @@ test("data-only cancellation releases ownership, while an unquiet resource start
           },
         };
       },
-    },
+    }),
   });
+  fixture.beforeRemoval(() => allowTermination.resolve());
   const resourceStarting = resourceBearing.start();
   await connectEntered.promise;
   assert.equal(resourceBearing.snapshot().state, "connecting");
   const resourceStopping = resourceBearing.stop();
-  clock.advance(5_000);
+  fixture.clock.advance(5_000);
   assert.deepEqual(await resourceStopping, { status: "blocked" });
   assert.deepEqual(resourceBearing.snapshot(), {
     state: "blocked",
@@ -856,16 +633,9 @@ test("data-only cancellation releases ownership, while an unquiet resource start
 test("preparation invocation and settlement are fenced before the next startup effect", async (t) => {
   for (const fenceAt of ["invoke", "settlement"] as const) {
     await t.test(fenceAt, async (t) => {
-      const fixture = await fixtureHome(t);
+      const fixture = await createLiveFixture(t);
       const effects: string[] = [];
-      const clock = new TestClock();
-      const capture: LiveCapture = { stop: async () => undefined };
-      const connection: LiveConnection = {
-        startCapture: () => settledStart(capture),
-        sendSample: () => undefined,
-        closeSession: async () => undefined,
-        close: async () => undefined,
-      };
+      const clock = fixture.clock;
       let lifecycle!: ReturnType<typeof createLiveLifecycle>;
       let armed = true;
       let scheduled = 0;
@@ -879,26 +649,18 @@ test("preparation invocation and settlement are fenced before the next startup e
       };
       if (fenceAt === "invoke") clock.onSet = fence;
       else clock.onClear = fence;
-      lifecycle = createLiveLifecycle({
-        admission: { check: admitted },
-        consent: { request: async () => true },
-        home: certifiedHome(fixture.home),
-        clock,
-        coordination: createIsolatedLiveCoordination(),
-        resources: {
-          credentials() {
-            effects.push("credentials");
-            return Promise.resolve();
-          },
-          attestation() {
-            effects.push("attestation");
-            return Promise.resolve();
-          },
-          connect() {
-            effects.push("connect");
-            return settledStart(connection);
-          },
-        },
+      fixture.resources.credentials = async () => {
+        effects.push("credentials");
+      };
+      fixture.resources.attestation = async () => {
+        effects.push("attestation");
+      };
+      fixture.resources.connect = () => {
+        effects.push("connect");
+        return settledStart(fixture.connection);
+      };
+      lifecycle = fixture.createLifecycle(approvingConsent, {
+        clock: fixture.clock,
       });
 
       const starting = lifecycle.start();
@@ -913,37 +675,27 @@ test("preparation invocation and settlement are fenced before the next startup e
 });
 
 test("connection construction is tracked before synchronous stop reentrancy", async (t) => {
-  const fixture = await fixtureHome(t);
+  const fixture = await createLiveFixture(t);
   const effects: string[] = [];
   let lifecycle!: ReturnType<typeof createLiveLifecycle>;
-  const connection: LiveConnection = {
+  const connection = createFakeConnection({
     startCapture() {
       effects.push("capture-started");
-      return settledStart({ stop: async () => undefined });
+      return settledStart(fixture.capture);
     },
-    sendSample: () => undefined,
     closeSession: async () => {
       effects.push("semantic-close");
     },
     close: async () => {
       effects.push("connection-close");
     },
-  };
-  lifecycle = createLiveLifecycle({
-    admission: { check: admitted },
-    consent: { request: async () => true },
-    home: certifiedHome(fixture.home),
-    coordination: createIsolatedLiveCoordination(),
-    resources: {
-      credentials: async () => undefined,
-      attestation: async () => undefined,
-      connect() {
-        effects.push("connection-constructor");
-        void lifecycle.stop();
-        return settledStart(connection);
-      },
-    },
   });
+  fixture.resources.connect = () => {
+    effects.push("connection-constructor");
+    void lifecycle.stop();
+    return settledStart(connection);
+  };
+  lifecycle = fixture.createLifecycle(approvingConsent);
 
   assert.equal((await lifecycle.start()).kind, "cancelled");
   await eventually(() => lifecycle.snapshot().state === "off");
@@ -952,48 +704,41 @@ test("connection construction is tracked before synchronous stop reentrancy", as
 });
 
 test("CORE: synchronous abort-listener stop reentrancy shares one published cleanup", async (t) => {
-  const fixture = await fixtureHome(t);
-  const clock = new TestClock();
+  const fixture = await createLiveFixture(t);
   let lifecycle!: ReturnType<typeof createLiveLifecycle>;
   let nestedStop:
     Promise<{ status: "off" | "blocked" | "release-pending" }> | undefined;
   let semanticCloseCalls = 0;
   let captureStopCalls = 0;
   let connectionCloseCalls = 0;
-  lifecycle = createLiveLifecycle({
-    admission: { check: admitted },
-    consent: { request: async () => true },
-    home: certifiedHome(fixture.home),
-    coordination: createIsolatedLiveCoordination(),
-    clock,
-    resources: {
-      credentials: async () => undefined,
-      attestation: async () => undefined,
-      connect({ signal }) {
-        signal.addEventListener(
-          "abort",
-          () => {
-            nestedStop = lifecycle.stop();
-          },
-          { once: true },
-        );
-        return settledStart({
-          startCapture: () =>
-            settledStart({
-              async stop() {
-                captureStopCalls += 1;
-              },
-            }),
-          sendSample: () => undefined,
+  fixture.resources.connect = ({ signal }) => {
+    signal.addEventListener(
+      "abort",
+      () => {
+        nestedStop = lifecycle.stop();
+      },
+      { once: true },
+    );
+    return settledStart(
+      createFakeConnection(
+        {
           async closeSession() {
             semanticCloseCalls += 1;
           },
           async close() {
             connectionCloseCalls += 1;
           },
-        });
-      },
-    },
+        },
+        createFakeCapture({
+          async stop() {
+            captureStopCalls += 1;
+          },
+        }),
+      ),
+    );
+  };
+  lifecycle = fixture.createLifecycle(approvingConsent, {
+    clock: fixture.clock,
   });
 
   assert.equal((await lifecycle.start()).kind, "started");
@@ -1020,15 +765,15 @@ test("CORE: synchronous abort-listener stop reentrancy shares one published clea
 });
 
 test("resource construction is tracked before a synchronous callback can reenter stop", async (t) => {
-  const fixture = await fixtureHome(t);
+  const fixture = await createLiveFixture(t);
   const effects: string[] = [];
   let lifecycle!: ReturnType<typeof createLiveLifecycle>;
-  const capture: LiveCapture = {
+  const capture = createFakeCapture({
     async stop() {
       effects.push("capture-stopped");
     },
-  };
-  const connection: LiveConnection = {
+  });
+  const connection = createFakeConnection({
     startCapture(callback) {
       callback([1]);
       return settledStart(capture);
@@ -1043,18 +788,9 @@ test("resource construction is tracked before a synchronous callback can reenter
     async close() {
       effects.push("connection-closed");
     },
-  };
-  lifecycle = createLiveLifecycle({
-    admission: { check: admitted },
-    consent: { request: async () => true },
-    home: certifiedHome(fixture.home),
-    resources: {
-      credentials: async () => undefined,
-      attestation: async () => undefined,
-      connect: () => settledStart(connection),
-    },
-    coordination: createIsolatedLiveCoordination(),
   });
+  fixture.resources.connect = () => settledStart(connection);
+  lifecycle = fixture.createLifecycle(approvingConsent);
 
   assert.equal((await lifecycle.start()).kind, "cancelled");
   await eventually(() => lifecycle.snapshot().state === "off");
@@ -1068,33 +804,19 @@ test("resource construction is tracked before a synchronous callback can reenter
 });
 
 test("a resource constructor throw remains uncertain while known resources still close once", async (t) => {
-  const fixture = await fixtureHome(t);
+  const fixture = await createLiveFixture(t);
   const effects: string[] = [];
-  const coordination = createIsolatedLiveCoordination();
-  const lifecycle = createLiveLifecycle({
-    admission: { check: admitted },
-    consent: { request: async () => true },
-    home: certifiedHome(fixture.home),
-    coordination,
-    resources: {
-      credentials: async () => undefined,
-      attestation: async () => undefined,
-      connect: () =>
-        settledStart({
-          startCapture() {
-            effects.push("capture-constructor");
-            throw new Error("opaque capture constructor failed");
-          },
-          sendSample: () => undefined,
-          closeSession: async () => {
-            effects.push("semantic-close");
-          },
-          close: async () => {
-            effects.push("connection-close");
-          },
-        }),
-    },
-  });
+  fixture.connection.startCapture = () => {
+    effects.push("capture-constructor");
+    throw new Error("opaque capture constructor failed");
+  };
+  fixture.connection.closeSession = async () => {
+    effects.push("semantic-close");
+  };
+  fixture.connection.close = async () => {
+    effects.push("connection-close");
+  };
+  const lifecycle = fixture.createLifecycle(approvingConsent);
 
   assert.equal((await lifecycle.start()).kind, "cancelled");
   await eventually(() =>
@@ -1130,7 +852,7 @@ test("a resource constructor throw remains uncertain while known resources still
   assert.deepEqual(await lifecycle.interrupt("pooling"), {
     status: "blocked",
   });
-  assert.equal(coordination.poolingRefused, true);
+  assert.equal(fixture.coordination.poolingRefused, true);
   assert.equal((await stat(fixture.lock)).isDirectory(), true);
   assert.deepEqual(await lifecycle.stop(), { status: "blocked" });
   assert.deepEqual(await lifecycle.start(), {
@@ -1145,35 +867,19 @@ test("a resource constructor throw remains uncertain while known resources still
 });
 
 test("a synchronous capture stop failure blocks after other known shutdown starts", async (t) => {
-  const fixture = await fixtureHome(t);
+  const fixture = await createLiveFixture(t);
   const effects: string[] = [];
-  const lifecycle = createLiveLifecycle({
-    admission: { check: admitted },
-    consent: { request: async () => true },
-    home: certifiedHome(fixture.home),
-    coordination: createIsolatedLiveCoordination(),
-    resources: {
-      credentials: async () => undefined,
-      attestation: async () => undefined,
-      connect: () =>
-        settledStart({
-          startCapture: () =>
-            settledStart({
-              stop(): Promise<void> {
-                effects.push("capture-stop");
-                throw new Error("synchronous capture stop failure");
-              },
-            }),
-          sendSample: () => undefined,
-          closeSession: async () => {
-            effects.push("semantic-close");
-          },
-          close: async () => {
-            effects.push("connection-close");
-          },
-        }),
-    },
-  });
+  fixture.capture.stop = () => {
+    effects.push("capture-stop");
+    throw new Error("synchronous capture stop failure");
+  };
+  fixture.connection.closeSession = async () => {
+    effects.push("semantic-close");
+  };
+  fixture.connection.close = async () => {
+    effects.push("connection-close");
+  };
+  const lifecycle = fixture.createLifecycle(approvingConsent);
 
   assert.equal((await lifecycle.start()).kind, "started");
   assert.deepEqual(await lifecycle.stop(), { status: "blocked" });
@@ -1186,48 +892,35 @@ test("a synchronous capture stop failure blocks after other known shutdown start
 });
 
 test("cleanup starts independent shutdowns promptly for an uncertain resource start", async (t) => {
-  const fixture = await fixtureHome(t);
-  const clock = new TestClock();
+  const fixture = await createLiveFixture(t);
   const captureStartEntered = deferred<void>();
   const terminateEntered = deferred<void>();
   const allowTerminate = deferred<void>();
   const closeEntered = deferred<void>();
   const effects: string[] = [];
-  const lifecycle = createLiveLifecycle({
-    admission: { check: admitted },
-    consent: { request: async () => true },
-    home: certifiedHome(fixture.home),
-    coordination: createIsolatedLiveCoordination(),
-    clock,
-    resources: {
-      credentials: async () => undefined,
-      attestation: async () => undefined,
-      connect: () =>
-        settledStart({
-          startCapture() {
-            captureStartEntered.resolve();
-            return {
-              result: new Promise<LiveCapture>(() => undefined),
-              async terminate() {
-                effects.push("capture-terminate");
-                terminateEntered.resolve();
-                await allowTerminate.promise;
-                throw new Error("capture shutdown remained uncertain");
-              },
-            };
-          },
-          sendSample: () => undefined,
-          closeSession: async () => {
-            effects.push("semantic-close");
-          },
-          close() {
-            effects.push("connection-close");
-            closeEntered.resolve();
-            return Promise.resolve();
-          },
-        }),
-    },
+  fixture.connection.startCapture = () => {
+    captureStartEntered.resolve();
+    return {
+      result: new Promise<LiveCapture>(() => undefined),
+      async terminate() {
+        effects.push("capture-terminate");
+        terminateEntered.resolve();
+        await allowTerminate.promise;
+        throw new Error("capture shutdown remained uncertain");
+      },
+    };
+  };
+  fixture.connection.closeSession = async () => {
+    effects.push("semantic-close");
+  };
+  fixture.connection.close = async () => {
+    effects.push("connection-close");
+    closeEntered.resolve();
+  };
+  const lifecycle = fixture.createLifecycle(approvingConsent, {
+    clock: fixture.clock,
   });
+  fixture.beforeRemoval(() => allowTerminate.resolve());
 
   const starting = lifecycle.start();
   await captureStartEntered.promise;
@@ -1238,7 +931,7 @@ test("cleanup starts independent shutdowns promptly for an uncertain resource st
     new Set(effects.slice(1)),
     new Set(["capture-terminate", "connection-close"]),
   );
-  clock.advance(5_000);
+  fixture.clock.advance(5_000);
   assert.deepEqual(await stopping, { status: "blocked" });
   allowTerminate.resolve();
   assert.equal((await starting).kind, "cancelled");
@@ -1247,38 +940,25 @@ test("cleanup starts independent shutdowns promptly for an uncertain resource st
 });
 
 test("the one semantic close receives the shared remaining deadline and cancellation", async (t) => {
-  const fixture = await fixtureHome(t);
-  const clock = new TestClock();
+  const fixture = await createLiveFixture(t);
+  const clock = fixture.clock;
   const allowConnectionClose = deferred<void>();
   const closeRequests: Array<{
     deadline: number;
     remainingMs: number;
     signal: AbortSignal;
   }> = [];
-  const capture: LiveCapture = { stop: async () => undefined };
-  const lifecycle = createLiveLifecycle({
-    admission: { check: admitted },
-    consent: { request: async () => true },
-    home: certifiedHome(fixture.home),
-    coordination: createIsolatedLiveCoordination(),
-    clock,
-    resources: {
-      credentials: async () => undefined,
-      attestation: async () => undefined,
-      connect: () =>
-        settledStart({
-          startCapture: () => settledStart(capture),
-          sendSample: () => undefined,
-          closeSession(request) {
-            closeRequests.push(request);
-            return new Promise<void>(() => undefined);
-          },
-          async close() {
-            await allowConnectionClose.promise;
-          },
-        }),
-    },
+  fixture.connection.closeSession = (request) => {
+    closeRequests.push(request);
+    return new Promise<void>(() => undefined);
+  };
+  fixture.connection.close = async () => {
+    await allowConnectionClose.promise;
+  };
+  const lifecycle = fixture.createLifecycle(approvingConsent, {
+    clock: fixture.clock,
   });
+  fixture.beforeRemoval(() => allowConnectionClose.resolve());
 
   assert.equal((await lifecycle.start()).kind, "started");
   clock.advance(125);
@@ -1305,19 +985,17 @@ test("the one semantic close receives the shared remaining deadline and cancella
 });
 
 test("quiescence one millisecond before the stop deadline may begin release", async (t) => {
-  const fixture = await fixtureHome(t);
-  const clock = new TestClock();
+  const fixture = await createLiveFixture(t);
   const closeEntered = deferred<void>();
   const allowClose = deferred<void>();
   const baseFileSystem = createNodeOwnershipFileSystem();
   let unlinkCalls = 0;
-  const capture: LiveCapture = { stop: async () => undefined };
-  const lifecycle = createLiveLifecycle({
-    admission: { check: admitted },
-    consent: { request: async () => true },
-    home: certifiedHome(fixture.home),
-    coordination: createIsolatedLiveCoordination(),
-    clock,
+  fixture.connection.close = async () => {
+    closeEntered.resolve();
+    await allowClose.promise;
+  };
+  const lifecycle = fixture.createLifecycle(approvingConsent, {
+    clock: fixture.clock,
     ownershipFileSystem: {
       ...baseFileSystem,
       async unlink(target) {
@@ -1325,26 +1003,13 @@ test("quiescence one millisecond before the stop deadline may begin release", as
         await baseFileSystem.unlink(target);
       },
     },
-    resources: {
-      credentials: async () => undefined,
-      attestation: async () => undefined,
-      connect: () =>
-        settledStart({
-          startCapture: () => settledStart(capture),
-          sendSample: () => undefined,
-          closeSession: async () => undefined,
-          async close() {
-            closeEntered.resolve();
-            await allowClose.promise;
-          },
-        }),
-    },
   });
+  fixture.beforeRemoval(() => allowClose.resolve());
 
   assert.equal((await lifecycle.start()).kind, "started");
   const stopping = lifecycle.stop();
   await closeEntered.promise;
-  clock.advance(4_999);
+  fixture.clock.advance(4_999);
   allowClose.resolve();
   assert.deepEqual(await stopping, { status: "off" });
   assert.equal(unlinkCalls, 1);
@@ -1352,41 +1017,26 @@ test("quiescence one millisecond before the stop deadline may begin release", as
 });
 
 test("quiescence at the exact stop deadline blocks and prohibits every release operation", async (t) => {
-  const fixture = await fixtureHome(t);
-  const clock = new TestClock();
+  const fixture = await createLiveFixture(t);
   const closeEntered = deferred<void>();
   const allowClose = deferred<void>();
   const baseFileSystem = createNodeOwnershipFileSystem();
   let unlinkCalls = 0;
-  const capture: LiveCapture = { stop: async () => undefined };
-  const connection: LiveConnection = {
-    startCapture: () => settledStart(capture),
-    sendSample: () => undefined,
-    closeSession: async () => undefined,
-    async close() {
-      closeEntered.resolve();
-      await allowClose.promise;
-    },
+  fixture.connection.close = async () => {
+    closeEntered.resolve();
+    await allowClose.promise;
   };
-  const lifecycle = createLiveLifecycle({
-    admission: { check: admitted },
-    consent: { request: async () => true },
-    home: certifiedHome(fixture.home),
-    resources: {
-      credentials: async () => undefined,
-      attestation: async () => undefined,
-      connect: () => settledStart(connection),
-    },
+  const lifecycle = fixture.createLifecycle(approvingConsent, {
+    clock: fixture.clock,
     ownershipFileSystem: {
       ...baseFileSystem,
-      async unlink(target: string) {
+      async unlink(target) {
         unlinkCalls += 1;
         await baseFileSystem.unlink(target);
       },
     },
-    coordination: createIsolatedLiveCoordination(),
-    clock,
   });
+  fixture.beforeRemoval(() => allowClose.resolve());
   assert.equal((await lifecycle.start()).kind, "started");
   const stopping = lifecycle.stop();
   await closeEntered.promise;
@@ -1411,7 +1061,7 @@ test("quiescence at the exact stop deadline blocks and prohibits every release o
     diagnostic: "busy",
   });
   const joined = lifecycle.stop();
-  clock.advance(5_000);
+  fixture.clock.advance(5_000);
   assert.deepEqual(await stopping, { status: "blocked" });
   assert.deepEqual(await joined, { status: "blocked" });
   assert.equal(unlinkCalls, 0);
@@ -1422,51 +1072,44 @@ test("quiescence at the exact stop deadline blocks and prohibits every release o
 });
 
 test("old-generation sample and data callbacks cannot send or affect a later call", async (t) => {
-  const fixture = await fixtureHome(t);
+  const fixture = await createLiveFixture(t);
   const callbacks: Array<(samples: readonly number[]) => void> = [];
   const sends: string[] = [];
   const dataSends: string[] = [];
   const closes: string[] = [];
   const oldDataResult = deferred<void>();
   let connectionNumber = 0;
-  const lifecycle = createLiveLifecycle({
-    admission: { check: admitted },
-    consent: { request: async () => true },
-    home: certifiedHome(fixture.home),
-    coordination: createIsolatedLiveCoordination(),
-    resources: {
-      credentials: async () => undefined,
-      attestation: async () => undefined,
-      connect() {
-        const number = ++connectionNumber;
-        const capture: LiveCapture = {
-          async stop() {
-            closes.push(`capture-${number}`);
-          },
-        };
-        const connection: LiveConnection = {
-          startCapture(callback) {
-            callbacks.push(callback);
-            return settledStart(capture);
-          },
-          sendSample() {
-            sends.push(`sample-${number}`);
-          },
-          sendData(data) {
-            dataSends.push(`${data.kind}-${number}:${data.text}`);
-            return number === 1 ? oldDataResult.promise : undefined;
-          },
-          async closeSession() {
-            closes.push(`semantic-${number}`);
-          },
-          async close() {
-            closes.push(`connection-${number}`);
-          },
-        };
-        return settledStart(connection);
+  fixture.resources.connect = () => {
+    const number = ++connectionNumber;
+    const capture = createFakeCapture({
+      async stop() {
+        closes.push(`capture-${number}`);
       },
-    },
-  });
+    });
+    return settledStart(
+      createFakeConnection({
+        startCapture(callback) {
+          callbacks.push(callback);
+          return settledStart(capture);
+        },
+        sendSample() {
+          sends.push(`sample-${number}`);
+        },
+        sendData(data) {
+          dataSends.push(`${data.kind}-${number}:${data.text}`);
+          return number === 1 ? oldDataResult.promise : undefined;
+        },
+        async closeSession() {
+          closes.push(`semantic-${number}`);
+        },
+        async close() {
+          closes.push(`connection-${number}`);
+        },
+      }),
+    );
+  };
+  const lifecycle = fixture.createLifecycle(approvingConsent);
+  fixture.beforeRemoval(() => oldDataResult.resolve());
 
   assert.equal((await lifecycle.start()).kind, "started");
   const firstDataSender = lifecycle.createOutgoingSender();
@@ -1505,45 +1148,35 @@ test("old-generation sample and data callbacks cannot send or affect a later cal
 });
 
 test("mute gates samples immediately and a pending stop plus unmute creates no overlapping capture", async (t) => {
-  const fixture = await fixtureHome(t);
+  const fixture = await createLiveFixture(t);
   const allowFirstStop = deferred<void>();
   const callbacks: Array<(samples: readonly number[]) => void> = [];
   const sent: number[] = [];
   let capturesStarted = 0;
   let activeCaptures = 0;
-  const connection: LiveConnection = {
-    startCapture(callback) {
-      callbacks.push(callback);
-      capturesStarted += 1;
-      assert.equal(activeCaptures, 0);
-      activeCaptures += 1;
-      const captureNumber = capturesStarted;
-      return settledStart({
+  fixture.connection.startCapture = (callback) => {
+    callbacks.push(callback);
+    capturesStarted += 1;
+    assert.equal(activeCaptures, 0);
+    activeCaptures += 1;
+    const captureNumber = capturesStarted;
+    return settledStart(
+      createFakeCapture({
         async stop() {
           if (captureNumber === 1) await allowFirstStop.promise;
           activeCaptures -= 1;
         },
-      });
-    },
-    sendSample(samples) {
-      sent.push(samples[0] ?? -1);
-    },
-    closeSession: async () => undefined,
-    async close() {
-      assert.equal(activeCaptures, 0);
-    },
+      }),
+    );
   };
-  const lifecycle = createLiveLifecycle({
-    admission: { check: admitted },
-    consent: { request: async () => true },
-    home: certifiedHome(fixture.home),
-    coordination: createIsolatedLiveCoordination(),
-    resources: {
-      credentials: async () => undefined,
-      attestation: async () => undefined,
-      connect: () => settledStart(connection),
-    },
-  });
+  fixture.connection.sendSample = (samples) => {
+    sent.push(samples[0] ?? -1);
+  };
+  fixture.connection.close = async () => {
+    assert.equal(activeCaptures, 0);
+  };
+  const lifecycle = fixture.createLifecycle(approvingConsent);
+  fixture.beforeRemoval(() => allowFirstStop.resolve());
   assert.equal((await lifecycle.start()).kind, "started");
   assert.equal(activeCaptures, 1);
 
@@ -1567,41 +1200,28 @@ test("mute gates samples immediately and a pending stop plus unmute creates no o
 });
 
 test("CORE: synchronous mute reentrancy preserves final intent without overlapping capture", async (t) => {
-  const fixture = await fixtureHome(t);
-  const clock = new TestClock();
+  const fixture = await createLiveFixture(t);
   let lifecycle!: ReturnType<typeof createLiveLifecycle>;
   let reentrantUnmute: Promise<LiveMutationResult> | undefined;
   let capturesStarted = 0;
   let activeCaptures = 0;
   const stoppedCaptures = new Set<number>();
-  const connection: LiveConnection = {
-    startCapture() {
-      const captureNumber = ++capturesStarted;
-      activeCaptures += 1;
-      return settledStart({
+  fixture.connection.startCapture = () => {
+    const captureNumber = ++capturesStarted;
+    activeCaptures += 1;
+    return settledStart(
+      createFakeCapture({
         async stop() {
           if (stoppedCaptures.has(captureNumber)) return;
           stoppedCaptures.add(captureNumber);
           activeCaptures -= 1;
           if (captureNumber === 1) reentrantUnmute = lifecycle.setMuted(false);
         },
-      });
-    },
-    sendSample: () => undefined,
-    closeSession: async () => undefined,
-    close: async () => undefined,
+      }),
+    );
   };
-  lifecycle = createLiveLifecycle({
-    admission: { check: admitted },
-    consent: { request: async () => true },
-    home: certifiedHome(fixture.home),
-    coordination: createIsolatedLiveCoordination(),
-    clock,
-    resources: {
-      credentials: async () => undefined,
-      attestation: async () => undefined,
-      connect: () => settledStart(connection),
-    },
+  lifecycle = fixture.createLifecycle(approvingConsent, {
+    clock: fixture.clock,
   });
 
   assert.equal((await lifecycle.start()).kind, "started");
@@ -1618,26 +1238,17 @@ test("CORE: synchronous mute reentrancy preserves final intent without overlappi
 });
 
 test("a fenced ownership recheck cannot create capture after cleanup snapshots work", async (t) => {
-  const fixture = await fixtureHome(t);
+  const fixture = await createLiveFixture(t);
   const baseFileSystem = createNodeOwnershipFileSystem();
   const validationEntered = deferred<void>();
   const allowValidation = deferred<void>();
   let lockEntries = 0;
   let capturesStarted = 0;
-  const connection: LiveConnection = {
-    startCapture() {
-      capturesStarted += 1;
-      return settledStart({ stop: async () => undefined });
-    },
-    sendSample: () => undefined,
-    closeSession: async () => undefined,
-    close: async () => undefined,
+  fixture.connection.startCapture = () => {
+    capturesStarted += 1;
+    return settledStart(fixture.capture);
   };
-  const lifecycle = createLiveLifecycle({
-    admission: { check: admitted },
-    consent: { request: async () => true },
-    home: certifiedHome(fixture.home),
-    coordination: createIsolatedLiveCoordination(),
+  const lifecycle = fixture.createLifecycle(approvingConsent, {
     ownershipFileSystem: {
       ...baseFileSystem,
       async entries(target) {
@@ -1650,12 +1261,8 @@ test("a fenced ownership recheck cannot create capture after cleanup snapshots w
         return entries;
       },
     },
-    resources: {
-      credentials: async () => undefined,
-      attestation: async () => undefined,
-      connect: () => settledStart(connection),
-    },
   });
+  fixture.beforeRemoval(() => allowValidation.resolve());
 
   assert.equal((await lifecycle.start()).kind, "started");
   assert.equal(capturesStarted, 1);
@@ -1672,31 +1279,16 @@ test("a fenced ownership recheck cannot create capture after cleanup snapshots w
 
 test("data and resource phases use their five and ten second budgets", async (t) => {
   await t.test("credential phase", async (t) => {
-    const fixture = await fixtureHome(t);
-    const clock = new TestClock();
+    const fixture = await createLiveFixture(t);
+    const clock = fixture.clock;
     const entered = deferred<void>();
     const never = deferred<void>();
-    const capture: LiveCapture = { stop: async () => undefined };
-    const connection: LiveConnection = {
-      startCapture: () => settledStart(capture),
-      sendSample: () => undefined,
-      closeSession: async () => undefined,
-      close: async () => undefined,
+    fixture.resources.credentials = () => {
+      entered.resolve();
+      return never.promise;
     };
-    const lifecycle = createLiveLifecycle({
-      admission: { check: admitted },
-      consent: { request: async () => true },
-      home: certifiedHome(fixture.home),
-      coordination: createIsolatedLiveCoordination(),
-      clock,
-      resources: {
-        credentials() {
-          entered.resolve();
-          return never.promise;
-        },
-        attestation: async () => undefined,
-        connect: () => settledStart(connection),
-      },
+    const lifecycle = fixture.createLifecycle(approvingConsent, {
+      clock: fixture.clock,
     });
     const starting = lifecycle.start();
     await entered.promise;
@@ -1709,27 +1301,19 @@ test("data and resource phases use their five and ten second budgets", async (t)
   });
 
   await t.test("resource setup phase", async (t) => {
-    const fixture = await fixtureHome(t);
-    const clock = new TestClock();
+    const fixture = await createLiveFixture(t);
+    const clock = fixture.clock;
     const entered = deferred<void>();
     const never = deferred<LiveConnection>();
-    const lifecycle = createLiveLifecycle({
-      admission: { check: admitted },
-      consent: { request: async () => true },
-      home: certifiedHome(fixture.home),
-      coordination: createIsolatedLiveCoordination(),
-      clock,
-      resources: {
-        credentials: async () => undefined,
-        attestation: async () => undefined,
-        connect() {
-          entered.resolve();
-          return {
-            result: never.promise,
-            terminate: async () => undefined,
-          };
-        },
-      },
+    fixture.resources.connect = () => {
+      entered.resolve();
+      return {
+        result: never.promise,
+        terminate: async () => undefined,
+      };
+    };
+    const lifecycle = fixture.createLifecycle(approvingConsent, {
+      clock: fixture.clock,
     });
     const starting = lifecycle.start();
     await entered.promise;
@@ -1746,33 +1330,20 @@ test("CORE: absolute lifecycle deadlines hold when timer delivery is delayed or 
   await t.test(
     "data phase settlement after five seconds is not adopted",
     async (t) => {
-      const fixture = await fixtureHome(t);
-      const clock = new TestClock();
+      const fixture = await createLiveFixture(t);
+      const clock = fixture.clock;
       const credentials = deferred<void>();
       const entered = deferred<void>();
       let attestationCalls = 0;
-      const lifecycle = createLiveLifecycle({
-        admission: { check: admitted },
-        consent: { request: async () => true },
-        home: certifiedHome(fixture.home),
-        coordination: createIsolatedLiveCoordination(),
-        clock,
-        resources: {
-          credentials() {
-            entered.resolve();
-            return credentials.promise;
-          },
-          async attestation() {
-            attestationCalls += 1;
-          },
-          connect: () =>
-            settledStart({
-              startCapture: () => settledStart({ stop: async () => undefined }),
-              sendSample: () => undefined,
-              closeSession: async () => undefined,
-              close: async () => undefined,
-            }),
-        },
+      fixture.resources.credentials = () => {
+        entered.resolve();
+        return credentials.promise;
+      };
+      fixture.resources.attestation = async () => {
+        attestationCalls += 1;
+      };
+      const lifecycle = fixture.createLifecycle(approvingConsent, {
+        clock: fixture.clock,
       });
 
       const starting = lifecycle.start();
@@ -1789,43 +1360,34 @@ test("CORE: absolute lifecycle deadlines hold when timer delivery is delayed or 
   await t.test(
     "resource settlement after ten seconds is disposed, not adopted",
     async (t) => {
-      const fixture = await fixtureHome(t);
-      const clock = new TestClock();
+      const fixture = await createLiveFixture(t);
+      const clock = fixture.clock;
       const pendingConnection = deferred<LiveConnection>();
       const entered = deferred<void>();
       let closeCalls = 0;
       let captureCalls = 0;
-      const connection: LiveConnection = {
+      const connection = createFakeConnection({
         startCapture() {
           captureCalls += 1;
-          return settledStart({ stop: async () => undefined });
+          return settledStart(createFakeCapture());
         },
-        sendSample: () => undefined,
-        closeSession: async () => undefined,
         async close() {
           closeCalls += 1;
         },
-      };
-      const lifecycle = createLiveLifecycle({
-        admission: { check: admitted },
-        consent: { request: async () => true },
-        home: certifiedHome(fixture.home),
-        coordination: createIsolatedLiveCoordination(),
-        clock,
-        resources: {
-          credentials: async () => undefined,
-          attestation: async () => undefined,
-          connect() {
-            entered.resolve();
-            return {
-              result: pendingConnection.promise,
-              async terminate(dispose) {
-                await dispose(await pendingConnection.promise);
-              },
-            };
-          },
-        },
       });
+      fixture.resources.connect = () => {
+        entered.resolve();
+        return {
+          result: pendingConnection.promise,
+          async terminate(dispose) {
+            await dispose(await pendingConnection.promise);
+          },
+        };
+      };
+      const lifecycle = fixture.createLifecycle(approvingConsent, {
+        clock: fixture.clock,
+      });
+      fixture.beforeRemoval(() => pendingConnection.resolve(connection));
 
       const starting = lifecycle.start();
       await entered.promise;
@@ -1841,14 +1403,17 @@ test("CORE: absolute lifecycle deadlines hold when timer delivery is delayed or 
   await t.test(
     "total connect deadline is checked after a parked home effect",
     async (t) => {
-      const fixture = await fixtureHome(t);
-      const clock = new TestClock();
+      const fixture = await createLiveFixture(t);
+      const clock = fixture.clock;
       const certificationEntered = deferred<void>();
       const allowCertification = deferred<void>();
       let connectCalls = 0;
-      const lifecycle = createLiveLifecycle({
-        admission: { check: admitted },
-        consent: { request: async () => true },
+      fixture.resources.connect = () => {
+        connectCalls += 1;
+        return settledStart(fixture.connection);
+      };
+      const lifecycle = fixture.createLifecycle(approvingConsent, {
+        clock: fixture.clock,
         home: {
           ...certifiedHome(fixture.home),
           async certify(observation) {
@@ -1857,22 +1422,8 @@ test("CORE: absolute lifecycle deadlines hold when timer delivery is delayed or 
             return { certified: true as const, ...observation };
           },
         },
-        coordination: createIsolatedLiveCoordination(),
-        clock,
-        resources: {
-          credentials: async () => undefined,
-          attestation: async () => undefined,
-          connect() {
-            connectCalls += 1;
-            return settledStart({
-              startCapture: () => settledStart({ stop: async () => undefined }),
-              sendSample: () => undefined,
-              closeSession: async () => undefined,
-              close: async () => undefined,
-            });
-          },
-        },
       });
+      fixture.beforeRemoval(() => allowCertification.resolve());
 
       const starting = lifecycle.start();
       await certificationEntered.promise;
@@ -1889,37 +1440,24 @@ test("CORE: absolute lifecycle deadlines hold when timer delivery is delayed or 
   await t.test(
     "capture settlement after the startup cutoff is disposed",
     async (t) => {
-      const fixture = await fixtureHome(t);
-      const clock = new TestClock();
+      const fixture = await createLiveFixture(t);
+      const clock = fixture.clock;
       const captureResult = deferred<LiveCapture>();
       const captureEntered = deferred<void>();
       let captureStops = 0;
-      const lifecycle = createLiveLifecycle({
-        admission: { check: admitted },
-        consent: { request: async () => true },
-        home: certifiedHome(fixture.home),
-        coordination: createIsolatedLiveCoordination(),
-        clock,
-        resources: {
-          credentials: async () => undefined,
-          attestation: async () => undefined,
-          connect: () =>
-            settledStart({
-              startCapture() {
-                captureEntered.resolve();
-                return {
-                  result: captureResult.promise,
-                  async terminate(dispose) {
-                    await dispose(await captureResult.promise);
-                  },
-                };
-              },
-              sendSample: () => undefined,
-              closeSession: async () => undefined,
-              close: async () => undefined,
-            }),
-        },
+      fixture.connection.startCapture = () => {
+        captureEntered.resolve();
+        return {
+          result: captureResult.promise,
+          async terminate(dispose) {
+            await dispose(await captureResult.promise);
+          },
+        };
+      };
+      const lifecycle = fixture.createLifecycle(approvingConsent, {
+        clock: fixture.clock,
       });
+      fixture.beforeRemoval(() => captureResult.resolve(createFakeCapture()));
 
       const starting = lifecycle.start();
       await captureEntered.promise;
@@ -1938,25 +1476,10 @@ test("CORE: absolute lifecycle deadlines hold when timer delivery is delayed or 
   await t.test(
     "total call checks monotonic time and ignores an early timer callback",
     async (t) => {
-      const fixture = await fixtureHome(t);
-      const clock = new TestClock();
-      const lifecycle = createLiveLifecycle({
-        admission: { check: admitted },
-        consent: { request: async () => true },
-        home: certifiedHome(fixture.home),
-        coordination: createIsolatedLiveCoordination(),
-        clock,
-        resources: {
-          credentials: async () => undefined,
-          attestation: async () => undefined,
-          connect: () =>
-            settledStart({
-              startCapture: () => settledStart({ stop: async () => undefined }),
-              sendSample: () => undefined,
-              closeSession: async () => undefined,
-              close: async () => undefined,
-            }),
-        },
+      const fixture = await createLiveFixture(t);
+      const clock = fixture.clock;
+      const lifecycle = fixture.createLifecycle(approvingConsent, {
+        clock: fixture.clock,
       });
 
       assert.equal((await lifecycle.start()).kind, "started");
@@ -1975,45 +1498,34 @@ test("CORE: absolute lifecycle deadlines hold when timer delivery is delayed or 
   await t.test(
     "late unmute capture is disposed within its own resource budget",
     async (t) => {
-      const fixture = await fixtureHome(t);
-      const clock = new TestClock();
+      const fixture = await createLiveFixture(t);
+      const clock = fixture.clock;
       const secondCapture = deferred<LiveCapture>();
       const secondEntered = deferred<void>();
       let capturesStarted = 0;
       let captureStops = 0;
-      const lifecycle = createLiveLifecycle({
-        admission: { check: admitted },
-        consent: { request: async () => true },
-        home: certifiedHome(fixture.home),
-        coordination: createIsolatedLiveCoordination(),
-        clock,
-        resources: {
-          credentials: async () => undefined,
-          attestation: async () => undefined,
-          connect: () =>
-            settledStart({
-              startCapture() {
-                capturesStarted += 1;
-                if (capturesStarted === 1)
-                  return settledStart({
-                    async stop() {
-                      captureStops += 1;
-                    },
-                  });
-                secondEntered.resolve();
-                return {
-                  result: secondCapture.promise,
-                  async terminate(dispose) {
-                    await dispose(await secondCapture.promise);
-                  },
-                };
+      fixture.connection.startCapture = () => {
+        capturesStarted += 1;
+        if (capturesStarted === 1)
+          return settledStart(
+            createFakeCapture({
+              async stop() {
+                captureStops += 1;
               },
-              sendSample: () => undefined,
-              closeSession: async () => undefined,
-              close: async () => undefined,
             }),
-        },
+          );
+        secondEntered.resolve();
+        return {
+          result: secondCapture.promise,
+          async terminate(dispose) {
+            await dispose(await secondCapture.promise);
+          },
+        };
+      };
+      const lifecycle = fixture.createLifecycle(approvingConsent, {
+        clock: fixture.clock,
       });
+      fixture.beforeRemoval(() => secondCapture.resolve(createFakeCapture()));
 
       assert.equal((await lifecycle.start()).kind, "started");
       assert.equal((await lifecycle.setMuted(true)).kind, "updated");
@@ -2034,8 +1546,8 @@ test("CORE: absolute lifecycle deadlines hold when timer delivery is delayed or 
 });
 
 test("connect and call budgets anchor at acquiring after consent, and delegated work anchors at admission", async (t) => {
-  const fixture = await fixtureHome(t);
-  const clock = new TestClock();
+  const fixture = await createLiveFixture(t);
+  const clock = fixture.clock;
   const consent = deferred<boolean>();
   const mkdirEntered = deferred<void>();
   const allowMkdir = deferred<void>();
@@ -2048,26 +1560,11 @@ test("connect and call budgets anchor at acquiring after consent, and delegated 
       await baseFileSystem.mkdirExclusive(target, mode);
     },
   };
-  const capture: LiveCapture = { stop: async () => undefined };
-  const connection: LiveConnection = {
-    startCapture: () => settledStart(capture),
-    sendSample: () => undefined,
-    closeSession: async () => undefined,
-    close: async () => undefined,
-  };
-  const connecting = createLiveLifecycle({
-    admission: { check: admitted },
-    consent: { request: () => consent.promise },
-    home: certifiedHome(fixture.home),
-    ownershipFileSystem: fileSystem,
-    resources: {
-      credentials: async () => undefined,
-      attestation: async () => undefined,
-      connect: () => settledStart(connection),
-    },
-    coordination: createIsolatedLiveCoordination(),
-    clock,
-  });
+  const connecting = fixture.createLifecycle(
+    { request: () => consent.promise },
+    { clock: fixture.clock, ownershipFileSystem: fileSystem },
+  );
+  fixture.beforeRemoval(() => allowMkdir.resolve());
   const connectingStart = connecting.start();
   clock.advance(777);
   consent.resolve(true);
@@ -2084,15 +1581,7 @@ test("connect and call budgets anchor at acquiring after consent, and delegated 
   await assert.rejects(stat(fixture.lock), { code: "ENOENT" });
 
   const activeClock = new TestClock();
-  const active = createLiveLifecycle({
-    admission: { check: admitted },
-    consent: { request: async () => true },
-    home: certifiedHome(fixture.home),
-    resources: {
-      credentials: async () => undefined,
-      attestation: async () => undefined,
-      connect: () => settledStart(connection),
-    },
+  const active = fixture.createLifecycle(approvingConsent, {
     coordination: createIsolatedLiveCoordination(),
     clock: activeClock,
   });
@@ -2115,25 +1604,10 @@ test("connect and call budgets anchor at acquiring after consent, and delegated 
 });
 
 test("CORE: delegation settlement capability is owned by its admitted call generation", async (t) => {
-  const fixture = await fixtureHome(t);
-  const clock = new TestClock();
-  const lifecycle = createLiveLifecycle({
-    admission: { check: admitted },
-    consent: { request: async () => true },
-    home: certifiedHome(fixture.home),
-    coordination: createIsolatedLiveCoordination(),
-    clock,
-    resources: {
-      credentials: async () => undefined,
-      attestation: async () => undefined,
-      connect: () =>
-        settledStart({
-          startCapture: () => settledStart({ stop: async () => undefined }),
-          sendSample: () => undefined,
-          closeSession: async () => undefined,
-          close: async () => undefined,
-        }),
-    },
+  const fixture = await createLiveFixture(t);
+  const clock = fixture.clock;
+  const lifecycle = fixture.createLifecycle(approvingConsent, {
+    clock: fixture.clock,
   });
 
   assert.equal((await lifecycle.start()).kind, "started");
@@ -2158,25 +1632,17 @@ test("CORE: delegation settlement capability is owned by its admitted call gener
 });
 
 test("a synchronous startup termination failure is shared without retrying shutdown", async (t) => {
-  const fixture = await fixtureHome(t);
+  const fixture = await createLiveFixture(t);
   let terminationCalls = 0;
-  const lifecycle = createLiveLifecycle({
-    admission: { check: admitted },
-    consent: { request: async () => true },
-    home: certifiedHome(fixture.home),
-    coordination: createIsolatedLiveCoordination(),
-    clock: new TestClock(),
-    resources: {
-      credentials: async () => undefined,
-      attestation: async () => undefined,
-      connect: () => ({
-        result: Promise.reject(new Error("connection failed")),
-        terminate() {
-          terminationCalls += 1;
-          throw new Error("termination uncertain");
-        },
-      }),
+  fixture.resources.connect = () => ({
+    result: Promise.reject(new Error("connection failed")),
+    terminate() {
+      terminationCalls += 1;
+      throw new Error("termination uncertain");
     },
+  });
+  const lifecycle = fixture.createLifecycle(approvingConsent, {
+    clock: fixture.clock,
   });
   await lifecycle.start();
   assert.deepEqual(await lifecycle.stop(), { status: "blocked" });
@@ -2187,25 +1653,10 @@ test("a synchronous startup termination failure is shared without retrying shutd
 test("delegation settlement cannot erase an expired deadline while timer delivery is delayed", async (t) => {
   for (const elapsed of [30 * 60_000 - 1, 30 * 60_000, 30 * 60_000 + 1]) {
     await t.test(`${elapsed} milliseconds`, async (t) => {
-      const fixture = await fixtureHome(t);
-      const clock = new TestClock();
-      const lifecycle = createLiveLifecycle({
-        admission: { check: admitted },
-        consent: { request: async () => true },
-        home: certifiedHome(fixture.home),
-        coordination: createIsolatedLiveCoordination(),
-        clock,
-        resources: {
-          credentials: async () => undefined,
-          attestation: async () => undefined,
-          connect: () =>
-            settledStart({
-              startCapture: () => settledStart({ stop: async () => undefined }),
-              sendSample: () => undefined,
-              closeSession: async () => undefined,
-              close: async () => undefined,
-            }),
-        },
+      const fixture = await createLiveFixture(t);
+      const clock = fixture.clock;
+      const lifecycle = fixture.createLifecycle(approvingConsent, {
+        clock: fixture.clock,
       });
       assert.equal((await lifecycle.start()).kind, "started");
       const admission = lifecycle.delegationAdmitted();

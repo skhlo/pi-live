@@ -1,712 +1,78 @@
 import assert from "node:assert/strict";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { once } from "node:events";
 import {
   chmod,
   lstat,
   mkdir,
-  mkdtemp,
   readFile,
   readdir,
-  realpath,
   rename,
-  rm,
   stat,
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir, userInfo } from "node:os";
+import { userInfo } from "node:os";
 import path from "node:path";
-import { createInterface } from "node:readline";
-import { test, type TestContext } from "node:test";
+import { test } from "node:test";
 
 import {
   createIsolatedLiveCoordination,
   createLiveLifecycle,
   createNodeOwnershipFileSystem,
   type HomeCertificationObservation,
-  type LiveCapture,
-  type LiveClock,
-  type LiveConnection,
-  type LiveResourceStart,
-  type LiveTimer,
-  type OwnershipFileHandle,
   type OwnershipFileSystem,
 } from "../src/live.ts";
+import {
+  admitted as admittedFacts,
+  approvingConsent,
+  certifiedHome,
+  createFakeCapture,
+  createFakeConnection,
+  createFakeResources as inertResources,
+  deferred,
+  ManualClock as TestClock,
+  settledStart,
+} from "./test-support/live-fixture.ts";
+import {
+  activeChildWatchdogCount,
+  assertChildBusy,
+  assertCompleteOwner,
+  assertEmptyLock,
+  type ChildMode,
+  createOwnershipFixture as fixtureHome,
+  eventually,
+  exitChildAtBarrier,
+  lockInventory,
+  parkedReleaseFileSystem,
+  publicationFaultFileSystem,
+  spawnContender,
+  startAndStopChild,
+  withChildWatchdog,
+} from "./test-support/live-ownership.ts";
 
-function deferred<T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise;
-    reject = rejectPromise;
-  });
-  return { promise, resolve, reject };
-}
-
-class TestClock implements LiveClock {
-  #now = 0;
-  #timers = new Set<
-    LiveTimer & { due: number; callback: () => void; cancelled: boolean }
-  >();
-
-  now(): number {
-    return this.#now;
-  }
-
-  setTimer(callback: () => void, delayMs: number): LiveTimer {
-    const timer = {
-      due: this.#now + delayMs,
-      callback,
-      cancelled: false,
-    };
-    this.#timers.add(timer);
-    return timer;
-  }
-
-  clearTimer(timer: LiveTimer): void {
-    const known = timer as LiveTimer & { cancelled?: boolean };
-    known.cancelled = true;
-    this.#timers.delete(
-      timer as LiveTimer & {
-        due: number;
-        callback: () => void;
-        cancelled: boolean;
-      },
-    );
-  }
-
-  advance(milliseconds: number): void {
-    this.#now += milliseconds;
-    for (;;) {
-      const ready = [...this.#timers]
-        .filter((timer) => !timer.cancelled && timer.due <= this.#now)
-        .sort((left, right) => left.due - right.due)[0];
-      if (!ready) return;
-      this.#timers.delete(ready);
-      ready.callback();
-    }
-  }
-}
-
-async function eventually(check: () => boolean): Promise<void> {
-  for (let turn = 0; turn < 100; turn += 1) {
-    if (check()) return;
-    await Promise.resolve();
-  }
-  assert.fail("condition did not settle within 100 microtask turns");
-}
-
-interface ChildExit {
-  code: number | null;
-  signal: NodeJS.Signals | null;
-}
-
-type ChildMode =
-  | "silent-exit"
-  | "coordination-probe"
-  | "start-barrier"
-  | "exit-before-mkdir"
-  | "exit-mkdir-submitted"
-  | "exit-mkdir-completed"
-  | "exit-owner-open"
-  | "exit-owner-write"
-  | "exit-owner-sync"
-  | "exit-owner-close"
-  | "exit-owner-verification"
-  | "exit-verified-ownership"
-  | "exit-unlink-complete"
-  | "exit-rmdir-pending"
-  | "exit-rmdir-complete-callback-parked";
-
-interface ContenderChild {
-  process: ChildProcessWithoutNullStreams;
-  next(): Promise<unknown>;
-  waitExited(): Promise<ChildExit>;
-  terminate(): Promise<ChildExit>;
-  stderr(): string;
-}
-
-let activeChildWatchdogs = 0;
-
-async function withChildWatchdog<T>(
-  operation: Promise<T>,
-  message: () => string,
-  timeoutMs = 10_000,
-): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  const watchdog = new Promise<never>((_resolve, reject) => {
-    activeChildWatchdogs += 1;
-    timer = setTimeout(() => reject(new Error(message())), timeoutMs);
-  });
-  try {
-    return await Promise.race([operation, watchdog]);
-  } finally {
-    if (timer) clearTimeout(timer);
-    activeChildWatchdogs -= 1;
-  }
-}
-
-function childEnvironment(
-  home: string,
-  agentDirectory: string,
-): NodeJS.ProcessEnv {
-  const environment: NodeJS.ProcessEnv = {
-    HOME: home,
-    PI_CODING_AGENT_DIR: agentDirectory,
-    XDG_CONFIG_HOME: path.join(agentDirectory, "xdg-config"),
-    XDG_DATA_HOME: path.join(agentDirectory, "xdg-data"),
-    XDG_STATE_HOME: path.join(agentDirectory, "xdg-state"),
-    XDG_CACHE_HOME: path.join(agentDirectory, "xdg-cache"),
-    PI_LIVE_TEST_SESSION_ROOT: path.join(agentDirectory, "sessions"),
-    PI_LIVE_TEST_SETTINGS_ROOT: path.join(agentDirectory, "settings"),
-    PI_LIVE_TEST_STORE_ROOT: path.join(agentDirectory, "stores"),
-  };
-  if (process.env.PATH !== undefined) environment.PATH = process.env.PATH;
-  environment.TMPDIR = process.env.TMPDIR ?? tmpdir();
-  return environment;
-}
-
-function spawnContender(
-  home: string,
-  agentDirectory: string,
-  mode?: ChildMode,
-): ContenderChild {
-  const child = spawn(
-    process.execPath,
-    [
-      "--no-addons",
-      path.join(import.meta.dirname, "pi-live-lifecycle-child.ts"),
-      home,
-      ...(mode === undefined ? [] : [mode]),
-    ],
-    {
-      cwd: path.resolve(import.meta.dirname, ".."),
-      env: childEnvironment(home, agentDirectory),
-      stdio: ["pipe", "pipe", "pipe"],
-    },
-  );
-  let standardError = "";
-  child.stderr.setEncoding("utf8");
-  child.stderr.on("data", (chunk: string) => {
-    standardError += chunk;
-  });
-  const lines = createInterface({ input: child.stdout, terminal: false });
-  const exited = once(child, "close").then(([code, signal]) => ({
-    code: typeof code === "number" ? code : null,
-    signal: typeof signal === "string" ? (signal as NodeJS.Signals) : null,
-  }));
-  const waitExited = async () => {
-    try {
-      return await withChildWatchdog(
-        exited,
-        () => `contender child exit timed out: ${standardError}`,
-      );
-    } catch (error) {
-      if (child.exitCode === null && child.signalCode === null)
-        child.kill("SIGKILL");
-      await withChildWatchdog(
-        exited,
-        () => `contender child forced join timed out: ${standardError}`,
-        2_000,
-      );
-      throw error;
-    }
-  };
-  const terminate = async () => {
-    if (child.exitCode === null && child.signalCode === null) child.kill();
-    return waitExited();
-  };
-  return {
-    process: child,
-    async next(): Promise<unknown> {
-      const line = once(lines, "line").then(([value]) => String(value));
-      const lineOrExit = Promise.race([
-        line,
-        exited.then((result) => {
-          throw new Error(
-            `contender child exited before output (${JSON.stringify(result)}): ${standardError}`,
-          );
-        }),
-      ]);
-      try {
-        return JSON.parse(
-          await withChildWatchdog(
-            lineOrExit,
-            () => `contender child output timed out: ${standardError}`,
-          ),
-        ) as unknown;
-      } catch (error) {
-        await terminate();
-        throw error;
-      }
-    },
-    waitExited,
-    terminate,
-    stderr: () => standardError,
-  };
-}
-
-type LockInventory =
-  | { kind: "absent" }
-  | {
-      kind: "directory";
-      mode: number;
-      entries: Array<{
-        name: string;
-        kind: "directory" | "file" | "symlink" | "other";
-        mode: number;
-        bytes?: string;
-      }>;
-    }
-  | { kind: "other"; mode: number };
-
-async function lockInventory(lockPath: string): Promise<LockInventory> {
-  let lockInfo;
-  try {
-    lockInfo = await lstat(lockPath);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT")
-      return { kind: "absent" };
-    throw error;
-  }
-  if (!lockInfo.isDirectory())
-    return { kind: "other", mode: lockInfo.mode & 0o7777 };
-  const inventory: Extract<LockInventory, { kind: "directory" }> = {
-    kind: "directory",
-    mode: lockInfo.mode & 0o7777,
-    entries: [],
-  };
-  for (const name of (await readdir(lockPath)).sort()) {
-    const target = path.join(lockPath, name);
-    const info = await lstat(target);
-    const kind = info.isDirectory()
-      ? "directory"
-      : info.isFile()
-        ? "file"
-        : info.isSymbolicLink()
-          ? "symlink"
-          : "other";
-    inventory.entries.push({
-      name,
-      kind,
-      mode: info.mode & 0o7777,
-      ...(kind === "file"
-        ? { bytes: (await readFile(target)).toString("utf8") }
-        : {}),
-    });
-  }
-  return inventory;
-}
-
-function assertEmptyLock(inventory: LockInventory): void {
-  assert.deepEqual(inventory, {
-    kind: "directory",
-    mode: 0o700,
-    entries: [],
-  });
-}
-
-function assertCompleteOwner(inventory: LockInventory): void {
-  assert.equal(inventory.kind, "directory");
-  if (inventory.kind !== "directory") return;
-  assert.equal(inventory.mode, 0o700);
-  assert.equal(inventory.entries.length, 1);
-  const entry = inventory.entries[0];
-  assert.deepEqual(
-    entry && { name: entry.name, kind: entry.kind, mode: entry.mode },
-    { name: "owner.json", kind: "file", mode: 0o600 },
-  );
-  assert.ok(entry?.bytes?.endsWith("\n"));
-  const record: unknown = JSON.parse(entry?.bytes ?? "");
-  assert.ok(record && typeof record === "object");
-  assert.equal((record as { version?: unknown }).version, 1);
-  assert.equal(
-    typeof (record as { generation?: unknown }).generation,
-    "string",
-  );
-  assert.equal(
-    typeof (record as { ownerToken?: unknown }).ownerToken,
-    "string",
-  );
-  assert.equal(typeof (record as { pid?: unknown }).pid, "number");
-}
-
-async function eventuallyOnTaskQueue(check: () => boolean): Promise<void> {
-  for (let turn = 0; turn < 100; turn += 1) {
-    if (check()) return;
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  }
-  assert.fail("condition did not settle within 100 task turns");
-}
-
-async function exitChildAtBarrier(child: ContenderChild): Promise<void> {
-  child.process.stdin.write("exit\n");
-  child.process.stdin.end();
-  assert.deepEqual(
-    await child.waitExited(),
-    { code: 0, signal: null },
-    child.stderr(),
-  );
-}
-
-async function assertChildBusy(
-  t: TestContext,
-  fixture: Awaited<ReturnType<typeof fixtureHome>>,
-): Promise<void> {
-  const contender = spawnContender(
-    fixture.home,
-    path.join(fixture.root, "agent-b"),
-  );
-  t.after(async () => {
-    await contender.terminate();
-  });
-  const line = await contender.next();
-  assert.ok(line && typeof line === "object");
-  assert.deepEqual(
-    (line as { result?: unknown }).result,
-    { kind: "refused", state: "off", diagnostic: "busy" },
-    contender.stderr(),
-  );
-  assert.deepEqual(
-    await contender.waitExited(),
-    { code: 0, signal: null },
-    contender.stderr(),
-  );
-}
-
-async function startAndStopChild(
-  t: TestContext,
-  fixture: Awaited<ReturnType<typeof fixtureHome>>,
-): Promise<ContenderChild> {
-  const contender = spawnContender(
-    fixture.home,
-    path.join(fixture.root, "agent-b"),
-  );
-  t.after(async () => {
-    await contender.terminate();
-  });
-  assert.deepEqual(await contender.next(), {
-    event: "started",
-    result: { kind: "started", state: "active" },
-    snapshot: { state: "active", muted: false, voice: "sol" },
-  });
-  const stopped = contender.next();
-  contender.process.stdin.write("stop\n");
-  assert.deepEqual(await stopped, {
-    event: "stopped",
-    result: { status: "off" },
-    snapshot: { state: "off", muted: false, voice: "sol" },
-  });
-  contender.process.stdin.end();
-  assert.deepEqual(
-    await contender.waitExited(),
-    { code: 0, signal: null },
-    contender.stderr(),
-  );
-  return contender;
-}
-
-type PublicationFault =
-  | "mkdir-return"
-  | "lock-inspect"
-  | "owner-open"
-  | "owner-write"
-  | "owner-sync"
-  | "owner-handle-inspect"
-  | "owner-close"
-  | "owner-path-inspect"
-  | "owner-read"
-  | "owner-reinspect"
-  | "lock-reinspect"
-  | "directory-entries";
-
-function publicationFaultFileSystem(
-  point: PublicationFault,
-  lockPath: string,
-): OwnershipFileSystem {
-  const base = createNodeOwnershipFileSystem();
-  const ownerPath = path.join(lockPath, "owner.json");
-  let created = false;
-  let ownerClosed = false;
-  let ownerPathInspections = 0;
-  let lockInspections = 0;
-  const fail = (): never => {
-    throw new Error(`injected publication fault: ${point}`);
-  };
-  return {
-    ...base,
-    async mkdirExclusive(target, mode) {
-      await base.mkdirExclusive(target, mode);
-      created = true;
-      if (point === "mkdir-return") fail();
-    },
-    async inspect(target) {
-      if (created && target === lockPath) {
-        lockInspections += 1;
-        if (point === "lock-inspect" && lockInspections === 1) fail();
-        if (point === "lock-reinspect" && lockInspections === 2) fail();
-      }
-      if (target === ownerPath && ownerClosed) {
-        ownerPathInspections += 1;
-        if (
-          (point === "owner-path-inspect" && ownerPathInspections === 1) ||
-          (point === "owner-reinspect" && ownerPathInspections === 2)
-        )
-          fail();
-      }
-      return base.inspect(target);
-    },
-    async openOwner(target, mode) {
-      if (point === "owner-open") fail();
-      const handle = await base.openOwner(target, mode);
-      const wrapped: OwnershipFileHandle = {
-        async write(bytes) {
-          if (point === "owner-write") fail();
-          await handle.write(bytes);
-        },
-        async sync() {
-          if (point === "owner-sync") fail();
-          await handle.sync();
-        },
-        async inspect() {
-          if (point === "owner-handle-inspect") fail();
-          return handle.inspect();
-        },
-        async close() {
-          ownerClosed = true;
-          await handle.close();
-          if (point === "owner-close") fail();
-        },
-      };
-      return wrapped;
-    },
-    async read(target, maxBytes) {
-      if (point === "owner-read" && target === ownerPath) fail();
-      return base.read(target, maxBytes);
-    },
-    async entries(target) {
-      if (point === "directory-entries" && target === lockPath) fail();
-      return base.entries(target);
-    },
-  };
-}
-
-type ReleaseParkPoint =
-  | "validation-realpath"
-  | "validation-inspect"
-  | "validation-read"
-  | "validation-entries"
-  | "unlink"
-  | "deletion-inspect"
-  | "deletion-entries"
-  | "rmdir";
-
-type ReleaseSettlement = "success" | "failure";
-
-function parkedReleaseFileSystem(point: ReleaseParkPoint) {
-  const base = createNodeOwnershipFileSystem();
-  const entered = deferred<{ operation: string; target: string }>();
-  const gate = deferred<ReleaseSettlement>();
-  const selectedSettled = deferred<void>();
-  const records: Array<{ operation: string; target: string }> = [];
-  let armed = false;
-  let parked = false;
-  let unlinkCompleted = false;
-  let active = 0;
-  let maximumActive = 0;
-
-  const run = async <T>(
-    operation: string,
-    target: string,
-    effect: () => Promise<T>,
-    selected: boolean,
-  ): Promise<T> => {
-    if (!armed) return effect();
-    active += 1;
-    maximumActive = Math.max(maximumActive, active);
-    records.push({ operation, target });
-    const shouldPark = selected && !parked;
-    if (shouldPark) {
-      parked = true;
-      entered.resolve({ operation, target });
-    }
-    try {
-      if (shouldPark && (await gate.promise) === "failure")
-        throw new Error(`injected settled release failure: ${point}`);
-      return await effect();
-    } finally {
-      active -= 1;
-      if (shouldPark) selectedSettled.resolve();
-    }
-  };
-
-  const fileSystem: OwnershipFileSystem = {
-    ...base,
-    realpath(target) {
-      return run(
-        "realpath",
-        target,
-        () => base.realpath(target),
-        point === "validation-realpath",
-      );
-    },
-    inspect(target) {
-      const ownerValidation =
-        !unlinkCompleted && path.basename(target) === "owner.json";
-      const directoryAfterUnlink =
-        unlinkCompleted && path.basename(target) === "active.lock";
-      return run(
-        "inspect",
-        target,
-        () => base.inspect(target),
-        (point === "validation-inspect" && ownerValidation) ||
-          (point === "deletion-inspect" && directoryAfterUnlink),
-      );
-    },
-    read(target, maxBytes) {
-      return run(
-        "read",
-        target,
-        () => base.read(target, maxBytes),
-        point === "validation-read",
-      );
-    },
-    entries(target) {
-      return run(
-        "entries",
-        target,
-        () => base.entries(target),
-        (point === "validation-entries" && !unlinkCompleted) ||
-          (point === "deletion-entries" && unlinkCompleted),
-      );
-    },
-    async unlink(target) {
-      await run(
-        "unlink",
-        target,
-        () => base.unlink(target),
-        point === "unlink",
-      );
-      unlinkCompleted = true;
-    },
-    rmdir(target) {
-      return run("rmdir", target, () => base.rmdir(target), point === "rmdir");
-    },
-  };
-
-  return {
-    fileSystem,
-    entered: entered.promise,
-    selectedSettled: selectedSettled.promise,
-    arm() {
-      armed = true;
-      records.length = 0;
-    },
-    settle(settlement: ReleaseSettlement) {
-      gate.resolve(settlement);
-    },
-    records: () => [...records],
-    maximumActive: () => maximumActive,
-  };
-}
-
-function settledStart<T>(resource: T): LiveResourceStart<T> {
-  return {
-    result: Promise.resolve(resource),
-    async terminate(dispose) {
-      await dispose(resource);
-    },
-  };
-}
-
-async function fixtureHome(t: TestContext) {
-  const createdRoot = await mkdtemp(
-    path.join(tmpdir(), "pi-live-ownership-test-"),
-  );
-  const root = await realpath(createdRoot);
-  const home = path.join(root, "home");
-  const stateParent = path.join(home, ".local/state/pi-live");
-  await mkdir(stateParent, { recursive: true, mode: 0o700 });
-  await Promise.all([
-    mkdir(path.join(root, "agent-a"), { mode: 0o700 }),
-    mkdir(path.join(root, "agent-b"), { mode: 0o700 }),
-  ]);
-  t.after(async () => rm(root, { recursive: true }));
-  return {
-    root,
-    home,
-    stateParent,
-    lock: path.join(stateParent, "active.lock"),
-  };
-}
-
-function certifiedHome(home: string) {
-  return {
-    accountHome: () => home,
-    environmentHome: () => home,
-    async certify(observation: HomeCertificationObservation) {
-      return { certified: true as const, ...observation };
-    },
-  };
-}
-
-function inertResources() {
-  const capture: LiveCapture = { stop: async () => undefined };
-  const connection: LiveConnection = {
-    startCapture: () => settledStart(capture),
-    sendSample: () => undefined,
-    closeSession: async () => undefined,
-    close: async () => undefined,
-  };
-  return {
-    credentials: async () => undefined,
-    attestation: async () => undefined,
-    connect: () => settledStart(connection),
-  };
-}
-
-const admitted = {
-  check: () => ({
-    tui: true,
-    compatible: true,
-    conflict: false,
-    dialog: false,
-    idle: true,
-    pendingWork: false,
-  }),
-};
-
-const consented = { request: async () => true };
+const admitted = { check: admittedFacts };
+const consented = approvingConsent;
 
 test("a certified fixture home publishes a private owner and releases it only after resources close", async (t) => {
   const fixture = await fixtureHome(t);
   const effects: string[] = [];
-  const resources = inertResources();
-  resources.connect = () => {
-    const capture: LiveCapture = {
-      async stop() {
-        effects.push("capture-stopped");
-      },
-    };
-    const connection: LiveConnection = {
-      startCapture: () => settledStart(capture),
-      sendSample: () => undefined,
+  const capture = createFakeCapture({
+    async stop() {
+      effects.push("capture-stopped");
+    },
+  });
+  const connection = createFakeConnection(
+    {
       async closeSession() {
         effects.push("session-close");
       },
       async close() {
         effects.push("connection-closed");
       },
-    };
-    return settledStart(connection);
-  };
-  const lifecycle = createLiveLifecycle({
-    admission: admitted,
-    consent: consented,
-    home: certifiedHome(fixture.home),
-    resources,
-  });
+    },
+    capture,
+  );
+  const resources = inertResources(connection);
+  const lifecycle = fixture.createLifecycle({ resources });
 
   assert.deepEqual(await lifecycle.start(), {
     kind: "started",
@@ -731,13 +97,7 @@ test("a certified fixture home publishes a private owner and releases it only af
 
 test("real child contenders using different Pi agent directories produce exactly one owner", async (t) => {
   const fixture = await fixtureHome(t);
-  const first = spawnContender(
-    fixture.home,
-    path.join(fixture.root, "agent-a"),
-  );
-  t.after(async () => {
-    await first.terminate();
-  });
+  const first = spawnContender(fixture, fixture.agentA);
   const firstStarted = await first.next();
   assert.deepEqual(firstStarted, {
     event: "started",
@@ -746,13 +106,7 @@ test("real child contenders using different Pi agent directories produce exactly
   });
   assert.equal((await stat(fixture.lock)).isDirectory(), true);
 
-  const second = spawnContender(
-    fixture.home,
-    path.join(fixture.root, "agent-b"),
-  );
-  t.after(async () => {
-    await second.terminate();
-  });
+  const second = spawnContender(fixture, fixture.agentB);
   assert.deepEqual(await second.next(), {
     event: "started",
     result: { kind: "refused", state: "off", diagnostic: "busy" },
@@ -785,20 +139,9 @@ test("real child contenders using different Pi agent directories produce exactly
 test("simultaneous ready-barrier children produce exactly one real owner", async (t) => {
   const fixture = await fixtureHome(t);
   const contenders = [
-    spawnContender(
-      fixture.home,
-      path.join(fixture.root, "agent-a"),
-      "start-barrier",
-    ),
-    spawnContender(
-      fixture.home,
-      path.join(fixture.root, "agent-b"),
-      "start-barrier",
-    ),
+    spawnContender(fixture, fixture.agentA, "start-barrier"),
+    spawnContender(fixture, fixture.agentB, "start-barrier"),
   ];
-  t.after(async () => {
-    await Promise.all(contenders.map((contender) => contender.terminate()));
-  });
 
   assert.deepEqual(await Promise.all(contenders.map((child) => child.next())), [
     { event: "ready", barrier: "start" },
@@ -860,31 +203,18 @@ test("a second real child stays busy while the first fake resource close is pend
   const fixture = await fixtureHome(t);
   const closeEntered = deferred<void>();
   const allowClose = deferred<void>();
-  const capture: LiveCapture = { stop: async () => undefined };
-  const connection: LiveConnection = {
-    startCapture: () => settledStart(capture),
-    sendSample: () => undefined,
-    closeSession: async () => undefined,
+  const connection = createFakeConnection({
     async close() {
       closeEntered.resolve();
       await allowClose.promise;
     },
-  };
-  const lifecycle = createLiveLifecycle({
-    admission: admitted,
-    consent: consented,
-    home: certifiedHome(fixture.home),
-    resources: {
-      credentials: async () => undefined,
-      attestation: async () => undefined,
-      connect: () => settledStart(connection),
-    },
+  });
+  const lifecycle = fixture.createLifecycle({
+    resources: inertResources(connection),
     coordination: createIsolatedLiveCoordination(),
   });
-  const children: ContenderChild[] = [];
-  t.after(async () => {
+  fixture.beforeRemoval(async () => {
     allowClose.resolve();
-    await Promise.all(children.map((child) => child.terminate()));
     await withChildWatchdog(
       lifecycle.stop(),
       () => "fixture lifecycle cleanup timed out",
@@ -898,11 +228,7 @@ test("a second real child stays busy while the first fake resource close is pend
     () => "fake connection close was not entered",
   );
 
-  const duringClose = spawnContender(
-    fixture.home,
-    path.join(fixture.root, "agent-b"),
-  );
-  children.push(duringClose);
+  const duringClose = spawnContender(fixture, fixture.agentB);
   const duringCloseResult = await duringClose.next();
   const unexpectedlyStarted =
     duringCloseResult !== null &&
@@ -933,11 +259,7 @@ test("a second real child stays busy while the first fake resource close is pend
   assert.deepEqual(stoppedFirst, { status: "off" });
   await assert.rejects(stat(fixture.lock), { code: "ENOENT" });
 
-  const afterClose = spawnContender(
-    fixture.home,
-    path.join(fixture.root, "agent-b"),
-  );
-  children.push(afterClose);
+  const afterClose = spawnContender(fixture, fixture.agentB);
   assert.deepEqual(await afterClose.next(), {
     event: "started",
     result: { kind: "started", state: "active" },
@@ -955,14 +277,7 @@ test("a second real child stays busy while the first fake resource close is pend
 
 test("the default cell rejects malformed state without contaminating an isolated cell", async (t) => {
   const fixture = await fixtureHome(t);
-  const child = spawnContender(
-    fixture.home,
-    path.join(fixture.root, "agent-a"),
-    "coordination-probe",
-  );
-  t.after(async () => {
-    await child.terminate();
-  });
+  const child = spawnContender(fixture, fixture.agentA, "coordination-probe");
 
   assert.deepEqual(await child.next(), {
     event: "coordination-probe",
@@ -980,18 +295,11 @@ test("the default cell rejects malformed state without contaminating an isolated
 
 test("child failures are joined and clear their bounded watchdog", async (t) => {
   const fixture = await fixtureHome(t);
-  const child = spawnContender(
-    fixture.home,
-    path.join(fixture.root, "agent-a"),
-    "silent-exit",
-  );
-  t.after(async () => {
-    await child.terminate();
-  });
+  const child = spawnContender(fixture, fixture.agentA, "silent-exit");
 
   await assert.rejects(child.next(), /exited before output/);
   assert.deepEqual(await child.waitExited(), { code: 0, signal: null });
-  assert.equal(activeChildWatchdogs, 0);
+  assert.equal(activeChildWatchdogCount(), 0);
 });
 
 test("actual process exit records exact acquisition and publication remnants without SDK disposal", async (t) => {
@@ -1010,14 +318,7 @@ test("actual process exit records exact acquisition and publication remnants wit
   for (const [mode, expected] of cases) {
     await t.test(mode, async (t) => {
       const fixture = await fixtureHome(t);
-      const child = spawnContender(
-        fixture.home,
-        path.join(fixture.root, "agent-a"),
-        mode,
-      );
-      t.after(async () => {
-        await child.terminate();
-      });
+      const child = spawnContender(fixture, fixture.agentA, mode);
       const report = await child.next();
       assert.ok(report && typeof report === "object");
       assert.deepEqual(
@@ -1087,9 +388,8 @@ test("actual process exit records exact acquisition and publication remnants wit
           JSON.stringify(afterJoinedExit),
         );
 
-      if (afterJoinedExit.kind === "absent")
-        await startAndStopChild(t, fixture);
-      else await assertChildBusy(t, fixture);
+      if (afterJoinedExit.kind === "absent") await startAndStopChild(fixture);
+      else await assertChildBusy(fixture);
     });
   }
 });
@@ -1102,14 +402,7 @@ test("actual process exit records release remnants and never treats an unacknowl
   ] as const) {
     await t.test(mode, async (t) => {
       const fixture = await fixtureHome(t);
-      const original = spawnContender(
-        fixture.home,
-        path.join(fixture.root, "agent-a"),
-        mode,
-      );
-      t.after(async () => {
-        await original.terminate();
-      });
+      const original = spawnContender(fixture, fixture.agentA, mode);
       assert.deepEqual(await original.next(), {
         event: "started",
         result: { kind: "started", state: "active" },
@@ -1155,13 +448,7 @@ test("actual process exit records release remnants and never treats an unacknowl
         );
 
       if (mode === "exit-rmdir-complete-callback-parked") {
-        const replacement = spawnContender(
-          fixture.home,
-          path.join(fixture.root, "agent-b"),
-        );
-        t.after(async () => {
-          await replacement.terminate();
-        });
+        const replacement = spawnContender(fixture, fixture.agentB);
         assert.deepEqual(await replacement.next(), {
           event: "started",
           result: { kind: "started", state: "active" },
@@ -1190,12 +477,12 @@ test("actual process exit records release remnants and never treats an unacknowl
       const afterJoinedExit = await lockInventory(fixture.lock);
       if (mode === "exit-unlink-complete") {
         assertEmptyLock(afterJoinedExit);
-        await assertChildBusy(t, fixture);
+        await assertChildBusy(fixture);
       } else if (afterJoinedExit.kind === "absent") {
-        await startAndStopChild(t, fixture);
+        await startAndStopChild(fixture);
       } else {
         assertEmptyLock(afterJoinedExit);
-        await assertChildBusy(t, fixture);
+        await assertChildBusy(fixture);
       }
     });
   }
@@ -1238,15 +525,12 @@ test("empty, partial, corrupt, unreadable, redirected, and dead-PID locks remain
       }
       const before = await lstat(fixture.lock);
       let resourceCalls = 0;
-      const lifecycle = createLiveLifecycle({
-        admission: admitted,
-        consent: consented,
-        home: certifiedHome(fixture.home),
+      const lifecycle = fixture.createLifecycle({
         resources: {
           ...inertResources(),
-          connect() {
+          connect(options) {
             resourceCalls += 1;
-            return inertResources().connect();
+            return inertResources().connect(options);
           },
         },
         coordination: createIsolatedLiveCoordination(),
@@ -1282,11 +566,7 @@ test("every post-mkdir publication fault is sticky and leaves child contenders b
   ] as const) {
     await t.test(point, async (t) => {
       const fixture = await fixtureHome(t);
-      const lifecycle = createLiveLifecycle({
-        admission: admitted,
-        consent: consented,
-        home: certifiedHome(fixture.home),
-        resources: inertResources(),
+      const lifecycle = fixture.createLifecycle({
         ownershipFileSystem: publicationFaultFileSystem(point, fixture.lock),
         coordination: createIsolatedLiveCoordination(),
       });
@@ -1302,13 +582,7 @@ test("every post-mkdir publication fault is sticky and leaves child contenders b
       });
       assert.equal((await stat(fixture.lock)).isDirectory(), true);
 
-      const contender = spawnContender(
-        fixture.home,
-        path.join(fixture.root, "agent-a"),
-      );
-      t.after(async () => {
-        await contender.terminate();
-      });
+      const contender = spawnContender(fixture, fixture.agentA);
       const result = await contender.next();
       assert.ok(result && typeof result === "object");
       assert.deepEqual(
@@ -1339,17 +613,21 @@ test("every serial release filesystem phase stays pending past its observer dead
     for (const settlement of ["success", "failure"] as const) {
       await t.test(`${point} then ${settlement}`, async (t) => {
         const fixture = await fixtureHome(t);
-        const parked = parkedReleaseFileSystem(point);
+        const parked = parkedReleaseFileSystem(fixture, point);
         const clock = new TestClock();
         const coordination = createIsolatedLiveCoordination();
-        const lifecycle = createLiveLifecycle({
-          admission: admitted,
-          consent: consented,
-          home: certifiedHome(fixture.home),
-          resources: inertResources(),
+        const lifecycle = fixture.createLifecycle({
           ownershipFileSystem: parked.fileSystem,
           clock,
           coordination,
+        });
+        fixture.beforeRemoval(async () => {
+          parked.settle("failure");
+          clock.advance(5_000);
+          await withChildWatchdog(
+            lifecycle.stop(),
+            () => `parked ${point} lifecycle cleanup timed out`,
+          );
         });
         assert.equal((await lifecycle.start()).kind, "started");
         parked.arm();
@@ -1411,17 +689,16 @@ test("every serial release filesystem phase stays pending past its observer dead
         parked.settle(settlement);
         await parked.selectedSettled;
         if (settlement === "success") {
-          await eventuallyOnTaskQueue(
-            () => lifecycle.snapshot().state === "off",
-          );
+          await eventually(() => lifecycle.snapshot().state === "off", "task");
           assert.deepEqual(await lifecycle.stop(), { status: "off" });
           assert.deepEqual(await lockInventory(fixture.lock), {
             kind: "absent",
           });
           assert.deepEqual(coordination.ownership, { kind: "none" });
         } else {
-          await eventuallyOnTaskQueue(
+          await eventually(
             () => lifecycle.snapshot().state === "blocked",
+            "task",
           );
           assert.deepEqual(await lifecycle.stop(), { status: "blocked" });
           assert.deepEqual(coordination.ownership, { kind: "blocked" });
@@ -1434,11 +711,7 @@ test("every serial release filesystem phase stays pending past its observer dead
             assertEmptyLock(retained);
           else assertCompleteOwner(retained);
 
-          const independentContender = createLiveLifecycle({
-            admission: admitted,
-            consent: consented,
-            home: certifiedHome(fixture.home),
-            resources: inertResources(),
+          const independentContender = fixture.createLifecycle({
             coordination: createIsolatedLiveCoordination(),
           });
           assert.deepEqual(await independentContender.start(), {
@@ -1480,6 +753,14 @@ test("an asynchronous release reports pending across reload and only its origina
     coordination,
   };
   const original = createLiveLifecycle(options);
+  fixture.beforeRemoval(async () => {
+    allowRmdir.resolve();
+    await withChildWatchdog(
+      original.stop(),
+      () => "asynchronous release cleanup timed out",
+    );
+    await eventually(() => original.snapshot().state !== "releasing", "task");
+  });
   assert.equal((await original.start()).kind, "started");
 
   const stopping = original.stop();
@@ -1538,23 +819,71 @@ test("a stale release failure cannot relabel another pending coordination owner"
   const baseFileSystem = createNodeOwnershipFileSystem();
   const rmdirEntered = deferred<void>();
   const rejectRmdir = deferred<void>();
+  const rmdirFailureSettled = deferred<void>();
   const clock = new TestClock();
   const coordination = createIsolatedLiveCoordination();
+  const cleanupCalls = {
+    capture: 0,
+    session: 0,
+    connection: 0,
+  };
+  const capture = createFakeCapture({
+    async stop() {
+      cleanupCalls.capture += 1;
+    },
+  });
+  const connection = createFakeConnection(
+    {
+      async closeSession() {
+        cleanupCalls.session += 1;
+      },
+      async close() {
+        cleanupCalls.connection += 1;
+      },
+    },
+    capture,
+  );
   const lifecycle = createLiveLifecycle({
     admission: admitted,
     consent: consented,
     home: certifiedHome(fixture.home),
-    resources: inertResources(),
+    resources: inertResources(connection),
     ownershipFileSystem: {
       ...baseFileSystem,
-      async rmdir() {
+      rmdir() {
         rmdirEntered.resolve();
-        await rejectRmdir.promise;
-        throw new Error("old release failed late");
+        const failure = rejectRmdir.promise.then(() => {
+          throw new Error("old release failed late");
+        });
+        void failure.then(undefined, () => {
+          rmdirFailureSettled.resolve();
+        });
+        return failure;
       },
     },
     clock,
     coordination,
+  });
+  fixture.beforeRemoval(async () => {
+    rejectRmdir.resolve();
+    await withChildWatchdog(
+      rmdirFailureSettled.promise,
+      () => "stale release filesystem continuation did not settle",
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(cleanupCalls, {
+      capture: 1,
+      session: 1,
+      connection: 1,
+    });
+    assertEmptyLock(await lockInventory(fixture.lock));
+    assert.equal(clock.timers.size, 0);
+    assert.equal(activeChildWatchdogCount(), 0);
+    assert.equal(lifecycle.snapshot().state, "releasing");
+    assert.deepEqual(coordination.ownership, {
+      kind: "pending",
+      attemptId: "new-release",
+    });
   });
   assert.equal((await lifecycle.start()).kind, "started");
   const stopping = lifecycle.stop();
@@ -1562,6 +891,8 @@ test("a stale release failure cannot relabel another pending coordination owner"
   assert.equal(coordination.ownership.kind, "pending");
   coordination.ownership = { kind: "pending", attemptId: "new-release" };
   rejectRmdir.resolve();
+  await rmdirFailureSettled.promise;
+  await new Promise<void>((resolve) => setImmediate(resolve));
   await eventually(
     () =>
       coordination.ownership.kind === "pending" &&
@@ -1596,14 +927,15 @@ test("a completed rmdir with a parked callback cannot touch a replacement child 
       await allowCallback.promise;
     },
   };
-  const lifecycle = createLiveLifecycle({
-    admission: admitted,
-    consent: consented,
-    home: certifiedHome(fixture.home),
-    resources: inertResources(),
+  const lifecycle = fixture.createLifecycle({
     ownershipFileSystem: fileSystem,
     coordination: createIsolatedLiveCoordination(),
     clock,
+  });
+  fixture.beforeRemoval(async () => {
+    allowCallback.resolve();
+    await eventually(() => lifecycle.snapshot().state !== "releasing", "task");
+    await lifecycle.stop();
   });
   assert.equal((await lifecycle.start()).kind, "started");
   const stopping = lifecycle.stop();
@@ -1612,13 +944,7 @@ test("a completed rmdir with a parked callback cannot touch a replacement child 
   clock.advance(5_000);
   assert.deepEqual(await stopping, { status: "release-pending" });
 
-  const replacement = spawnContender(
-    fixture.home,
-    path.join(fixture.root, "agent-b"),
-  );
-  t.after(async () => {
-    await replacement.terminate();
-  });
+  const replacement = spawnContender(fixture, fixture.agentB);
   assert.deepEqual(await replacement.next(), {
     event: "started",
     result: { kind: "started", state: "active" },
@@ -1660,11 +986,7 @@ test("release-time identity and content drift never removes a foreign owner", as
       const baseFileSystem = createNodeOwnershipFileSystem();
       let unlinkCalls = 0;
       let rmdirCalls = 0;
-      const lifecycle = createLiveLifecycle({
-        admission: admitted,
-        consent: consented,
-        home: certifiedHome(fixture.home),
-        resources: inertResources(),
+      const lifecycle = fixture.createLifecycle({
         ownershipFileSystem: {
           ...baseFileSystem,
           async unlink(target) {
@@ -1734,7 +1056,7 @@ test("release-time identity and content drift never removes a foreign owner", as
           ),
           retainedInventory,
         );
-      await assertChildBusy(t, fixture);
+      await assertChildBusy(fixture);
     });
   }
 });
@@ -1742,11 +1064,7 @@ test("release-time identity and content drift never removes a foreign owner", as
 test("settled release validation and partial-removal faults block without another delete", async (t) => {
   await t.test("unexpected directory entry", async (t) => {
     const fixture = await fixtureHome(t);
-    const lifecycle = createLiveLifecycle({
-      admission: admitted,
-      consent: consented,
-      home: certifiedHome(fixture.home),
-      resources: inertResources(),
+    const lifecycle = fixture.createLifecycle({
       coordination: createIsolatedLiveCoordination(),
     });
     assert.equal((await lifecycle.start()).kind, "started");
@@ -1764,11 +1082,7 @@ test("settled release validation and partial-removal faults block without anothe
     const fixture = await fixtureHome(t);
     const baseFileSystem = createNodeOwnershipFileSystem();
     let rmdirCalls = 0;
-    const lifecycle = createLiveLifecycle({
-      admission: admitted,
-      consent: consented,
-      home: certifiedHome(fixture.home),
-      resources: inertResources(),
+    const lifecycle = fixture.createLifecycle({
       ownershipFileSystem: {
         ...baseFileSystem,
         async rmdir() {
@@ -1785,13 +1099,7 @@ test("settled release validation and partial-removal faults block without anothe
     assert.deepEqual(await lifecycle.stop(), { status: "blocked" });
     assert.equal(rmdirCalls, 1);
 
-    const contender = spawnContender(
-      fixture.home,
-      path.join(fixture.root, "agent-a"),
-    );
-    t.after(async () => {
-      await contender.terminate();
-    });
+    const contender = spawnContender(fixture, fixture.agentA);
     const line = await contender.next();
     assert.ok(line && typeof line === "object");
     assert.deepEqual((line as { result?: unknown }).result, {
@@ -1869,14 +1177,11 @@ test("HOME absence and aliases use the injected account home, while divergence a
   const alias = path.join(fixture.root, "home-alias");
   await symlink(fixture.home, alias);
   for (const environmentHome of [undefined, alias]) {
-    const lifecycle = createLiveLifecycle({
-      admission: admitted,
-      consent: consented,
+    const lifecycle = fixture.createLifecycle({
       home: {
         ...certifiedHome(fixture.home),
         environmentHome: () => environmentHome,
       },
-      resources: inertResources(),
       coordination: createIsolatedLiveCoordination(),
     });
     assert.equal((await lifecycle.start()).kind, "started");
@@ -1912,15 +1217,13 @@ test("HOME absence and aliases use the injected account home, while divergence a
       }),
     },
   ]) {
-    const lifecycle = createLiveLifecycle({
-      admission: admitted,
-      consent: consented,
+    const lifecycle = fixture.createLifecycle({
       home,
       resources: {
         ...inertResources(),
-        connect() {
+        connect(options) {
           resourceCalls += 1;
-          return inertResources().connect();
+          return inertResources().connect(options);
         },
       },
       coordination: createIsolatedLiveCoordination(),
@@ -1940,11 +1243,7 @@ test("an unowned intermediate state directory refuses before lock creation", asy
   const baseFileSystem = createNodeOwnershipFileSystem();
   const localDirectory = path.join(fixture.home, ".local");
   let mkdirCalls = 0;
-  const lifecycle = createLiveLifecycle({
-    admission: admitted,
-    consent: consented,
-    home: certifiedHome(fixture.home),
-    resources: inertResources(),
+  const lifecycle = fixture.createLifecycle({
     ownershipFileSystem: {
       ...baseFileSystem,
       async inspect(target) {
@@ -1959,9 +1258,6 @@ test("an unowned intermediate state directory refuses before lock creation", asy
       },
     },
     coordination: createIsolatedLiveCoordination(),
-  });
-  t.after(async () => {
-    await lifecycle.stop();
   });
 
   assert.deepEqual(await lifecycle.start(), {
@@ -1990,11 +1286,7 @@ test("owner reads are no-follow and bounded before bytes can be trusted", async 
 test("special permission bits on a newly-created lock are rejected", async (t) => {
   const fixture = await fixtureHome(t);
   const baseFileSystem = createNodeOwnershipFileSystem();
-  const lifecycle = createLiveLifecycle({
-    admission: admitted,
-    consent: consented,
-    home: certifiedHome(fixture.home),
-    resources: inertResources(),
+  const lifecycle = fixture.createLifecycle({
     ownershipFileSystem: {
       ...baseFileSystem,
       async mkdirExclusive(target, mode) {
@@ -2003,9 +1295,6 @@ test("special permission bits on a newly-created lock are rejected", async (t) =
       },
     },
     coordination: createIsolatedLiveCoordination(),
-  });
-  t.after(async () => {
-    await lifecycle.stop();
   });
 
   assert.equal((await lifecycle.start()).kind, "cancelled");
@@ -2024,9 +1313,7 @@ test("home or state-parent identity drift after certification refuses before mkd
       const fixture = await fixtureHome(t);
       let mkdirCalls = 0;
       const baseFileSystem = createNodeOwnershipFileSystem();
-      const lifecycle = createLiveLifecycle({
-        admission: admitted,
-        consent: consented,
+      const lifecycle = fixture.createLifecycle({
         home: {
           accountHome: () => fixture.home,
           environmentHome: () => fixture.home,
@@ -2053,11 +1340,7 @@ test("home or state-parent identity drift after certification refuses before mkd
             await baseFileSystem.mkdirExclusive(target, mode);
           },
         },
-        resources: inertResources(),
         coordination: createIsolatedLiveCoordination(),
-      });
-      t.after(async () => {
-        await lifecycle.stop();
       });
       assert.deepEqual(await lifecycle.start(), {
         kind: "refused",

@@ -1,602 +1,35 @@
 import assert from "node:assert/strict";
-import { access, chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { test, type TestContext } from "node:test";
+import { test } from "node:test";
 
 import {
   DefaultResourceLoader,
-  ModelRuntime,
-  SessionManager,
   SettingsManager,
-  createAgentSession,
-  createAgentSessionRuntime,
-  type AgentSession,
-  type AgentSessionRuntime,
   type ExtensionUIContext,
   type InlineExtension,
-  type ResourceLoader,
   type SourceInfo,
 } from "@earendil-works/pi-coding-agent";
 
 import piLiveExtension from "../index.ts";
+import { PINNED_BETTER_OPENAI_PACKAGE_SOURCES } from "../src/live.ts";
+import { deferred, type Deferred } from "./test-support/live-fixture.ts";
 import {
-  PINNED_BETTER_OPENAI_PACKAGE_SOURCES,
-  bindPiLiveLifecycle,
-  createIsolatedLiveCoordination,
-  createNodeOwnershipFileSystem,
-  type LiveCapture,
-  type LiveClock,
-  type LiveConnection,
-  type LiveLifecycleBinding,
-  type LiveResourceStart,
-  type LiveTimer,
-} from "../src/live.ts";
-
-interface Deferred<T> {
-  promise: Promise<T>;
-  resolve(value: T): void;
-}
-
-function deferred<T>(): Deferred<T> {
-  let resolvePromise!: (value: T) => void;
-  return {
-    promise: new Promise<T>((resolve) => {
-      resolvePromise = resolve;
-    }),
-    resolve: (value) => resolvePromise(value),
-  };
-}
-
-class ManualClock implements LiveClock {
-  nowValue = 0;
-  private sequence = 0;
-  private readonly timers = new Map<
-    LiveTimer,
-    { at: number; sequence: number; callback: () => void }
-  >();
-
-  now(): number {
-    return this.nowValue;
-  }
-
-  setTimer(callback: () => void, delayMs: number): LiveTimer {
-    const timer = {};
-    this.timers.set(timer, {
-      at: this.nowValue + Math.max(0, delayMs),
-      sequence: this.sequence++,
-      callback,
-    });
-    return timer;
-  }
-
-  clearTimer(timer: LiveTimer): void {
-    this.timers.delete(timer);
-  }
-
-  advance(milliseconds: number): void {
-    this.nowValue += milliseconds;
-    for (;;) {
-      const due = [...this.timers.entries()]
-        .filter(([, timer]) => timer.at <= this.nowValue)
-        .sort(
-          (left, right) =>
-            left[1].at - right[1].at || left[1].sequence - right[1].sequence,
-        )[0];
-      if (!due) return;
-      this.timers.delete(due[0]);
-      due[1].callback();
-    }
-  }
-}
-
-function resourceStart<T>(value: T): LiveResourceStart<T> {
-  const result = Promise.resolve(value);
-  return {
-    result,
-    async terminate(dispose): Promise<void> {
-      await dispose(await result);
-    },
-  };
-}
-
-async function waitUntil(
-  predicate: () => boolean,
-  description: string,
-): Promise<void> {
-  for (let turn = 0; turn < 200; turn += 1) {
-    if (predicate()) return;
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  }
-  assert.fail(`Timed out waiting for ${description}`);
-}
-
-async function pathExists(target: string): Promise<boolean> {
-  try {
-    await access(target);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function emptyUi(
-  confirm: ExtensionUIContext["confirm"] = async () => true,
-): ExtensionUIContext {
-  return {
-    select: async () => undefined,
-    confirm,
-    input: async () => undefined,
-    notify: () => undefined,
-    onTerminalInput: () => () => undefined,
-    setStatus: () => undefined,
-    setWorkingMessage: () => undefined,
-    setWorkingVisible: () => undefined,
-    setWorkingIndicator: () => undefined,
-    setHiddenThinkingLabel: () => undefined,
-    setWidget: () => undefined,
-    setFooter: () => undefined,
-    setHeader: () => undefined,
-    setTitle: () => undefined,
-    custom: async () => undefined as never,
-    pasteToEditor: () => undefined,
-    setEditorText: () => undefined,
-    getEditorText: () => "",
-    editor: async () => undefined,
-    addAutocompleteProvider: () => undefined,
-    setEditorComponent: () => undefined,
-    getEditorComponent: () => undefined,
-    theme: {} as ExtensionUIContext["theme"],
-    getAllThemes: () => [],
-    getTheme: () => undefined,
-    setTheme: () => ({ success: false, error: "fixture" }),
-    getToolsExpanded: () => false,
-    setToolsExpanded: () => undefined,
-  };
-}
-
-interface FixtureOptions {
-  before?: InlineExtension[];
-  after?: InlineExtension[];
-  closeGate?: Deferred<void>;
-  delayRmdirCallback?: Deferred<void>;
-  onRmdirRemoved?: () => void;
-  ui?: ExtensionUIContext;
-  consent?: Parameters<typeof bindPiLiveLifecycle>[1]["consent"];
-  configuredPackageSources?: readonly string[];
-  getCommandsOverride?: () => unknown;
-  sourceInfoByInlineName?: ReadonlyMap<string, SourceInfo>;
-}
-
-interface SdkFixture {
-  root: string;
-  home: string;
-  cwd: string;
-  agentDir: string;
-  lockPath: string;
-  clock: ManualClock;
-  coordination: ReturnType<typeof createIsolatedLiveCoordination>;
-  runtime: AgentSessionRuntime;
-  bindings: LiveLifecycleBinding[];
-  abortCalls: number;
-  captureStops: number;
-  closeCalls: number;
-  closeSessionCalls: number;
-  sentSamples: number;
-  acquisitionCalls: number;
-  emitSample(samples?: readonly number[]): void;
-  current(): LiveLifecycleBinding;
-  disposeRuntime(): Promise<void>;
-}
-
-async function sdkFixture(
-  t: TestContext,
-  options: FixtureOptions = {},
-): Promise<SdkFixture> {
-  const root = await mkdtemp(path.join(tmpdir(), "pi-live-sdk-test-"));
-  const home = path.join(root, "account-home");
-  const cwd = path.join(root, "work");
-  const agentDir = path.join(root, "empty-agent");
-  const stateParent = path.join(home, ".local/state/pi-live");
-  const sessions = path.join(root, "sessions");
-  for (const directory of [home, cwd, agentDir, stateParent, sessions])
-    await mkdir(directory, { recursive: true, mode: 0o700 });
-  await chmod(stateParent, 0o700);
-
-  const previousHome = process.env.HOME;
-  process.env.HOME = home;
-
-  const clock = new ManualClock();
-  const coordination = createIsolatedLiveCoordination();
-  const bindings: LiveLifecycleBinding[] = [];
-  const nodeOwnership = createNodeOwnershipFileSystem();
-  let abortCalls = 0;
-  let captureStops = 0;
-  let closeCalls = 0;
-  let closeSessionCalls = 0;
-  let sentSamples = 0;
-  let acquisitionCalls = 0;
-  let sampleHandler: ((samples: readonly number[]) => void) | undefined;
-  let randomSequence = 0;
-  let disposed = false;
-
-  const capture: LiveCapture = {
-    async stop(): Promise<void> {
-      captureStops += 1;
-    },
-  };
-  const connection: LiveConnection = {
-    startCapture(onSample) {
-      sampleHandler = onSample;
-      return resourceStart(capture);
-    },
-    sendSample() {
-      sentSamples += 1;
-    },
-    async closeSession(): Promise<void> {
-      closeSessionCalls += 1;
-    },
-    async close(): Promise<void> {
-      closeCalls += 1;
-      await options.closeGate?.promise;
-    },
-  };
-
-  const bindingFactory: InlineExtension = {
-    name: "pi-live-lifecycle-test",
-    factory(pi) {
-      const bindingApi = options.getCommandsOverride
-        ? (new Proxy(pi, {
-            get(target, property, receiver) {
-              if (property === "getCommands")
-                return options.getCommandsOverride;
-              return Reflect.get(target, property, receiver);
-            },
-          }) as typeof pi)
-        : pi;
-      bindings.push(
-        bindPiLiveLifecycle(bindingApi, {
-          facts: {
-            check: () => ({
-              compatible: true,
-              configuredPackageSources: options.configuredPackageSources,
-            }),
-          },
-          consent:
-            options.consent ??
-            ({
-              request: ({ openConfirm }) =>
-                openConfirm("Pi Live consent", "Start the fixture call?"),
-            } satisfies NonNullable<FixtureOptions["consent"]>),
-          lifecycle: {
-            clock,
-            coordination,
-            randomId: () => `fixture-${++randomSequence}`,
-            home: {
-              accountHome: () => home,
-              environmentHome: () => process.env.HOME,
-              certify: (observation) => ({
-                certified: true,
-                ...observation,
-              }),
-            },
-            ownershipFileSystem: {
-              ...nodeOwnership,
-              async mkdirExclusive(target, mode): Promise<void> {
-                acquisitionCalls += 1;
-                await nodeOwnership.mkdirExclusive(target, mode);
-              },
-              async rmdir(target): Promise<void> {
-                await nodeOwnership.rmdir(target);
-                options.onRmdirRemoved?.();
-                await options.delayRmdirCallback?.promise;
-              },
-            },
-            resources: {
-              credentials: async () => undefined,
-              attestation: async () => undefined,
-              connect: () => resourceStart(connection),
-            },
-          },
-        }),
-      );
-    },
-  };
-
-  const extensionFactories = [
-    ...(options.before ?? []),
-    bindingFactory,
-    ...(options.after ?? []),
-  ];
-  const settingsManager = SettingsManager.inMemory({
-    cacheWarming: "off",
-    compaction: { enabled: false },
-  });
-  const modelRuntime = await ModelRuntime.create({
-    credentials: {
-      read: async () => undefined,
-      list: async () => [],
-      modify: async () => undefined,
-      delete: async () => undefined,
-    },
-    modelsPath: null,
-    refreshOnCreate: false,
-    allowModelNetwork: false,
-  });
-  const baseLoader = new DefaultResourceLoader({
-    cwd,
-    agentDir,
-    settingsManager,
-    extensionFactories,
-    noExtensions: true,
-    noSkills: true,
-    noPromptTemplates: true,
-    noThemes: true,
-    noContextFiles: true,
-    systemPrompt: "Offline Pi Live lifecycle SDK fixture.",
-  });
-  const resourceLoader: ResourceLoader = {
-    getExtensions() {
-      const result = baseLoader.getExtensions();
-      for (const extension of result.extensions) {
-        const name = extension.path.match(/^<inline:(.+)>$/)?.[1];
-        const sourceInfo = name
-          ? options.sourceInfoByInlineName?.get(name)
-          : undefined;
-        if (!sourceInfo) continue;
-        extension.sourceInfo = sourceInfo;
-        for (const command of extension.commands.values())
-          command.sourceInfo = sourceInfo;
-      }
-      return result;
-    },
-    getSkills: () => baseLoader.getSkills(),
-    getPrompts: () => baseLoader.getPrompts(),
-    getThemes: () => baseLoader.getThemes(),
-    getAgentsFiles: () => baseLoader.getAgentsFiles(),
-    getSystemPrompt: () => baseLoader.getSystemPrompt(),
-    getSystemPromptSource: () => baseLoader.getSystemPromptSource(),
-    getAppendSystemPrompt: () => baseLoader.getAppendSystemPrompt(),
-    getAppendSystemPromptSources: () =>
-      baseLoader.getAppendSystemPromptSources(),
-    extendResources: (paths) => baseLoader.extendResources(paths),
-    reload: (reloadOptions) => baseLoader.reload(reloadOptions),
-  };
-
-  const createRuntime = async ({
-    cwd: targetCwd,
-    sessionManager,
-    sessionStartEvent,
-  }: Parameters<typeof createAgentSessionRuntime>[0] extends (
-    input: infer Input,
-  ) => unknown
-    ? Input
-    : never) => {
-    await resourceLoader.reload();
-    const result = await createAgentSession({
-      cwd: targetCwd,
-      agentDir,
-      modelRuntime,
-      settingsManager,
-      resourceLoader,
-      sessionManager,
-      sessionStartEvent,
-      noTools: "all",
-    });
-    return {
-      ...result,
-      services: {
-        cwd: targetCwd,
-        agentDir,
-        modelRuntime,
-        settingsManager,
-        resourceLoader,
-        diagnostics: [],
-      },
-      diagnostics: [],
-    };
-  };
-
-  let runtime!: AgentSessionRuntime;
-  const extensionErrors: unknown[] = [];
-  const bind = async (session: AgentSession): Promise<void> => {
-    await session.bindExtensions({
-      mode: "tui",
-      uiContext: options.ui ?? emptyUi(),
-      abortHandler: () => {
-        abortCalls += 1;
-      },
-      onError: (error) => {
-        extensionErrors.push(error);
-      },
-      commandContextActions: {
-        waitForIdle: () => session.waitForIdle(),
-        newSession: (replacementOptions) =>
-          runtime.newSession(replacementOptions),
-        fork: (entryId, forkOptions) => runtime.fork(entryId, forkOptions),
-        navigateTree: (entryId, navigationOptions) =>
-          session.navigateTree(entryId, navigationOptions),
-        switchSession: (sessionPath, switchOptions) =>
-          runtime.switchSession(sessionPath, switchOptions),
-        reload: () => session.reload(),
-      },
-    });
-  };
-
-  runtime = await createAgentSessionRuntime(createRuntime, {
-    cwd,
-    agentDir,
-    sessionManager: SessionManager.inMemory(cwd),
-  });
-  runtime.setRebindSession(bind);
-  await bind(runtime.session);
-  assert.deepEqual(extensionErrors, []);
-  assert.ok(bindings.length >= 1);
-
-  const fixture: SdkFixture = {
-    root,
-    home,
-    cwd,
-    agentDir,
-    lockPath: path.join(stateParent, "active.lock"),
-    clock,
-    coordination,
-    runtime,
-    bindings,
-    get abortCalls() {
-      return abortCalls;
-    },
-    get captureStops() {
-      return captureStops;
-    },
-    get closeCalls() {
-      return closeCalls;
-    },
-    get closeSessionCalls() {
-      return closeSessionCalls;
-    },
-    get sentSamples() {
-      return sentSamples;
-    },
-    get acquisitionCalls() {
-      return acquisitionCalls;
-    },
-    emitSample(samples = [0.25]) {
-      sampleHandler?.(samples);
-    },
-    current() {
-      const binding = bindings.at(-1);
-      assert.ok(binding);
-      return binding;
-    },
-    async disposeRuntime(): Promise<void> {
-      if (disposed) return;
-      disposed = true;
-      await runtime.dispose();
-    },
-  };
-
-  t.after(async () => {
-    options.closeGate?.resolve();
-    options.delayRmdirCallback?.resolve();
-    clock.advance(5_000);
-    await fixture.disposeRuntime();
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    await rm(root, { recursive: true });
-    if (previousHome === undefined) delete process.env.HOME;
-    else process.env.HOME = previousHome;
-  });
-
-  return fixture;
-}
-
-async function startActive(binding: LiveLifecycleBinding): Promise<void> {
-  assert.deepEqual(await binding.lifecycle.start(), {
-    kind: "started",
-    state: "active",
-  });
-  assert.equal(binding.lifecycle.snapshot().state, "active");
-}
-
-function lifecycleEventRecorder(record: {
-  starts: string[];
-  shutdowns: string[];
-}): InlineExtension {
-  return {
-    name: "lifecycle-event-recorder",
-    factory(pi) {
-      pi.on("session_start", (event) => {
-        record.starts.push(event.reason);
-      });
-      pi.on("session_shutdown", (event) => {
-        record.shutdowns.push(event.reason);
-      });
-    },
-  };
-}
-
-type MovementKind = "tree" | "new" | "resume" | "fork";
-
-interface PreparedMovement {
-  oldSession: AgentSession;
-  oldLeaf: string | null;
-  targetLeaf?: string;
-  invoke(): Promise<{ cancelled: boolean }>;
-}
-
-async function prepareMovement(
-  fixture: SdkFixture,
-  kind: MovementKind,
-): Promise<PreparedMovement> {
-  const oldSession = fixture.runtime.session;
-  const manager = oldSession.sessionManager;
-  if (kind === "tree") {
-    const targetLeaf = manager.appendCustomEntry("tree-target", { fixture: 1 });
-    manager.appendCustomEntry("tree-tail", { fixture: 2 });
-    oldSession.refreshContext();
-    return {
-      oldSession,
-      oldLeaf: manager.getLeafId(),
-      targetLeaf,
-      invoke: () => oldSession.navigateTree(targetLeaf),
-    };
-  }
-  if (kind === "fork") {
-    const targetLeaf = manager.appendCustomEntry("fork-target", { fixture: 1 });
-    manager.appendCustomEntry("fork-tail", { fixture: 2 });
-    oldSession.refreshContext();
-    return {
-      oldSession,
-      oldLeaf: manager.getLeafId(),
-      invoke: () => fixture.runtime.fork(targetLeaf, { position: "at" }),
-    };
-  }
-  if (kind === "resume") {
-    const target = SessionManager.create(
-      fixture.cwd,
-      path.join(fixture.root, "resume-sessions"),
-    );
-    target.appendMessage({
-      role: "assistant",
-      content: [{ type: "text", text: "isolated session fixture" }],
-      provider: "fixture",
-      model: "fixture",
-      api: "openai-responses",
-      usage: {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        totalTokens: 0,
-        cost: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
-          cacheWrite: 0,
-          total: 0,
-        },
-      },
-      stopReason: "stop",
-      timestamp: Date.now(),
-    });
-    const targetPath = target.getSessionFile();
-    assert.ok(targetPath);
-    return {
-      oldSession,
-      oldLeaf: manager.getLeafId(),
-      invoke: () => fixture.runtime.switchSession(targetPath),
-    };
-  }
-  return {
-    oldSession,
-    oldLeaf: manager.getLeafId(),
-    invoke: () => fixture.runtime.newSession(),
-  };
-}
+  betterOpenAIFactory,
+  createSdkFixture,
+  emptyUi,
+  lifecycleEventRecorder,
+  packageSourceInfo,
+  pathExists,
+  prepareMovement,
+  startActive,
+  waitUntil,
+} from "./test-support/live-sdk.ts";
 
 test("AgentSessionRuntime.dispose fences voice on quit without calling ctx.abort", async (t) => {
   const events = { starts: [] as string[], shutdowns: [] as string[] };
-  const fixture = await sdkFixture(t, {
+  const fixture = await createSdkFixture(t, {
     after: [lifecycleEventRecorder(events)],
   });
   const binding = fixture.current();
@@ -623,7 +56,7 @@ test("real reload projects asynchronous release until a completed rmdir callback
   const callbackGate = deferred<void>();
   const rmdirRemoved = deferred<void>();
   const events = { starts: [] as string[], shutdowns: [] as string[] };
-  const fixture = await sdkFixture(t, {
+  const fixture = await createSdkFixture(t, {
     after: [lifecycleEventRecorder(events)],
     delayRmdirCallback: callbackGate,
     onRmdirRemoved: () => rmdirRemoved.resolve(),
@@ -666,7 +99,7 @@ test("real reload projects asynchronous release until a completed rmdir callback
 test("shutdown retires held bindings after actual reload and replacement", async (t) => {
   for (const operation of ["reload", "replacement"] as const) {
     await t.test(operation, async (t) => {
-      const fixture = await sdkFixture(t);
+      const fixture = await createSdkFixture(t);
       const oldBinding = fixture.current();
 
       if (operation === "reload") await fixture.runtime.session.reload();
@@ -695,7 +128,7 @@ test("shutdown retires held bindings after actual reload and replacement", async
 test("real reload projects blocked while an old connection close remains pending", async (t) => {
   const closeGate = deferred<void>();
   const events = { starts: [] as string[], shutdowns: [] as string[] };
-  const fixture = await sdkFixture(t, {
+  const fixture = await createSdkFixture(t, {
     after: [lifecycleEventRecorder(events)],
     closeGate,
   });
@@ -739,7 +172,7 @@ test("an earlier shutdown handler can delay delivery, but binding entry fences s
       });
     },
   };
-  const fixture = await sdkFixture(t, { before: [delayFactory] });
+  const fixture = await createSdkFixture(t, { before: [delayFactory] });
   const oldBinding = fixture.current();
   await startActive(oldBinding);
 
@@ -791,7 +224,7 @@ test("an external dialog nested during own consent leaves the outer report open 
       });
     },
   };
-  const fixture = await sdkFixture(t, {
+  const fixture = await createSdkFixture(t, {
     after: [dialogFactory, promptRecorder],
     ui: emptyUi((title) => {
       const result = deferred<boolean>();
@@ -852,7 +285,7 @@ test("an external dialog reported before own confirm invocation refuses without 
       });
     },
   };
-  const fixture = await sdkFixture(t, {
+  const fixture = await createSdkFixture(t, {
     after: [dialogFactory],
     ui: emptyUi(() => {
       const confirmation = deferred<boolean>();
@@ -883,7 +316,7 @@ test("an external dialog reported before own confirm invocation refuses without 
 test("ordinary own confirm is admitted through the narrow openConfirm capability", async (t) => {
   const confirmation = deferred<boolean>();
   let ownResult: boolean | undefined;
-  const fixture = await sdkFixture(t, {
+  const fixture = await createSdkFixture(t, {
     ui: emptyUi(() => confirmation.promise),
     consent: {
       request: async ({ openConfirm }) => {
@@ -924,7 +357,7 @@ test("a delayed own prompt marker is ambiguous and fails closed without changing
       });
     },
   };
-  const fixture = await sdkFixture(t, {
+  const fixture = await createSdkFixture(t, {
     before: [delayFactory],
     ui: emptyUi(() => confirmation.promise),
     consent: {
@@ -968,7 +401,7 @@ test("a same-title external dialog after activation fences voice and preserves i
       });
     },
   };
-  const fixture = await sdkFixture(t, {
+  const fixture = await createSdkFixture(t, {
     after: [dialogFactory],
     ui: emptyUi(() => {
       const confirmation = deferred<boolean>();
@@ -1010,7 +443,7 @@ test("validated pooling shape is never invoked and latches across reload", async
       emit = (channel, payload) => pi.events.emit(channel, payload);
     },
   };
-  const fixture = await sdkFixture(t, { before: [emitterFactory] });
+  const fixture = await createSdkFixture(t, { before: [emitterFactory] });
   const binding = fixture.current();
   await startActive(binding);
 
@@ -1071,7 +504,7 @@ test("a synchronous pooling announcement inside consent fences startup", async (
       emit = (channel, payload) => pi.events.emit(channel, payload);
     },
   };
-  const fixture = await sdkFixture(t, {
+  const fixture = await createSdkFixture(t, {
     before: [emitterFactory],
     consent: {
       request: ({ openConfirm }) => {
@@ -1129,7 +562,7 @@ test("pooling and a reported dialog cannot recast projected release across reloa
       });
     },
   };
-  const fixture = await sdkFixture(t, {
+  const fixture = await createSdkFixture(t, {
     before: [emitterFactory],
     after: [dialogFactory],
     ui: emptyUi(() => {
@@ -1175,30 +608,6 @@ test("pooling and a reported dialog cannot recast projected release across reloa
   assert.equal(fixture.abortCalls, 0);
 });
 
-function betterOpenAIFactory(
-  description = "Start or stop Codex-backed realtime voice mode",
-): InlineExtension {
-  return {
-    name: "better-openai",
-    factory(pi) {
-      pi.registerCommand("live", {
-        description,
-        handler: async () => undefined,
-      });
-    },
-  };
-}
-
-function packageSourceInfo(source: string): SourceInfo {
-  return {
-    path: "/fixture/pi-better-openai/index.ts",
-    source,
-    scope: "user",
-    origin: "package",
-    baseDir: "/fixture/pi-better-openai",
-  };
-}
-
 test("getCommands errors and malformed observations fail closed with the busy diagnostic", async (t) => {
   const cases: Array<[string, () => unknown]> = [
     [
@@ -1213,7 +622,7 @@ test("getCommands errors and malformed observations fail closed with the busy di
 
   for (const [name, getCommandsOverride] of cases) {
     await t.test(name, async (t) => {
-      const fixture = await sdkFixture(t, { getCommandsOverride });
+      const fixture = await createSdkFixture(t, { getCommandsOverride });
       assert.deepEqual(await fixture.current().lifecycle.start(), {
         kind: "refused",
         state: "off",
@@ -1228,7 +637,7 @@ test("getCommands errors and malformed observations fail closed with the busy di
 test("a configured pinned Better OpenAI source refuses without a live command", async (t) => {
   for (const source of PINNED_BETTER_OPENAI_PACKAGE_SOURCES) {
     await t.test(source, async (t) => {
-      const fixture = await sdkFixture(t, {
+      const fixture = await createSdkFixture(t, {
         configuredPackageSources: [source],
       });
       assert.deepEqual(await fixture.current().lifecycle.start(), {
@@ -1245,7 +654,7 @@ test("configured pinned source matching is independent of a wrong live descripti
   for (const source of PINNED_BETTER_OPENAI_PACKAGE_SOURCES) {
     for (const order of ["before", "after"] as const) {
       await t.test(`${source} ${order}`, async (t) => {
-        const fixture = await sdkFixture(t, {
+        const fixture = await createSdkFixture(t, {
           [order]: [betterOpenAIFactory("Wrong fixture description")],
           configuredPackageSources: [source],
           sourceInfoByInlineName: new Map([
@@ -1268,7 +677,7 @@ test("exact pinned Better OpenAI command provenance refuses both factory load or
     for (const order of ["before", "after"] as const) {
       await t.test(`${source} ${order}`, async (t) => {
         const competitor = betterOpenAIFactory();
-        const fixture = await sdkFixture(t, {
+        const fixture = await createSdkFixture(t, {
           [order]: [competitor],
           sourceInfoByInlineName: new Map([
             ["better-openai", packageSourceInfo(source)],
@@ -1318,7 +727,7 @@ test("near-match and malformed Better OpenAI provenance is ignored", async (t) =
 
   for (const [name, competitor, sourceInfo] of cases) {
     await t.test(name, async (t) => {
-      const fixture = await sdkFixture(t, {
+      const fixture = await createSdkFixture(t, {
         before: [competitor],
         sourceInfoByInlineName: new Map([["better-openai", sourceInfo]]),
       });
@@ -1338,7 +747,7 @@ test("real tree/new/resume/fork navigation cancels on release-pending and blocke
         const rmdirGate =
           outcome === "release-pending" ? deferred<void>() : undefined;
         const events = { starts: [] as string[], shutdowns: [] as string[] };
-        const fixture = await sdkFixture(t, {
+        const fixture = await createSdkFixture(t, {
           before: [lifecycleEventRecorder(events)],
           closeGate,
           delayRmdirCallback: rmdirGate,
@@ -1389,7 +798,7 @@ test("real tree/new/resume/fork movement proceeds only after voice reaches off",
   for (const kind of ["tree", "new", "resume", "fork"] as const) {
     await t.test(kind, async (t) => {
       const events = { starts: [] as string[], shutdowns: [] as string[] };
-      const fixture = await sdkFixture(t, {
+      const fixture = await createSdkFixture(t, {
         before: [lifecycleEventRecorder(events)],
       });
       const movement = await prepareMovement(fixture, kind);
