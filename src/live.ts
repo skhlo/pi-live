@@ -20,6 +20,11 @@ import type {
   MessageEndEvent,
   SessionEntry,
 } from "@earendil-works/pi-coding-agent";
+import {
+  CONFIG_DIR_NAME,
+  getAgentDir,
+  SettingsManager,
+} from "@earendil-works/pi-coding-agent";
 import type { Dispatcher } from "undici";
 
 import {
@@ -4776,6 +4781,7 @@ export interface LiveDependencies {
   preferences: PreferenceStore;
   compatibility: CompatibilityChecker;
   truncateToWidth: TruncateToWidth;
+  packageSources?(ctx: ExtensionContext): Promise<readonly string[]>;
   runtime?: {
     lifecycle?: Omit<
       LiveLifecycleOptions,
@@ -4787,6 +4793,77 @@ export interface LiveDependencies {
   };
 }
 
+async function readLiveSettings(file: string): Promise<string | undefined> {
+  let handle: FileHandle | undefined;
+  try {
+    handle = await open(file, constants.O_RDONLY | constants.O_NONBLOCK);
+    const info = await handle.stat();
+    if (!info.isFile() || info.size > 1_024 * 1_024)
+      throw new Error("settings unavailable");
+    const bytes = Buffer.alloc(1_024 * 1_024 + 1);
+    let length = 0;
+    while (length < bytes.length) {
+      const { bytesRead } = await handle.read(
+        bytes,
+        length,
+        bytes.length - length,
+        null,
+      );
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    if (length > 1_024 * 1_024) throw new Error("settings unavailable");
+    return bytes.subarray(0, length).toString("utf8");
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") return undefined;
+    throw error;
+  } finally {
+    await handle?.close();
+  }
+}
+
+async function configuredLivePackageSources(
+  ctx: ExtensionContext,
+): Promise<readonly string[]> {
+  const projectTrusted = ctx.isProjectTrusted();
+  const [global, project] = await Promise.all([
+    readLiveSettings(path.join(getAgentDir(), "settings.json")),
+    projectTrusted
+      ? readLiveSettings(path.join(ctx.cwd, CONFIG_DIR_NAME, "settings.json"))
+      : undefined,
+  ]);
+  // Use Pi's public parser/migrations with immutable read snapshots. The ordinary
+  // file-backed SettingsManager takes file locks even to read; this backend
+  // never writes settings or creates locks before consent.
+  const settings = SettingsManager.fromStorage(
+    {
+      withLock(scope, read) {
+        if (read(scope === "global" ? global : project) !== undefined)
+          throw new Error("settings are read-only");
+      },
+    },
+    { projectTrusted },
+  );
+  if (settings.drainErrors().length) throw new Error("settings unavailable");
+  const sources: string[] = [];
+  for (const value of [
+    settings.getGlobalSettings(),
+    settings.getProjectSettings(),
+  ]) {
+    if (!isUnknownRecord(value)) throw new Error("settings unavailable");
+    const packages: unknown = value.packages;
+    if (packages === undefined) continue;
+    if (!Array.isArray(packages)) throw new Error("settings unavailable");
+    for (const entry of packages) {
+      if (typeof entry === "string") sources.push(entry);
+      else if (isUnknownRecord(entry) && typeof entry.source === "string")
+        sources.push(entry.source);
+      else throw new Error("settings unavailable");
+    }
+  }
+  return sources;
+}
+
 export function createLiveDependencies(
   truncateToWidth: TruncateToWidth,
 ): LiveDependencies {
@@ -4794,6 +4871,7 @@ export function createLiveDependencies(
     preferences: createFilePreferenceStore(),
     compatibility: createCompatibilityChecker(),
     truncateToWidth,
+    packageSources: configuredLivePackageSources,
   };
 }
 
@@ -4861,7 +4939,8 @@ export function registerPiLive(
         return {
           compatible: (await dependencies.compatibility.check()).supported,
           configuredPackageSources:
-            dependencies.runtime?.configuredPackageSources,
+            dependencies.runtime?.configuredPackageSources ??
+            (await dependencies.packageSources?.(current)),
         };
       },
     },

@@ -2,7 +2,9 @@
 
 Private, experimental Pi extension extracted for standalone development. Live
 controls and conservative coding delegation are implemented and verified with
-fake media. Actual-home certification remains unavailable, so the shipped
+fake media, but **automatic final forwarding is not accepted for delivery**:
+review reproduced an unobservable later context edit. See the
+[issue #5 blocker](docs/ISSUE-5-BLOCKER.md). Actual-home certification remains unavailable, so the shipped
 package still refuses real call setup. No microphone/provider trial or rollout
 has been performed.
 

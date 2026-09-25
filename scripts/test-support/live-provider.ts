@@ -28,6 +28,7 @@ export function fakeProvider(
   } = {},
 ) {
   let calls = 0;
+  const contexts: string[] = [];
   const provider: Parameters<ModelRuntime["registerProvider"]>[1] = {
     api: "live-fixture-api",
     apiKey: "synthetic-fixture-key",
@@ -44,6 +45,7 @@ export function fakeProvider(
       },
     ],
     streamSimple(model, _context, input) {
+      contexts.push(JSON.stringify(_context.messages));
       const stream = createStream();
       const call = ++calls;
       void (async () => {
@@ -132,5 +134,5 @@ export function fakeProvider(
       return stream;
     },
   };
-  return { provider, calls: () => calls };
+  return { provider, calls: () => calls, contexts };
 }

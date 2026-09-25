@@ -10,6 +10,10 @@ import { fakeMedia } from "./test-support/live-media.ts";
 import { deferred } from "./test-support/live-fixture.ts";
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { parseJsonObject, jsonObject } from "./test-json.ts";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { PINNED_BETTER_OPENAI_PACKAGE_SOURCES } from "../src/live.ts";
+import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 
 function finalText(frames: string[]): string {
   return frames
@@ -29,6 +33,55 @@ function finalText(frames: string[]): string {
     })
     .join("");
 }
+
+for (const scope of ["global", "project"] as const)
+  for (const order of ["before", "after"] as const) {
+    test(`shipped settings-source observation refuses ${scope} conflict with ${order}-loaded unrelated command`, async (t) => {
+      const media = fakeMedia();
+      let consents = 0;
+      const other: InlineExtension = {
+        name: "different-command",
+        factory(pi) {
+          pi.registerCommand("unrelated", {
+            description: "No matching live command",
+            handler: async () => {},
+          });
+        },
+      };
+      const fixture = await createSdkFixture(t, {
+        controls: true,
+        configuredSourcesFromSettings: true,
+        resources: media.resources,
+        [order]: [other],
+        ui: emptyUi(async () => {
+          consents++;
+          return true;
+        }),
+      });
+      const directory =
+        scope === "global" ? fixture.agentDir : path.join(fixture.cwd, ".pi");
+      await mkdir(directory, { recursive: true });
+      const file = path.join(directory, "settings.json");
+      const content = JSON.stringify({
+        packages: [
+          scope === "global"
+            ? PINNED_BETTER_OPENAI_PACKAGE_SOURCES[0]
+            : {
+                source: PINNED_BETTER_OPENAI_PACKAGE_SOURCES[1],
+                extensions: [],
+              },
+        ],
+        retained: { value: 1 },
+      });
+      await writeFile(file, content);
+      await fixture.runtime.session.prompt("/live start");
+      assert.equal(consents, 0);
+      assert.equal(fixture.current().lifecycle.snapshot().lastFailure, "busy");
+      assert.equal(media.counts().resourcesCreated, 0);
+      assert.equal(await readFile(file, "utf8"), content);
+      assert.deepEqual(await readdir(directory), ["settings.json"]);
+    });
+  }
 
 test("live controls require disclosed consent and connect the real parser to owned final delivery with replay protection", async (t) => {
   const media = fakeMedia();

@@ -1,5 +1,24 @@
 # Issue #5 - delegation and control verification
 
+## Review blocker - acceptance withdrawn
+
+The fresh-context review of `494676ca8531c4568626b15c1e3c5cd46ecd7c3e`
+found that a later `context_with_system` handler can change model input after the
+adapter's observation, without a persisted branch change. The retained real-SDK
+regression fails its no-forwarding assertion. **The results below are historical
+candidate receipts, not full G3/G4 acceptance or authorization to deliver this
+automatic-forwarding implementation.** See [the blocker](ISSUE-5-BLOCKER.md).
+
+The separate configured-source wiring finding is corrected: production now reads
+global/trusted-project package declarations through Pi's public settings parser
+over bounded read-only snapshots. Four added SDK cases pass in both load orders
+and verify no file/lock mutation. The new final-context tests pass for an earlier
+handler and fail for a later handler. That failing test is retained intact.
+The latest network-denied suite reports **408 passed, one failed**: only that
+ownership regression fails. Typecheck, formatting, package and isolated loader
+checks pass after the configured-source correction. This is not a green delivery
+candidate.
+
 ## Scope
 
 Implemented after the user's explicit instruction to implement issue #5, from

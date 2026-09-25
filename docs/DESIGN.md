@@ -2,6 +2,10 @@
 
 ## Status
 
+Issue #5 remains under spec review. Its automatic final-forwarding candidate
+fails the retained later-context-edit regression; the earlier positive receipts
+do not establish result ownership. See [the blocker](ISSUE-5-BLOCKER.md).
+
 Pi Live is a standalone, private Pi extension. The repository owns development;
 dotfiles is only the retained extraction source. Issues #3/#4 supply lifecycle
 and bounded auth/media/transport. Issue #5 connects public Pi controls and
@@ -163,9 +167,11 @@ stopped must stop voice first. The adapter keeps lifecycle handlers first so its
 stop fence does not acquire another event-handler delay.
 
 Known package-source/command observations and validated pooling announcements
-reuse the existing binding. Source observations can be supplied by the host;
-command provenance is inspected through public `pi.getCommands()` in the shipped
-path. This is not a complete extension or shortcut inventory.
+reuse the existing binding. The shipped path reads global and trusted-project
+package declarations through Pi's public settings parser, using bounded read-only
+snapshots rather than its file-locking storage. Command provenance is inspected
+through public `pi.getCommands()`. This is not a complete extension or shortcut
+inventory, and no settings or lock file is written by source inspection.
 
 The user's #5 implementation instruction authorizes local work and fake-resource
 verification. Actual-home certification/recovery remains #6, real-access trial

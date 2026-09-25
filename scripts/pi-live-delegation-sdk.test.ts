@@ -217,6 +217,44 @@ test("a real competing dispatch winning after admission cannot lend its result t
   assert.equal(fixture.abortCalls, 0);
 });
 
+for (const order of ["before", "after"] as const) {
+  test(`an unpersisted ${order}-loaded final-context edit prevents voice forwarding`, async (t) => {
+    const outgoing: LiveOutgoingData[] = [];
+    const fake = fakeProvider();
+    const fixture = await createSdkFixture(t, {
+      provider: fake.provider,
+      sendData: (data) => outgoing.push(data),
+      [order]: [
+        {
+          name: "final-context-editor",
+          factory(pi: ExtensionAPI) {
+            pi.on("context_with_system", (event) => ({
+              messages: [
+                ...event.messages,
+                {
+                  role: "user",
+                  content: "foreign final-context request",
+                  timestamp: 0,
+                },
+              ],
+            }));
+          },
+        },
+      ],
+    });
+    await startActive(fixture.current());
+    fixture.current().delegation.request({ id: "one", text: "Inspect" });
+    await fixture.runtime.session.waitForIdle();
+    assert.ok(
+      fake.contexts.some((context) =>
+        context.includes("foreign final-context request"),
+      ),
+    );
+    assert.deepEqual(outgoing, []);
+    assert.notEqual(fixture.current().lifecycle.snapshot().state, "active");
+  });
+}
+
 for (const interference of [
   "competing input",
   "non-trigger append",

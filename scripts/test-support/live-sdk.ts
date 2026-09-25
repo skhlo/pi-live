@@ -21,6 +21,7 @@ import {
 import {
   bindPiLiveLifecycle,
   registerPiLive,
+  createLiveDependencies,
   createIsolatedLiveCoordination,
   createNodeOwnershipFileSystem,
   type LiveLifecycleBinding,
@@ -111,6 +112,7 @@ interface SdkFixtureOptions {
   resources?: NonNullable<LiveDependencies["runtime"]>["resources"];
   retry?: boolean;
   beforeDispatch?: () => void;
+  configuredSourcesFromSettings?: boolean;
 }
 
 export async function createSdkFixture(
@@ -125,7 +127,9 @@ export async function createSdkFixture(
     await mkdir(directory, { recursive: true, mode: 0o700 });
 
   const previousHome = process.env.HOME;
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   process.env.HOME = home;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
 
   const clock = new ManualClock();
   const coordination = createIsolatedLiveCoordination();
@@ -163,6 +167,9 @@ export async function createSdkFixture(
     } finally {
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
+      if (previousAgentDir === undefined)
+        delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
     }
     if (errors.length > 0)
       throw new AggregateError(errors, "SDK fixture cleanup failed");
@@ -275,6 +282,12 @@ export async function createSdkFixture(
               check: async () => ({ supported: true, issues: [] }),
             },
             truncateToWidth: (text, width) => text.slice(0, width),
+            ...(options.configuredSourcesFromSettings
+              ? {
+                  packageSources: createLiveDependencies((text) => text)
+                    .packageSources,
+                }
+              : {}),
             runtime: {
               lifecycle: bindingOptions.lifecycle,
               executionHost: () => "fixture-host",
@@ -416,6 +429,7 @@ export async function createSdkFixture(
   return Object.assign(counts, {
     root,
     cwd,
+    agentDir,
     lockPath,
     clock,
     runtime,
