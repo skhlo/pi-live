@@ -10,6 +10,7 @@ import {
   unlink,
   type FileHandle,
 } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { userInfo } from "node:os";
 import path from "node:path";
 
@@ -17,6 +18,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import type { Dispatcher } from "undici";
 
 import {
   createCompatibilityChecker,
@@ -55,6 +57,395 @@ export interface LiveSnapshot {
   muted: boolean;
   voice: string;
   lastFailure?: LiveDiagnostic;
+}
+
+const LIVE_LIMITS = {
+  accessTokenBytes: 16 * 1_024,
+  accountIdBytes: 256,
+  credentialEnvelopeBytes: 20 * 1_024,
+  deviceCheckTokenBytes: 8 * 1_024,
+  attestationHeaderBytes: 16 * 1_024,
+  combinedHeaderBytes: 64 * 1_024,
+  sdpBytes: 1_024 * 1_024,
+  signalingRequestBytes: 2 * 1_024 * 1_024,
+  nonOkBodyBytes: 8 * 1_024,
+  inboundBytes: 256 * 1_024,
+  idBytes: 256,
+  contextChunkBytes: 500,
+  textBytes: 64 * 1_024,
+  contentEntries: 64,
+  seenIds: 256,
+  pendingProducers: 256,
+  retainedProducerBytes: 256 * 1_024,
+  pendingFragments: 256,
+  pendingEnvelopeBytes: 256 * 1_024,
+  socketHighWaterBytes: 256 * 1_024,
+  microphoneSamples: 16_000,
+  microphoneBucket: 32_000,
+  microphoneRefillPerSecond: 16_000,
+  eventBucket: 200,
+  eventRefillPerSecond: 200,
+} as const;
+
+export interface LiveCredentials {
+  accessToken: string;
+  accountId: string;
+}
+
+export interface LiveCredentialRegistry {
+  getApiKeyForProvider(provider: string): Promise<string | undefined>;
+}
+
+export interface LiveCredentialResolutionOptions {
+  signal?: AbortSignal;
+  now?: () => number;
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isValidUtf8String(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index += 1;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function decodeUtf8(bytes: Uint8Array): string | undefined {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return undefined;
+  }
+}
+
+function validCredentialField(
+  value: unknown,
+  maxBytes: number,
+): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value === value.trim() &&
+    isValidUtf8String(value) &&
+    !/[\u0000-\u001f\u007f]/.test(value) &&
+    Buffer.byteLength(value, "utf8") <= maxBytes
+  );
+}
+
+interface ParsedLiveJwt {
+  accountId: string;
+}
+
+function parseLiveJwt(token: string, now: number): ParsedLiveJwt | undefined {
+  try {
+    if (!isValidUtf8String(token)) return undefined;
+    const parts = token.split(".");
+    const payloadPart = parts[1];
+    if (
+      parts.length !== 3 ||
+      !parts[0] ||
+      !payloadPart ||
+      !parts[2] ||
+      !/^[A-Za-z0-9_-]+$/.test(payloadPart)
+    )
+      return undefined;
+    const decoded = Buffer.from(payloadPart, "base64url");
+    if (
+      decoded.byteLength > LIVE_LIMITS.accessTokenBytes ||
+      decoded.toString("base64url") !== payloadPart
+    )
+      return undefined;
+    const text = decodeUtf8(decoded);
+    if (text === undefined) return undefined;
+    const parsed = JSON.parse(text) as unknown;
+    if (!isUnknownRecord(parsed)) return undefined;
+    const expiry = parsed.exp;
+    if (
+      typeof expiry !== "number" ||
+      !Number.isFinite(expiry) ||
+      expiry <= now / 1_000
+    )
+      return undefined;
+    const auth = parsed["https://api.openai.com/auth"];
+    if (!isUnknownRecord(auth)) return undefined;
+    const accountId = auth.chatgpt_account_id;
+    if (!validCredentialField(accountId, LIVE_LIMITS.accountIdBytes))
+      return undefined;
+    return { accountId };
+  } catch {
+    return undefined;
+  }
+}
+
+function parseLiveRegistryCredentials(
+  raw: string | undefined,
+  now: number,
+): LiveCredentials | undefined {
+  if (
+    typeof raw !== "string" ||
+    raw.length === 0 ||
+    Buffer.byteLength(raw, "utf8") > LIVE_LIMITS.credentialEnvelopeBytes
+  )
+    return undefined;
+  const value = raw.trim();
+  if (!value) return undefined;
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (isUnknownRecord(parsed)) {
+      const accessToken =
+        typeof parsed.access === "string"
+          ? parsed.access
+          : typeof parsed.token === "string"
+            ? parsed.token
+            : undefined;
+      const accountId =
+        typeof parsed.accountId === "string"
+          ? parsed.accountId
+          : typeof parsed.account_id === "string"
+            ? parsed.account_id
+            : undefined;
+      const expiry = parsed.expires;
+      if (
+        !validCredentialField(accessToken, LIVE_LIMITS.accessTokenBytes) ||
+        !validCredentialField(accountId, LIVE_LIMITS.accountIdBytes)
+      )
+        return undefined;
+      const tokenLooksLikeJwt = accessToken.split(".").length === 3;
+      if (tokenLooksLikeJwt) {
+        const jwt = parseLiveJwt(accessToken, now);
+        if (!jwt || jwt.accountId !== accountId) return undefined;
+        if (
+          expiry !== undefined &&
+          (typeof expiry !== "number" ||
+            !Number.isFinite(expiry) ||
+            expiry <= now)
+        )
+          return undefined;
+        return { accessToken, accountId };
+      }
+      if (
+        typeof expiry !== "number" ||
+        !Number.isFinite(expiry) ||
+        expiry <= now
+      )
+        return undefined;
+      return { accessToken, accountId };
+    }
+  } catch {
+    // Pi normally returns the plain OAuth access token.
+  }
+
+  if (!validCredentialField(value, LIVE_LIMITS.accessTokenBytes))
+    return undefined;
+  const jwt = parseLiveJwt(value, now);
+  return jwt ? { accessToken: value, accountId: jwt.accountId } : undefined;
+}
+
+export async function resolveLiveRegistryCredentials(
+  registry: LiveCredentialRegistry,
+  options: LiveCredentialResolutionOptions = {},
+): Promise<LiveCredentials | undefined> {
+  if (options.signal?.aborted) return undefined;
+  let request: Promise<string | undefined>;
+  try {
+    request = registry.getApiKeyForProvider("openai-codex");
+  } catch {
+    return undefined;
+  }
+
+  const observed = request.then(
+    (value) => ({ kind: "value" as const, value }),
+    () => ({ kind: "error" as const }),
+  );
+  let removeAbort: (() => void) | undefined;
+  const cancelled = options.signal
+    ? new Promise<{ kind: "cancelled" }>((resolve) => {
+        const onAbort = () => resolve({ kind: "cancelled" });
+        options.signal!.addEventListener("abort", onAbort, { once: true });
+        removeAbort = () =>
+          options.signal!.removeEventListener("abort", onAbort);
+        if (options.signal!.aborted) onAbort();
+      })
+    : undefined;
+  const result = cancelled
+    ? await Promise.race([observed, cancelled])
+    : await observed;
+  removeAbort?.();
+  if (result.kind !== "value" || options.signal?.aborted) return undefined;
+  return parseLiveRegistryCredentials(
+    result.value,
+    (options.now ?? Date.now)(),
+  );
+}
+
+export interface LiveDeviceCheckResult {
+  supported: boolean;
+  tokenBase64?: string;
+  error?: string;
+  latencyMs: number;
+}
+
+export interface LiveDeviceCheck {
+  generateToken(): Promise<LiveDeviceCheckResult>;
+}
+
+export interface LiveAttestation {
+  header: string;
+  supported: boolean;
+}
+
+export interface LiveAttestationOptions {
+  locale?: string;
+  timeZone?: string;
+  appSessionId?: string;
+}
+
+function cborHeader(major: number, value: number): Buffer {
+  if (!Number.isSafeInteger(value) || value < 0)
+    throw new Error("Live attestation data is invalid.");
+  if (value < 24) return Buffer.from([major + value]);
+  if (value <= 0xff) return Buffer.from([major + 24, value]);
+  if (value <= 0xffff) {
+    const output = Buffer.allocUnsafe(3);
+    output[0] = major + 25;
+    output.writeUInt16BE(value, 1);
+    return output;
+  }
+  if (value <= 0xffff_ffff) {
+    const output = Buffer.allocUnsafe(5);
+    output[0] = major + 26;
+    output.writeUInt32BE(value, 1);
+    return output;
+  }
+  throw new Error("Live attestation data is invalid.");
+}
+
+function cborUnsigned(value: number): Buffer {
+  return cborHeader(0, value);
+}
+
+function cborText(value: string): Buffer {
+  if (!isValidUtf8String(value))
+    throw new Error("Live attestation data is invalid.");
+  const text = Buffer.from(value, "utf8");
+  return Buffer.concat([cborHeader(96, text.byteLength), text]);
+}
+
+function cborMap(entries: ReadonlyArray<readonly [Buffer, Buffer]>): Buffer {
+  const parts: Buffer[] = [cborHeader(160, entries.length)];
+  for (const [key, value] of entries) parts.push(key, value);
+  return Buffer.concat(parts);
+}
+
+function liveAttestationSignals(options: LiveAttestationOptions): Buffer {
+  const resolved = Intl.DateTimeFormat().resolvedOptions();
+  const locale = (options.locale ?? resolved.locale ?? "unknown").slice(0, 64);
+  const timeZone = (options.timeZone ?? resolved.timeZone ?? "unknown").slice(
+    0,
+    64,
+  );
+  const appSessionId = (options.appSessionId ?? randomUUID()).slice(0, 128);
+  const preferredLanguages = Buffer.concat([
+    cborHeader(128, 1),
+    cborText(locale),
+  ]);
+  return cborMap([
+    [cborUnsigned(0), cborUnsigned(1)],
+    [cborUnsigned(1), preferredLanguages],
+    [cborUnsigned(2), cborText(locale)],
+    [cborUnsigned(3), cborText(timeZone)],
+    [cborUnsigned(4), cborUnsigned(0)],
+    [cborUnsigned(5), cborUnsigned(1)],
+    [cborUnsigned(6), cborText(appSessionId)],
+  ]);
+}
+
+function decodeDeviceCheckToken(value: string): Buffer | undefined {
+  const maximumEncodedLength =
+    Math.ceil(LIVE_LIMITS.deviceCheckTokenBytes / 3) * 4;
+  if (
+    value.length === 0 ||
+    value.length > maximumEncodedLength ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
+      value,
+    )
+  )
+    return undefined;
+  const decoded = Buffer.from(value, "base64");
+  return decoded.byteLength <= LIVE_LIMITS.deviceCheckTokenBytes &&
+    decoded.toString("base64") === value
+    ? decoded
+    : undefined;
+}
+
+function buildLiveClientAttestation(
+  result: LiveDeviceCheckResult,
+  options: LiveAttestationOptions,
+): string {
+  const entries: Array<readonly [Buffer, Buffer]> = [];
+  if (result.supported) {
+    if (
+      result.error !== undefined ||
+      typeof result.tokenBase64 !== "string" ||
+      !decodeDeviceCheckToken(result.tokenBase64)
+    )
+      throw new Error("Live attestation data is invalid.");
+    entries.push([cborText("token"), cborText(result.tokenBase64)]);
+  } else {
+    if (result.error !== undefined || result.tokenBase64 !== undefined)
+      throw new Error("Live attestation data is invalid.");
+    entries.push([cborText("error_code"), cborUnsigned(3)]);
+  }
+  entries.push([cborText("bundle_id"), cborText("com.openai.codex")]);
+  const signals = liveAttestationSignals(options);
+  entries.push([
+    cborText("f"),
+    Buffer.concat([cborHeader(64, signals.byteLength), signals]),
+  ]);
+  if (Number.isFinite(result.latencyMs)) {
+    const latency = Buffer.allocUnsafe(9);
+    latency[0] = 0xfb;
+    latency.writeDoubleBE(result.latencyMs, 1);
+    entries.push([cborText("t"), latency]);
+  }
+  return `v1.${cborMap(entries).toString("base64url")}`;
+}
+
+export async function prepareLiveAttestation(
+  deviceCheck: LiveDeviceCheck,
+  options: LiveAttestationOptions = {},
+): Promise<LiveAttestation> {
+  let result: LiveDeviceCheckResult;
+  try {
+    result = await deviceCheck.generateToken();
+  } catch {
+    throw new Error("Live attestation failed.");
+  }
+  if (
+    typeof result?.supported !== "boolean" ||
+    typeof result.latencyMs !== "number" ||
+    !Number.isFinite(result.latencyMs) ||
+    result.latencyMs < 0 ||
+    (result.tokenBase64 !== undefined &&
+      typeof result.tokenBase64 !== "string") ||
+    (result.error !== undefined && typeof result.error !== "string")
+  )
+    throw new Error("Live attestation data is invalid.");
+  const clientAttestation = buildLiveClientAttestation(result, options);
+  const header = JSON.stringify({ v: 1, s: 0, t: clientAttestation });
+  if (Buffer.byteLength(header, "utf8") > LIVE_LIMITS.attestationHeaderBytes)
+    throw new Error("Live attestation data is invalid.");
+  return { header, supported: result.supported };
 }
 
 export interface LiveAdmissionFacts {
@@ -131,18 +522,143 @@ export interface LiveSessionCloseRequest {
 
 export interface LiveConnection {
   startCapture(
-    onSample: (samples: readonly number[]) => void,
+    onSample: (samples: Float32Array) => void,
   ): LiveResourceStart<LiveCapture>;
-  sendSample(samples: readonly number[]): void | Promise<void>;
+  sendSample(samples: Float32Array): void | Promise<void>;
   sendData?(data: LiveOutgoingData): void | Promise<void>;
   closeSession(request: LiveSessionCloseRequest): void | Promise<void>;
   close(): Promise<void>;
 }
 
 export interface LiveResources {
-  credentials(input: { signal: AbortSignal }): Promise<void>;
-  attestation(input: { signal: AbortSignal }): Promise<void>;
-  connect(input: { signal: AbortSignal }): LiveResourceStart<LiveConnection>;
+  credentials(input: { signal: AbortSignal }): Promise<LiveCredentials>;
+  attestation(input: {
+    signal: AbortSignal;
+    credentials: LiveCredentials;
+  }): Promise<LiveAttestation>;
+  connect(input: {
+    signal: AbortSignal;
+    deadline: number;
+    credentials: LiveCredentials;
+    attestation: LiveAttestation;
+    voice: string;
+    onFailure?(diagnostic: LiveDiagnostic): void;
+  }): LiveResourceStart<LiveConnection>;
+}
+
+export interface LiveHttpResponse {
+  status: number;
+  statusText: string;
+  location?: string;
+  body: AsyncIterable<Uint8Array>;
+  cancel(): void | Promise<void>;
+}
+
+export interface LiveSignalingStartInput {
+  url: string;
+  method: "POST";
+  redirect: "manual";
+  headers: Record<string, string>;
+  body: string;
+  proxyUrl?: string;
+  signal: AbortSignal;
+}
+
+export interface LiveSidebandSocket {
+  bufferedAmount(): number;
+  sendText(payload: string): Promise<void>;
+  sendPong(payload: Uint8Array): Promise<void>;
+  close(): Promise<boolean>;
+}
+
+export interface LiveSidebandStartInput {
+  url: string;
+  headers: Record<string, string>;
+  followRedirects: false;
+  maxPayloadBytes: number;
+  autoPong: false;
+  proxyUrl?: string;
+  signal: AbortSignal;
+  onText(payload: Uint8Array): void;
+  onBinary(payload: Uint8Array): void;
+  onPing(payload: Uint8Array): void;
+  onPong(payload: Uint8Array): void;
+  onFailure(failure: LiveSidebandFailure): void;
+  onClose(): void;
+}
+
+export type LiveSidebandFailure =
+  | { kind: "transient" }
+  | { kind: "http"; status: number }
+  | { kind: "malformed" }
+  | { kind: "cancelled" };
+
+export interface LiveNetworkAdapter {
+  signal(input: LiveSignalingStartInput): LiveResourceStart<LiveHttpResponse>;
+  openSideband(
+    input: LiveSidebandStartInput,
+  ): LiveResourceStart<LiveSidebandSocket>;
+}
+
+export interface LiveNativePeer {
+  createOffer(): Promise<string>;
+  acceptAnswer(sdp: string): Promise<void>;
+  waitForOpen(): Promise<void>;
+  pushAudio(samples: Float32Array): void;
+  setMuted(muted: boolean): void;
+  close(): Promise<boolean>;
+}
+
+export interface LiveNativeAdapter {
+  deviceCheck: LiveDeviceCheck;
+  createPeer(input: {
+    onEvent(payload: string): void;
+    onOutputLevel(level: number): void;
+    onFailure(): void;
+  }): LiveResourceStart<LiveNativePeer>;
+  startCapture(input: {
+    onSample(samples: Float32Array): void;
+    onFailure(): void;
+  }): LiveResourceStart<LiveCapture>;
+}
+
+export interface LiveRuntimeDiagnostic {
+  code: LiveDiagnostic;
+  phase:
+    | "credentials"
+    | "attestation"
+    | "offer"
+    | "signaling"
+    | "answer"
+    | "native-open"
+    | "sideband"
+    | "audio"
+    | "protocol"
+    | "cleanup";
+  text: string;
+  httpStatus?: number;
+  dependencyVersion?: string;
+}
+
+export interface LiveRuntimeResourcesOptions {
+  registry: LiveCredentialRegistry;
+  sessionId: string;
+  instructions: string;
+  native?: LiveNativeAdapter;
+  network?: LiveNetworkAdapter;
+  clock?: LiveClock;
+  randomId?: () => string;
+  proxyForUrl?: (
+    url: string,
+  ) => string | undefined | Promise<string | undefined>;
+  callbacks?: {
+    onRequest?(request: { id: string; text: string }): boolean;
+    onTranscript?(transcript: {
+      role: "user" | "assistant";
+      text: string;
+    }): void;
+    onDiagnostic?(diagnostic: LiveRuntimeDiagnostic): void;
+  };
 }
 
 export type LiveTimer = object;
@@ -282,6 +798,8 @@ interface CallAttempt {
   deliveryFenced: boolean;
   closeSent: boolean;
   closeController?: AbortController;
+  microphoneTokens: number;
+  microphoneBucketAt: number;
   delegation?: { token: object; timer?: LiveTimer; deadline: number };
 }
 
@@ -440,6 +958,2302 @@ function defaultClock(): LiveClock {
     },
     clearTimer(timer) {
       clearTimeout(timer as NodeJS.Timeout);
+    },
+  };
+}
+
+const LIVE_SIGNALING_URL =
+  "https://chatgpt.com/backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas";
+const LIVE_SIDEBAND_ORIGIN = "https://api.openai.com";
+const LIVE_CLIENT_VERSION = "0.144.1";
+const LIVE_MODEL = "gpt-live-1-codex";
+const LIVE_SIDE_BAND_ATTEMPTS = 3;
+const LIVE_PHASE_MS = 10_000;
+const LIVE_SEND_MS = 5_000;
+const LIVE_CONTROL_FRAME_BYTES = 125;
+const LIVE_WEBSOCKET_FRAME_OVERHEAD = 14;
+const LIVE_PENDING_ENVELOPE_MAX_BYTES = 4 * 1_024;
+
+class LiveRuntimeError extends Error {
+  readonly kind: "timeout" | "protocol" | "cancelled" | "cleanup";
+
+  constructor(kind: LiveRuntimeError["kind"], message: string) {
+    super(message);
+    this.kind = kind;
+  }
+}
+
+function fixedRuntimeError(kind: LiveRuntimeError["kind"]): LiveRuntimeError {
+  switch (kind) {
+    case "timeout":
+      return new LiveRuntimeError(kind, "Live transport connection timed out.");
+    case "cancelled":
+      return new LiveRuntimeError(kind, "Live transport was cancelled.");
+    case "cleanup":
+      return new LiveRuntimeError(
+        kind,
+        "Live transport cleanup is unconfirmed.",
+      );
+    case "protocol":
+      return new LiveRuntimeError(kind, "Live transport protocol failed.");
+  }
+}
+
+function runtimeDiagnosticText(code: LiveDiagnostic): string {
+  switch (code) {
+    case "busy":
+      return "Pi Live is busy.";
+    case "missing-auth":
+      return "Pi Live authentication is unavailable.";
+    case "denied":
+      return "Pi Live permission was denied.";
+    case "connect-timeout":
+      return "Pi Live connection timed out.";
+    case "protocol-error":
+      return "Pi Live protocol failed.";
+    case "audio-error":
+      return "Pi Live audio failed.";
+    case "cleanup-blocked":
+      return "Pi Live cleanup could not be confirmed.";
+  }
+}
+
+function byteLengthWithin(value: string, maximum: number): boolean {
+  return Buffer.byteLength(value, "utf8") <= maximum;
+}
+
+function validHeaderValue(value: string): boolean {
+  return isValidUtf8String(value) && !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+function combinedHeaderBytes(headers: Record<string, string>): number {
+  let total = 0;
+  for (const [name, value] of Object.entries(headers))
+    total += Buffer.byteLength(`${name}: ${value}\r\n`, "utf8");
+  return total;
+}
+
+function buildLiveHeaders(
+  credentials: LiveCredentials,
+  sessionId: string,
+  realtimeSessionId: string,
+  attestation: LiveAttestation,
+): Record<string, string> {
+  const accessToken = credentials.accessToken;
+  const accountId = credentials.accountId;
+  const attestationHeader = attestation.header;
+  if (
+    !validCredentialField(accessToken, LIVE_LIMITS.accessTokenBytes) ||
+    !validCredentialField(accountId, LIVE_LIMITS.accountIdBytes) ||
+    !validCredentialField(sessionId, LIVE_LIMITS.idBytes) ||
+    !validCredentialField(realtimeSessionId, LIVE_LIMITS.idBytes) ||
+    !validHeaderValue(attestationHeader) ||
+    !byteLengthWithin(attestationHeader, LIVE_LIMITS.attestationHeaderBytes)
+  )
+    throw fixedRuntimeError("protocol");
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${accessToken}`,
+    "OpenAI-Alpha": "quicksilver=v2",
+    "User-Agent": `Codex Desktop/${LIVE_CLIENT_VERSION}`,
+    "x-session-id": realtimeSessionId,
+    originator: "Codex Desktop",
+    version: LIVE_CLIENT_VERSION,
+    "session-id": sessionId,
+    "thread-id": sessionId,
+    "chatgpt-account-id": accountId,
+    "x-oai-attestation": attestationHeader,
+  };
+  if (combinedHeaderBytes(headers) > LIVE_LIMITS.combinedHeaderBytes)
+    throw fixedRuntimeError("protocol");
+  return headers;
+}
+
+function parseLiveCallLocation(location: string | undefined): string {
+  if (
+    typeof location !== "string" ||
+    location.length === 0 ||
+    !byteLengthWithin(location, 2_048)
+  )
+    throw fixedRuntimeError("protocol");
+  let parsed: URL;
+  try {
+    parsed = new URL(location, LIVE_SIDEBAND_ORIGIN);
+  } catch {
+    throw fixedRuntimeError("protocol");
+  }
+  if (
+    parsed.origin !== LIVE_SIDEBAND_ORIGIN ||
+    parsed.protocol !== "https:" ||
+    parsed.username !== "" ||
+    parsed.password !== "" ||
+    parsed.search !== "" ||
+    parsed.hash !== ""
+  )
+    throw fixedRuntimeError("protocol");
+  const canonicalAbsolute = `${LIVE_SIDEBAND_ORIGIN}${parsed.pathname}`;
+  if (location !== parsed.pathname && location !== canonicalAbsolute)
+    throw fixedRuntimeError("protocol");
+  const match = /^\/v1\/live\/(rtc_[A-Za-z0-9_-]+)$/.exec(parsed.pathname);
+  const callId = match?.[1];
+  if (!callId || !byteLengthWithin(callId, LIVE_LIMITS.idBytes))
+    throw fixedRuntimeError("protocol");
+  return callId;
+}
+
+async function readBoundedBody(
+  response: LiveHttpResponse,
+  maximum: number,
+  retain: boolean,
+  deadline: number,
+  clock: LiveClock,
+  signal: AbortSignal,
+): Promise<Buffer> {
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  const stopRead = async (kind: "cancelled" | "timeout" | "protocol") => {
+    try {
+      await response.cancel();
+    } catch {
+      throw fixedRuntimeError("cleanup");
+    }
+    throw fixedRuntimeError(kind);
+  };
+  try {
+    for await (const chunk of response.body) {
+      if (signal.aborted) await stopRead("cancelled");
+      if (clock.now() >= deadline) await stopRead("timeout");
+      if (!(chunk instanceof Uint8Array)) await stopRead("protocol");
+      if (total + chunk.byteLength > maximum) await stopRead("protocol");
+      total += chunk.byteLength;
+      if (retain && chunk.byteLength > 0) parts.push(chunk);
+    }
+    if (signal.aborted) await stopRead("cancelled");
+    if (clock.now() >= deadline) await stopRead("timeout");
+  } catch (error) {
+    if (error instanceof LiveRuntimeError) throw error;
+    throw fixedRuntimeError("protocol");
+  }
+  return retain ? Buffer.concat(parts, total) : Buffer.alloc(0);
+}
+
+function sidebandFailureIsTransient(failure: unknown): boolean {
+  if (!isUnknownRecord(failure)) return false;
+  if (failure.kind === "transient") return true;
+  return (
+    failure.kind === "http" &&
+    typeof failure.status === "number" &&
+    Number.isSafeInteger(failure.status) &&
+    failure.status >= 500 &&
+    failure.status <= 599
+  );
+}
+
+function waitWithClock(
+  clock: LiveClock,
+  delayMs: number,
+  signal: AbortSignal,
+): Promise<void> {
+  if (signal.aborted) return Promise.reject(fixedRuntimeError("cancelled"));
+  const deadline = clock.now() + Math.max(0, delayMs);
+  return new Promise<void>((resolve, reject) => {
+    let timer: LiveTimer;
+    const onAbort = () => {
+      clock.clearTimer(timer);
+      signal.removeEventListener("abort", onAbort);
+      reject(fixedRuntimeError("cancelled"));
+    };
+    const observeDeadline = () => {
+      if (clock.now() < deadline) {
+        timer = clock.setTimer(observeDeadline, deadline - clock.now());
+        return;
+      }
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    };
+    timer = clock.setTimer(observeDeadline, deadline - clock.now());
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
+}
+
+async function waitForRuntimePhase<T>(
+  operation: Promise<T>,
+  totalDeadline: number,
+  clock: LiveClock,
+  signal: AbortSignal,
+): Promise<T> {
+  const deadline = Math.min(totalDeadline, clock.now() + LIVE_PHASE_MS);
+  if (signal.aborted) throw fixedRuntimeError("cancelled");
+  if (clock.now() >= deadline) throw fixedRuntimeError("timeout");
+  let timer: LiveTimer | undefined;
+  let removeAbort: (() => void) | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    const observeDeadline = () => {
+      if (clock.now() < deadline) {
+        timer = clock.setTimer(observeDeadline, deadline - clock.now());
+        return;
+      }
+      reject(fixedRuntimeError("timeout"));
+    };
+    timer = clock.setTimer(observeDeadline, deadline - clock.now());
+  });
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    const onAbort = () => reject(fixedRuntimeError("cancelled"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    removeAbort = () => signal.removeEventListener("abort", onAbort);
+    if (signal.aborted) onAbort();
+  });
+  try {
+    const value = await Promise.race([operation, timeout, cancelled]);
+    if (clock.now() >= deadline) throw fixedRuntimeError("timeout");
+    return value;
+  } catch (error) {
+    if (error instanceof LiveRuntimeError) throw error;
+    if (
+      isUnknownRecord(error) &&
+      (error.kind === "transient" ||
+        error.kind === "http" ||
+        error.kind === "malformed" ||
+        error.kind === "cancelled")
+    )
+      throw error;
+    throw fixedRuntimeError("protocol");
+  } finally {
+    if (timer) clock.clearTimer(timer);
+    removeAbort?.();
+  }
+}
+
+function utf8Prefix(value: string, maximum: number): string {
+  let bytes = 0;
+  let index = 0;
+  while (index < value.length) {
+    const codePoint = value.codePointAt(index);
+    if (codePoint === undefined) break;
+    const characterBytes =
+      codePoint <= 0x7f
+        ? 1
+        : codePoint <= 0x7ff
+          ? 2
+          : codePoint <= 0xffff
+            ? 3
+            : 4;
+    if (bytes + characterBytes > maximum) break;
+    bytes += characterBytes;
+    index += codePoint > 0xffff ? 2 : 1;
+  }
+  return value.slice(0, index);
+}
+
+function utf8Tail(value: string, maximum: number): string {
+  let bytes = 0;
+  let index = value.length;
+  while (index > 0) {
+    let start = index - 1;
+    const last = value.charCodeAt(start);
+    if (last >= 0xdc00 && last <= 0xdfff && start > 0) {
+      const first = value.charCodeAt(start - 1);
+      if (first >= 0xd800 && first <= 0xdbff) start -= 1;
+    }
+    const codePoint = value.codePointAt(start);
+    if (codePoint === undefined) break;
+    const characterBytes =
+      codePoint <= 0x7f
+        ? 1
+        : codePoint <= 0x7ff
+          ? 2
+          : codePoint <= 0xffff
+            ? 3
+            : 4;
+    if (bytes + characterBytes > maximum) break;
+    bytes += characterBytes;
+    index = start;
+  }
+  return value.slice(index);
+}
+
+function truncateLiveFinal(value: string): string {
+  if (byteLengthWithin(value, LIVE_LIMITS.textBytes)) return value;
+  const marker = "\n[truncated]";
+  return `${utf8Prefix(
+    value,
+    LIVE_LIMITS.textBytes - Buffer.byteLength(marker),
+  )}${marker}`;
+}
+
+function liveTextChunkAt(
+  value: string,
+  start: number,
+): { text: string; next: number } {
+  if (value.length === 0) return { text: "", next: 0 };
+  let bytes = 0;
+  let index = start;
+  while (index < value.length) {
+    const codePoint = value.codePointAt(index);
+    if (codePoint === undefined) break;
+    const characterLength = codePoint > 0xffff ? 2 : 1;
+    const characterBytes =
+      codePoint <= 0x7f
+        ? 1
+        : codePoint <= 0x7ff
+          ? 2
+          : codePoint <= 0xffff
+            ? 3
+            : 4;
+    if (bytes + characterBytes > LIVE_LIMITS.contextChunkBytes) break;
+    bytes += characterBytes;
+    index += characterLength;
+  }
+  return { text: value.slice(start, index), next: index };
+}
+
+function buildLiveSessionRequest(
+  offer: string,
+  instructions: string,
+  voice: string,
+): string {
+  if (!byteLengthWithin(offer, LIVE_LIMITS.sdpBytes))
+    throw fixedRuntimeError("protocol");
+  if (
+    !isValidUtf8String(instructions) ||
+    !byteLengthWithin(instructions, LIVE_LIMITS.textBytes) ||
+    !validCredentialField(voice, LIVE_LIMITS.idBytes)
+  )
+    throw fixedRuntimeError("protocol");
+  const body = JSON.stringify({
+    sdp: offer,
+    session: {
+      model: LIVE_MODEL,
+      instructions,
+      audio: { output: { voice } },
+      delegation: { type: "client" },
+    },
+  });
+  if (!byteLengthWithin(body, LIVE_LIMITS.signalingRequestBytes))
+    throw fixedRuntimeError("protocol");
+  return body;
+}
+
+function unsafeLiveDependencyDebug(value: string | undefined): boolean {
+  return value !== undefined && value.trim().length > 0;
+}
+
+function defaultProxyForUrl(url: string): Promise<string | undefined> {
+  return Promise.resolve().then(() => {
+    const proxyModule = liveRuntimeRequire("proxy-from-env") as {
+      getProxyForUrl(target: string): string;
+    };
+    return proxyModule.getProxyForUrl(url) || undefined;
+  });
+}
+
+export function createLiveRuntimeResources(
+  options: LiveRuntimeResourcesOptions,
+): LiveResources {
+  const clock = options.clock ?? defaultClock();
+  const native = options.native ?? createDefaultLiveNativeAdapter();
+  const network = options.network ?? createDefaultLiveNetworkAdapter();
+  const randomId = options.randomId ?? randomUUID;
+  const proxyForUrl = options.proxyForUrl ?? defaultProxyForUrl;
+
+  const report = (
+    code: LiveDiagnostic,
+    phase: LiveRuntimeDiagnostic["phase"],
+    status?: number,
+  ): void => {
+    try {
+      const safeStatus =
+        status !== undefined &&
+        Number.isSafeInteger(status) &&
+        status >= 100 &&
+        status <= 599
+          ? status
+          : undefined;
+      options.callbacks?.onDiagnostic?.({
+        code,
+        phase,
+        text: runtimeDiagnosticText(code),
+        ...(safeStatus === undefined ? {} : { httpStatus: safeStatus }),
+      });
+    } catch {
+      // Diagnostics cannot affect the call lifecycle.
+    }
+  };
+
+  let debugRefusalReported = false;
+  const refuseUnsafeDebug = (): void => {
+    if (
+      !unsafeLiveDependencyDebug(process.env.DEBUG) &&
+      !unsafeLiveDependencyDebug(process.env.NODE_DEBUG)
+    )
+      return;
+    if (!debugRefusalReported) {
+      debugRefusalReported = true;
+      report("denied", "protocol");
+    }
+    throw fixedRuntimeError("protocol");
+  };
+
+  return {
+    async credentials({ signal }): Promise<LiveCredentials> {
+      refuseUnsafeDebug();
+      const resolved = await resolveLiveRegistryCredentials(options.registry, {
+        signal,
+      });
+      if (resolved) return resolved;
+      if (signal.aborted)
+        throw new Error("Live authentication resolution was cancelled.");
+      report("missing-auth", "credentials");
+      throw new Error("Live authentication is unavailable.");
+    },
+    async attestation({ signal }): Promise<LiveAttestation> {
+      refuseUnsafeDebug();
+      if (signal.aborted) throw new Error("Live attestation was cancelled.");
+      let prepared: LiveAttestation;
+      try {
+        prepared = await prepareLiveAttestation(native.deviceCheck);
+      } catch {
+        if (!signal.aborted) report("protocol-error", "attestation");
+        throw new Error("Live attestation failed.");
+      }
+      if (signal.aborted) throw new Error("Live attestation was cancelled.");
+      return prepared;
+    },
+    connect(input): LiveResourceStart<LiveConnection> {
+      const closeController = new AbortController();
+      const signal = AbortSignal.any([input.signal, closeController.signal]);
+      const { credentials, attestation } = input;
+      const pendingNative = new Set<Promise<unknown>>();
+      const pendingNetworkReads = new Set<Promise<unknown>>();
+      const pendingSocketSends = new Set<Promise<unknown>>();
+      let peerStart: LiveResourceStart<LiveNativePeer> | undefined;
+      let sidebandStart: LiveResourceStart<LiveSidebandSocket> | undefined;
+      let peer: LiveNativePeer | undefined;
+      let sideband: LiveSidebandSocket | undefined;
+      let connection: LiveConnection | undefined;
+      let active = true;
+      let transportCleanupUnconfirmed = false;
+      let closePromise: Promise<void> | undefined;
+
+      const trackOperation = <T>(
+        operations: Set<Promise<unknown>>,
+        operation: Promise<T>,
+      ): Promise<T> => {
+        operations.add(operation);
+        void operation.then(
+          () => operations.delete(operation),
+          () => operations.delete(operation),
+        );
+        return operation;
+      };
+      const trackNative = <T>(operation: Promise<T>): Promise<T> =>
+        trackOperation(pendingNative, operation);
+      const effectAllowed = (): boolean =>
+        active && !input.signal.aborted && !closeController.signal.aborted;
+      const requireEffectAllowed = (): void => {
+        if (effectAllowed()) return;
+        throw fixedRuntimeError(
+          input.signal.aborted || closeController.signal.aborted
+            ? "cancelled"
+            : "protocol",
+        );
+      };
+      const failActive = (
+        code: LiveDiagnostic,
+        phase: LiveRuntimeDiagnostic["phase"],
+        status?: number,
+      ) => {
+        if (!active || input.signal.aborted || closeController.signal.aborted)
+          return;
+        active = false;
+        closeController.abort();
+        report(code, phase, status);
+        try {
+          input.onFailure?.(code);
+        } catch {
+          // The generation owner controls its own callback failure.
+        }
+      };
+
+      let eventTokens: number = LIVE_LIMITS.eventBucket;
+      let eventBucketAt = clock.now();
+      const seenRequests = new Map<string, string>();
+      const latestTranscripts = new Map<"user" | "assistant", string>();
+      let activeDelegationId: string | undefined;
+      let requestAdmissionPending = false;
+      type WriterFragment = {
+        kind: "text" | "pong";
+        payload: string | Uint8Array;
+        framedBytes: number;
+        charged: boolean;
+      };
+      type WriterProducer = {
+        kind: "text" | "pong";
+        text?: string;
+        pong?: Uint8Array;
+        dataKind?: "application" | "final";
+        delegationId?: string;
+        offset: number;
+        completed: boolean;
+        fragment?: WriterFragment;
+        retainedBytes: number;
+        retained: boolean;
+        deadline: number;
+        final: boolean;
+        settled: boolean;
+        resolve(): void;
+        reject(error: LiveRuntimeError): void;
+      };
+      const producerQueue: WriterProducer[] = [];
+      let activeProducer: WriterProducer | undefined;
+      let writerRunning = false;
+      let writerStopped = false;
+      let finalProducerPending = false;
+      let pendingProducers = 0;
+      let queuedRetainedBytes = 0;
+      let pendingEnvelopeCount = 0;
+      let pendingEnvelopeBytes = 0;
+      let sessionCloseSent = false;
+      let closeSessionPromise: Promise<void> | undefined;
+      let startupPhase: LiveRuntimeDiagnostic["phase"] = "offer";
+      let startupReported = false;
+
+      const takeEvent = (): boolean => {
+        const now = clock.now();
+        const elapsed = Math.max(0, now - eventBucketAt);
+        eventTokens = Math.min(
+          LIVE_LIMITS.eventBucket,
+          eventTokens + (elapsed / 1_000) * LIVE_LIMITS.eventRefillPerSecond,
+        );
+        eventBucketAt = now;
+        if (eventTokens < 1) return false;
+        eventTokens -= 1;
+        return true;
+      };
+
+      const protocolFailure = (): void =>
+        failActive("protocol-error", "protocol");
+
+      const emitTranscript = (
+        role: "user" | "assistant",
+        text: string,
+      ): void => {
+        const retained = utf8Tail(text, LIVE_LIMITS.textBytes);
+        latestTranscripts.set(role, retained);
+        try {
+          options.callbacks?.onTranscript?.({ role, text: retained });
+        } catch {
+          // Caller callbacks are isolated from transport ownership.
+        }
+      };
+
+      const processEvent = (payload: string): void => {
+        if (!active || input.signal.aborted || closeController.signal.aborted)
+          return;
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(payload) as unknown;
+        } catch {
+          protocolFailure();
+          return;
+        }
+        if (!isUnknownRecord(parsed) || typeof parsed.type !== "string") {
+          protocolFailure();
+          return;
+        }
+        switch (parsed.type) {
+          case "session.started":
+          case "session.updated": {
+            const session = parsed.session;
+            if (
+              !isUnknownRecord(session) ||
+              !validCredentialField(session.id, LIVE_LIMITS.idBytes)
+            )
+              protocolFailure();
+            return;
+          }
+          case "input_transcript.added":
+          case "output_transcript.added": {
+            const item = parsed.item;
+            if (
+              !isUnknownRecord(item) ||
+              typeof item.text !== "string" ||
+              !isValidUtf8String(item.text)
+            ) {
+              protocolFailure();
+              return;
+            }
+            emitTranscript(
+              parsed.type === "input_transcript.added" ? "user" : "assistant",
+              item.text,
+            );
+            return;
+          }
+          case "turn.done": {
+            const turn = parsed.turn;
+            if (
+              !isUnknownRecord(turn) ||
+              (turn.role !== "user" && turn.role !== "assistant") ||
+              typeof turn.transcript !== "string" ||
+              !isValidUtf8String(turn.transcript)
+            ) {
+              protocolFailure();
+              return;
+            }
+            emitTranscript(turn.role, turn.transcript);
+            return;
+          }
+          case "delegation.created": {
+            const item = parsed.item;
+            if (
+              !isUnknownRecord(item) ||
+              item.type !== "delegation" ||
+              item.target !== "client" ||
+              !validCredentialField(item.id, LIVE_LIMITS.idBytes) ||
+              !Array.isArray(item.content) ||
+              item.content.length === 0 ||
+              item.content.length > LIVE_LIMITS.contentEntries
+            ) {
+              protocolFailure();
+              return;
+            }
+            const content: string[] = [];
+            let requestBytes = 0;
+            for (const entry of item.content) {
+              if (
+                !isUnknownRecord(entry) ||
+                entry.type !== "input_text" ||
+                typeof entry.text !== "string" ||
+                !isValidUtf8String(entry.text)
+              ) {
+                protocolFailure();
+                return;
+              }
+              requestBytes +=
+                (content.length === 0 ? 0 : 1) +
+                Buffer.byteLength(entry.text, "utf8");
+              if (requestBytes > LIVE_LIMITS.textBytes) {
+                protocolFailure();
+                return;
+              }
+              content.push(entry.text);
+            }
+            const joinedRequest = content.join("\n");
+            if (!byteLengthWithin(joinedRequest, LIVE_LIMITS.textBytes)) {
+              protocolFailure();
+              return;
+            }
+            const request = joinedRequest.trim();
+            if (request.length === 0) {
+              protocolFailure();
+              return;
+            }
+            const fingerprint = JSON.stringify(content);
+            const previous = seenRequests.get(item.id);
+            if (previous !== undefined) {
+              if (previous !== fingerprint) protocolFailure();
+              return;
+            }
+            if (seenRequests.size >= LIVE_LIMITS.seenIds) {
+              protocolFailure();
+              return;
+            }
+            seenRequests.set(item.id, fingerprint);
+            if (activeDelegationId !== undefined || requestAdmissionPending) {
+              protocolFailure();
+              return;
+            }
+            let admitted = false;
+            requestAdmissionPending = true;
+            try {
+              admitted =
+                options.callbacks?.onRequest?.({
+                  id: item.id,
+                  text: request,
+                }) === true;
+            } catch {
+              // #5 owns request admission; callback failures stay outside wire data.
+            } finally {
+              requestAdmissionPending = false;
+            }
+            if (!effectAllowed()) return;
+            if (admitted) activeDelegationId = item.id;
+            return;
+          }
+          case "error":
+            protocolFailure();
+            return;
+          case "output_audio.delta":
+            if (
+              typeof parsed.audio !== "string" ||
+              !isValidUtf8String(parsed.audio)
+            )
+              protocolFailure();
+            return;
+          default:
+            return;
+        }
+      };
+
+      const receiveText = (bytes: Uint8Array): void => {
+        if (!active || input.signal.aborted || closeController.signal.aborted)
+          return;
+        if (
+          !(bytes instanceof Uint8Array) ||
+          bytes.byteLength > LIVE_LIMITS.inboundBytes ||
+          !takeEvent()
+        ) {
+          protocolFailure();
+          return;
+        }
+        const payload = decodeUtf8(
+          new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength),
+        );
+        if (payload === undefined) {
+          protocolFailure();
+          return;
+        }
+        processEvent(payload);
+      };
+
+      const receiveNative = (payload: string): void => {
+        if (!active || input.signal.aborted || closeController.signal.aborted)
+          return;
+        if (
+          typeof payload !== "string" ||
+          !isValidUtf8String(payload) ||
+          !byteLengthWithin(payload, LIVE_LIMITS.inboundBytes) ||
+          !takeEvent()
+        ) {
+          protocolFailure();
+          return;
+        }
+        processEvent(payload);
+      };
+
+      function releaseRetained(producer: WriterProducer): void {
+        if (!producer.retained) return;
+        producer.retained = false;
+        queuedRetainedBytes -= producer.retainedBytes;
+      }
+
+      function releaseFragment(fragment: WriterFragment): void {
+        if (!fragment.charged) return;
+        fragment.charged = false;
+        pendingEnvelopeCount -= 1;
+        pendingEnvelopeBytes -= fragment.framedBytes;
+        materializeWaitingProducers();
+        startWriter();
+      }
+
+      function settleProducer(
+        producer: WriterProducer,
+        error?: LiveRuntimeError,
+      ): void {
+        if (producer.settled) return;
+        producer.settled = true;
+        pendingProducers -= 1;
+        releaseRetained(producer);
+        if (producer.fragment) {
+          releaseFragment(producer.fragment);
+          producer.fragment = undefined;
+        }
+        producer.text = undefined;
+        producer.pong = undefined;
+        producer.delegationId = undefined;
+        if (producer.final) finalProducerPending = false;
+        if (error) producer.reject(error);
+        else producer.resolve();
+      }
+
+      function materializeProducer(producer: WriterProducer): boolean {
+        if (producer.fragment) return true;
+        if (producer.completed || writerStopped) return false;
+        const requiredCapacity =
+          producer.kind === "pong"
+            ? (producer.pong?.byteLength ?? 0) + LIVE_WEBSOCKET_FRAME_OVERHEAD
+            : LIVE_PENDING_ENVELOPE_MAX_BYTES;
+        if (
+          pendingEnvelopeCount >= LIVE_LIMITS.pendingFragments ||
+          pendingEnvelopeBytes + requiredCapacity >
+            LIVE_LIMITS.pendingEnvelopeBytes
+        )
+          return false;
+
+        let payload: string | Uint8Array;
+        let nextOffset = producer.offset;
+        let completed = true;
+        if (producer.kind === "pong") {
+          if (!producer.pong) throw fixedRuntimeError("protocol");
+          payload = producer.pong;
+        } else {
+          if (producer.text === undefined || producer.dataKind === undefined)
+            throw fixedRuntimeError("protocol");
+          const chunk = liveTextChunkAt(producer.text, producer.offset);
+          nextOffset = chunk.next;
+          completed = nextOffset >= producer.text.length;
+          const message = producer.delegationId
+            ? {
+                type: "delegation.context.append",
+                delegation_item_id: producer.delegationId,
+                ...(producer.dataKind === "application"
+                  ? { channel: "commentary" }
+                  : {}),
+                content: [{ type: "input_text", text: chunk.text }],
+              }
+            : {
+                type: "session.context.append",
+                channel: "commentary",
+                content: [{ type: "input_text", text: chunk.text }],
+              };
+          payload = JSON.stringify(message);
+        }
+        const payloadBytes =
+          typeof payload === "string"
+            ? Buffer.byteLength(payload, "utf8")
+            : payload.byteLength;
+        if (
+          (producer.kind === "pong" &&
+            payloadBytes > LIVE_CONTROL_FRAME_BYTES) ||
+          payloadBytes + LIVE_WEBSOCKET_FRAME_OVERHEAD >
+            LIVE_PENDING_ENVELOPE_MAX_BYTES
+        )
+          throw fixedRuntimeError("protocol");
+        const framedBytes = payloadBytes + LIVE_WEBSOCKET_FRAME_OVERHEAD;
+        if (
+          pendingEnvelopeCount >= LIVE_LIMITS.pendingFragments ||
+          pendingEnvelopeBytes + framedBytes > LIVE_LIMITS.pendingEnvelopeBytes
+        )
+          return false;
+        producer.offset = nextOffset;
+        producer.completed = completed;
+        producer.fragment = {
+          kind: producer.kind,
+          payload,
+          framedBytes,
+          charged: true,
+        };
+        pendingEnvelopeCount += 1;
+        pendingEnvelopeBytes += framedBytes;
+        return true;
+      }
+
+      function materializeWaitingProducers(): void {
+        if (writerStopped) return;
+        for (let index = 0; index < producerQueue.length;) {
+          const producer = producerQueue[index]!;
+          if (producer.fragment) {
+            index += 1;
+            continue;
+          }
+          const reserveActiveFragment =
+            activeProducer !== undefined && !activeProducer.completed;
+          if (
+            pendingEnvelopeCount + 1 + (reserveActiveFragment ? 1 : 0) >
+              LIVE_LIMITS.pendingFragments ||
+            pendingEnvelopeBytes +
+              LIVE_PENDING_ENVELOPE_MAX_BYTES +
+              (reserveActiveFragment ? LIVE_PENDING_ENVELOPE_MAX_BYTES : 0) >
+              LIVE_LIMITS.pendingEnvelopeBytes
+          )
+            break;
+          try {
+            if (!materializeProducer(producer)) break;
+            index += 1;
+          } catch {
+            producerQueue.splice(index, 1);
+            settleProducer(producer, fixedRuntimeError("protocol"));
+          }
+        }
+      }
+
+      const waitForCapacity = (
+        socket: LiveSidebandSocket,
+        framedBytes: number,
+        deadline: number,
+        sendSignal: AbortSignal,
+      ): Promise<void> =>
+        new Promise<void>((resolve, reject) => {
+          let pollTimer: LiveTimer | undefined;
+          let deadlineTimer: LiveTimer | undefined;
+          let settled = false;
+          const cleanup = () => {
+            if (pollTimer) clock.clearTimer(pollTimer);
+            if (deadlineTimer) clock.clearTimer(deadlineTimer);
+            sendSignal.removeEventListener("abort", onAbort);
+          };
+          const finish = (error?: LiveRuntimeError) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            if (error) reject(error);
+            else resolve();
+          };
+          const onAbort = () => finish(fixedRuntimeError("cancelled"));
+          const observeDeadline = () => {
+            if (clock.now() < deadline) {
+              deadlineTimer = clock.setTimer(
+                observeDeadline,
+                deadline - clock.now(),
+              );
+              return;
+            }
+            finish(fixedRuntimeError("timeout"));
+          };
+          const check = () => {
+            if (sendSignal.aborted || !effectAllowed())
+              return finish(fixedRuntimeError("cancelled"));
+            if (clock.now() >= deadline)
+              return finish(fixedRuntimeError("timeout"));
+            let buffered: number;
+            try {
+              buffered = socket.bufferedAmount();
+            } catch {
+              return finish(fixedRuntimeError("protocol"));
+            }
+            if (
+              !Number.isSafeInteger(buffered) ||
+              buffered < 0 ||
+              buffered > LIVE_LIMITS.socketHighWaterBytes
+            )
+              return finish(fixedRuntimeError("protocol"));
+            if (buffered + framedBytes <= LIVE_LIMITS.socketHighWaterBytes)
+              return finish();
+            pollTimer = clock.setTimer(
+              check,
+              Math.min(10, deadline - clock.now()),
+            );
+          };
+          if (sendSignal.aborted || clock.now() >= deadline) {
+            finish(
+              sendSignal.aborted
+                ? fixedRuntimeError("cancelled")
+                : fixedRuntimeError("timeout"),
+            );
+            return;
+          }
+          sendSignal.addEventListener("abort", onAbort, { once: true });
+          deadlineTimer = clock.setTimer(
+            observeDeadline,
+            deadline - clock.now(),
+          );
+          check();
+        });
+
+      const sendChecked = async (
+        fragment: WriterFragment,
+        sendSignal: AbortSignal,
+        deadline: number,
+      ): Promise<void> => {
+        const socket = sideband;
+        if (!socket || closeController.signal.aborted) {
+          releaseFragment(fragment);
+          throw fixedRuntimeError("cancelled");
+        }
+        try {
+          await waitForCapacity(
+            socket,
+            fragment.framedBytes,
+            deadline,
+            sendSignal,
+          );
+        } catch (error) {
+          releaseFragment(fragment);
+          throw error;
+        }
+        if (sendSignal.aborted || !effectAllowed()) {
+          releaseFragment(fragment);
+          throw fixedRuntimeError("cancelled");
+        }
+        let operation: Promise<void>;
+        try {
+          operation =
+            fragment.kind === "text"
+              ? socket.sendText(fragment.payload as string)
+              : socket.sendPong(fragment.payload as Uint8Array);
+        } catch {
+          releaseFragment(fragment);
+          throw fixedRuntimeError("protocol");
+        }
+        pendingSocketSends.add(operation);
+        void operation.then(
+          () => {
+            pendingSocketSends.delete(operation);
+            releaseFragment(fragment);
+          },
+          () => {
+            pendingSocketSends.delete(operation);
+            releaseFragment(fragment);
+          },
+        );
+        if (clock.now() >= deadline) throw fixedRuntimeError("timeout");
+        let timer: LiveTimer | undefined;
+        let removeAbort: (() => void) | undefined;
+        const cancelled = new Promise<never>((_resolve, reject) => {
+          const onAbort = () => reject(fixedRuntimeError("cancelled"));
+          sendSignal.addEventListener("abort", onAbort, { once: true });
+          removeAbort = () => sendSignal.removeEventListener("abort", onAbort);
+          if (sendSignal.aborted) onAbort();
+        });
+        try {
+          await Promise.race([
+            operation.catch(() => {
+              throw fixedRuntimeError("protocol");
+            }),
+            cancelled,
+            new Promise<never>((_resolve, reject) => {
+              const observeDeadline = () => {
+                if (clock.now() < deadline) {
+                  timer = clock.setTimer(
+                    observeDeadline,
+                    deadline - clock.now(),
+                  );
+                  return;
+                }
+                reject(fixedRuntimeError("timeout"));
+              };
+              timer = clock.setTimer(observeDeadline, deadline - clock.now());
+            }),
+          ]);
+          if (clock.now() >= deadline) throw fixedRuntimeError("timeout");
+        } finally {
+          if (timer) clock.clearTimer(timer);
+          removeAbort?.();
+        }
+      };
+
+      function startWriter(): void {
+        if (writerRunning || writerStopped) return;
+        writerRunning = true;
+        void (async () => {
+          while (!writerStopped) {
+            const producer =
+              activeProducer ?? producerQueue.shift() ?? undefined;
+            if (!producer) return;
+            if (!activeProducer) {
+              activeProducer = producer;
+              releaseRetained(producer);
+            }
+            try {
+              if (!producer.fragment && !materializeProducer(producer)) return;
+              const fragment = producer.fragment!;
+              producer.fragment = undefined;
+              await sendChecked(fragment, signal, producer.deadline);
+              if (writerStopped) throw fixedRuntimeError("cancelled");
+              if (producer.completed) {
+                activeProducer = undefined;
+                settleProducer(producer);
+                materializeWaitingProducers();
+              }
+            } catch (error) {
+              activeProducer = undefined;
+              settleProducer(
+                producer,
+                error instanceof LiveRuntimeError
+                  ? error
+                  : fixedRuntimeError("protocol"),
+              );
+              materializeWaitingProducers();
+            }
+          }
+        })().finally(() => {
+          writerRunning = false;
+          if (writerStopped) return;
+          if (activeProducer) {
+            try {
+              if (
+                activeProducer.fragment ||
+                materializeProducer(activeProducer)
+              )
+                startWriter();
+              return;
+            } catch {
+              const failed = activeProducer;
+              activeProducer = undefined;
+              settleProducer(failed, fixedRuntimeError("protocol"));
+            }
+          }
+          materializeWaitingProducers();
+          if (producerQueue[0]?.fragment) startWriter();
+        });
+      }
+
+      const queueProducer = (
+        specification:
+          | {
+              kind: "text";
+              text: string;
+              dataKind: "application" | "final";
+              delegationId?: string;
+              final: boolean;
+            }
+          | { kind: "pong"; pong: Uint8Array; final: false },
+        retainedBytes: number,
+        deadline: number,
+      ): Promise<void> => {
+        if (writerStopped || !effectAllowed())
+          return Promise.reject(fixedRuntimeError("cancelled"));
+        if (
+          !Number.isSafeInteger(retainedBytes) ||
+          retainedBytes < 0 ||
+          pendingProducers >= LIVE_LIMITS.pendingProducers ||
+          queuedRetainedBytes + retainedBytes >
+            LIVE_LIMITS.retainedProducerBytes ||
+          (specification.final && finalProducerPending)
+        )
+          return Promise.reject(fixedRuntimeError("protocol"));
+        let resolveProducer!: () => void;
+        let rejectProducer!: (error: LiveRuntimeError) => void;
+        const operation = new Promise<void>((resolve, reject) => {
+          resolveProducer = resolve;
+          rejectProducer = reject;
+        });
+        const producer: WriterProducer = {
+          ...specification,
+          offset: 0,
+          completed: false,
+          retainedBytes,
+          retained: true,
+          deadline,
+          settled: false,
+          resolve: resolveProducer,
+          reject: rejectProducer,
+        };
+        pendingProducers += 1;
+        queuedRetainedBytes += retainedBytes;
+        if (producer.final) finalProducerPending = true;
+        producerQueue.push(producer);
+        materializeWaitingProducers();
+        startWriter();
+        return operation;
+      };
+
+      const queuePong = (payload: Uint8Array): void => {
+        if (!effectAllowed()) return;
+        if (
+          !(payload instanceof Uint8Array) ||
+          payload.byteLength > LIVE_CONTROL_FRAME_BYTES ||
+          !takeEvent()
+        ) {
+          protocolFailure();
+          return;
+        }
+        const retainedPayload = payload.slice();
+        void queueProducer(
+          { kind: "pong", pong: retainedPayload, final: false },
+          retainedPayload.byteLength,
+          clock.now() + LIVE_SEND_MS,
+        ).catch(() => protocolFailure());
+      };
+
+      const cancelWriter = (): void => {
+        if (writerStopped) return;
+        writerStopped = true;
+        const cancellation = fixedRuntimeError("cancelled");
+        const current = activeProducer;
+        activeProducer = undefined;
+        if (current) settleProducer(current, cancellation);
+        for (const producer of producerQueue.splice(0))
+          settleProducer(producer, cancellation);
+      };
+
+      const closeResources = (): Promise<void> => {
+        if (closePromise) return closePromise;
+        active = false;
+        closeController.abort();
+        cancelWriter();
+        closePromise = (async () => {
+          const disposals: Promise<unknown>[] = [];
+          if (sidebandStart) {
+            const start = sidebandStart;
+            sidebandStart = undefined;
+            disposals.push(
+              start.terminate(async (socket) => {
+                if (!(await socket.close())) throw fixedRuntimeError("cleanup");
+              }),
+            );
+          }
+          if (peerStart) {
+            const start = peerStart;
+            peerStart = undefined;
+            disposals.push(
+              start.terminate(async (ownedPeer) => {
+                if (!(await ownedPeer.close()))
+                  throw fixedRuntimeError("cleanup");
+              }),
+            );
+          }
+          const disposalResult = Promise.allSettled(disposals);
+          await Promise.allSettled([...pendingNative, ...pendingSocketSends]);
+          const disposalSettled = await disposalResult;
+          if (
+            transportCleanupUnconfirmed ||
+            disposalSettled.some((result) => result.status === "rejected")
+          ) {
+            report("cleanup-blocked", "cleanup");
+            throw fixedRuntimeError("cleanup");
+          }
+        })();
+        return closePromise;
+      };
+
+      const operation = (async (): Promise<LiveConnection> => {
+        try {
+          refuseUnsafeDebug();
+        } catch {
+          startupReported = true;
+          active = false;
+          try {
+            input.onFailure?.("denied");
+          } catch {
+            // The generation owner controls its own callback failure.
+          }
+          throw fixedRuntimeError("protocol");
+        }
+        const realtimeSessionId = randomId();
+        const headers = buildLiveHeaders(
+          credentials,
+          options.sessionId,
+          realtimeSessionId,
+          attestation,
+        );
+
+        requireEffectAllowed();
+        try {
+          peerStart = native.createPeer({
+            onEvent: receiveNative,
+            onOutputLevel: (level) => {
+              if (!Number.isFinite(level)) protocolFailure();
+            },
+            onFailure: () => failActive("protocol-error", "native-open"),
+          });
+        } catch {
+          transportCleanupUnconfirmed = true;
+          throw fixedRuntimeError("protocol");
+        }
+        requireEffectAllowed();
+        const startedPeer = peerStart;
+        const offerOperation = trackNative(
+          startedPeer.result.then((createdPeer) => {
+            requireEffectAllowed();
+            peer = createdPeer;
+            requireEffectAllowed();
+            return createdPeer.createOffer();
+          }),
+        );
+        const offer = await waitForRuntimePhase(
+          offerOperation,
+          input.deadline,
+          clock,
+          signal,
+        );
+        const requestBody = buildLiveSessionRequest(
+          offer,
+          options.instructions,
+          input.voice,
+        );
+        const signalingHeaders = {
+          ...headers,
+          Accept: "*/*",
+          "Content-Type": "application/json",
+        };
+        if (
+          combinedHeaderBytes(signalingHeaders) >
+          LIVE_LIMITS.combinedHeaderBytes
+        )
+          throw fixedRuntimeError("protocol");
+
+        startupPhase = "signaling";
+        const signalingDeadline = Math.min(
+          input.deadline,
+          clock.now() + LIVE_PHASE_MS,
+        );
+        requireEffectAllowed();
+        const signalingProxy = await waitForRuntimePhase(
+          Promise.resolve(proxyForUrl(LIVE_SIGNALING_URL)),
+          signalingDeadline,
+          clock,
+          signal,
+        );
+        requireEffectAllowed();
+        let signalingStart: LiveResourceStart<LiveHttpResponse>;
+        try {
+          signalingStart = network.signal({
+            url: LIVE_SIGNALING_URL,
+            method: "POST",
+            redirect: "manual",
+            headers: signalingHeaders,
+            body: requestBody,
+            ...(signalingProxy ? { proxyUrl: signalingProxy } : {}),
+            signal,
+          });
+        } catch {
+          transportCleanupUnconfirmed = true;
+          throw fixedRuntimeError("protocol");
+        }
+        let response: LiveHttpResponse | undefined;
+        try {
+          requireEffectAllowed();
+          response = await waitForRuntimePhase(
+            signalingStart.result,
+            signalingDeadline,
+            clock,
+            signal,
+          );
+          requireEffectAllowed();
+          if (
+            !Number.isSafeInteger(response.status) ||
+            response.status < 200 ||
+            response.status > 299
+          ) {
+            try {
+              await waitForRuntimePhase(
+                trackOperation(
+                  pendingNetworkReads,
+                  readBoundedBody(
+                    response,
+                    LIVE_LIMITS.nonOkBodyBytes,
+                    false,
+                    signalingDeadline,
+                    clock,
+                    signal,
+                  ),
+                ),
+                signalingDeadline,
+                clock,
+                signal,
+              );
+            } catch (error) {
+              if (
+                error instanceof LiveRuntimeError &&
+                (error.kind === "timeout" ||
+                  error.kind === "cancelled" ||
+                  error.kind === "cleanup")
+              )
+                throw error;
+            }
+            try {
+              await response.cancel();
+            } catch {
+              throw fixedRuntimeError("cleanup");
+            }
+            startupReported = true;
+            failActive("protocol-error", "signaling", response.status);
+            throw fixedRuntimeError("protocol");
+          }
+          const answerBytes = await waitForRuntimePhase(
+            trackOperation(
+              pendingNetworkReads,
+              readBoundedBody(
+                response,
+                LIVE_LIMITS.sdpBytes,
+                true,
+                signalingDeadline,
+                clock,
+                signal,
+              ),
+            ),
+            signalingDeadline,
+            clock,
+            signal,
+          );
+          if (answerBytes.byteLength === 0) throw fixedRuntimeError("protocol");
+          const answer = decodeUtf8(answerBytes);
+          if (answer === undefined) throw fixedRuntimeError("protocol");
+          const callId = parseLiveCallLocation(response.location);
+          if (!peer) throw fixedRuntimeError("protocol");
+          startupPhase = "answer";
+          requireEffectAllowed();
+          const acceptOperation = trackNative(peer.acceptAnswer(answer));
+          await waitForRuntimePhase(
+            acceptOperation,
+            input.deadline,
+            clock,
+            signal,
+          );
+          startupPhase = "native-open";
+          requireEffectAllowed();
+          const openOperation = trackNative(peer.waitForOpen());
+          await waitForRuntimePhase(
+            openOperation,
+            input.deadline,
+            clock,
+            signal,
+          );
+          requireEffectAllowed();
+          peer.setMuted(false);
+
+          startupPhase = "sideband";
+          const sidebandUrl = `wss://api.openai.com/v1/live/${callId}`;
+          requireEffectAllowed();
+          const sidebandProxy = await waitForRuntimePhase(
+            Promise.resolve(proxyForUrl(sidebandUrl)),
+            input.deadline,
+            clock,
+            signal,
+          );
+          requireEffectAllowed();
+          let currentCandidate: object | undefined;
+          for (
+            let attemptNumber = 0;
+            attemptNumber < LIVE_SIDE_BAND_ATTEMPTS;
+            attemptNumber += 1
+          ) {
+            requireEffectAllowed();
+            let candidate: LiveResourceStart<LiveSidebandSocket>;
+            const candidateState: {
+              token: object;
+              adopted: boolean;
+              retired: boolean;
+              failure?: LiveSidebandFailure;
+            } = {
+              token: {},
+              adopted: false,
+              retired: false,
+            };
+            currentCandidate = candidateState.token;
+            const candidateIsCurrent = () =>
+              currentCandidate === candidateState.token &&
+              !candidateState.retired;
+            const failCandidate = (failure: LiveSidebandFailure) => {
+              if (!candidateIsCurrent()) return;
+              if (candidateState.adopted) {
+                failActive("protocol-error", "sideband");
+                return;
+              }
+              candidateState.failure ??= failure;
+            };
+            try {
+              candidate = network.openSideband({
+                url: sidebandUrl,
+                headers,
+                followRedirects: false,
+                maxPayloadBytes: LIVE_LIMITS.inboundBytes,
+                autoPong: false,
+                ...(sidebandProxy ? { proxyUrl: sidebandProxy } : {}),
+                signal,
+                onText: (payload) => {
+                  if (!candidateIsCurrent()) return;
+                  if (!candidateState.adopted) {
+                    failCandidate({ kind: "malformed" });
+                    return;
+                  }
+                  receiveText(payload);
+                },
+                onBinary: (payload) => {
+                  if (!candidateIsCurrent()) return;
+                  if (!candidateState.adopted) {
+                    failCandidate({ kind: "malformed" });
+                    return;
+                  }
+                  if (!effectAllowed()) return;
+                  if (
+                    payload.byteLength > LIVE_LIMITS.inboundBytes ||
+                    !takeEvent()
+                  ) {
+                    protocolFailure();
+                    return;
+                  }
+                  protocolFailure();
+                },
+                onPing: (payload) => {
+                  if (!candidateIsCurrent()) return;
+                  if (!candidateState.adopted) {
+                    failCandidate({ kind: "malformed" });
+                    return;
+                  }
+                  queuePong(payload);
+                },
+                onPong: (payload) => {
+                  if (!candidateIsCurrent()) return;
+                  if (!candidateState.adopted) {
+                    failCandidate({ kind: "malformed" });
+                    return;
+                  }
+                  if (!effectAllowed()) return;
+                  if (
+                    payload.byteLength > LIVE_CONTROL_FRAME_BYTES ||
+                    !takeEvent()
+                  )
+                    protocolFailure();
+                },
+                onFailure: failCandidate,
+                onClose: () => failCandidate({ kind: "malformed" }),
+              });
+            } catch {
+              candidateState.retired = true;
+              currentCandidate = undefined;
+              transportCleanupUnconfirmed = true;
+              throw fixedRuntimeError("protocol");
+            }
+            try {
+              requireEffectAllowed();
+              const opened = await waitForRuntimePhase(
+                candidate.result,
+                input.deadline,
+                clock,
+                signal,
+              );
+              requireEffectAllowed();
+              if (candidateState.failure) throw candidateState.failure;
+              candidateState.adopted = true;
+              sidebandStart = candidate;
+              sideband = opened;
+              break;
+            } catch (failure) {
+              const observedFailure = candidateState.failure ?? failure;
+              candidateState.retired = true;
+              if (currentCandidate === candidateState.token)
+                currentCandidate = undefined;
+              try {
+                await candidate.terminate(async (socket) => {
+                  if (!(await socket.close()))
+                    throw fixedRuntimeError("cleanup");
+                });
+              } catch {
+                transportCleanupUnconfirmed = true;
+                throw fixedRuntimeError("cleanup");
+              }
+              if (
+                observedFailure instanceof LiveRuntimeError &&
+                (observedFailure.kind === "timeout" ||
+                  observedFailure.kind === "cancelled")
+              )
+                throw observedFailure;
+              const transient = sidebandFailureIsTransient(observedFailure);
+              if (!transient || attemptNumber + 1 >= LIVE_SIDE_BAND_ATTEMPTS)
+                throw fixedRuntimeError("protocol");
+              const backoff = 200 * 2 ** attemptNumber;
+              const remaining = input.deadline - clock.now();
+              if (remaining <= 0) throw fixedRuntimeError("timeout");
+              await waitWithClock(clock, Math.min(backoff, remaining), signal);
+              if (clock.now() >= input.deadline)
+                throw fixedRuntimeError("timeout");
+            }
+          }
+          if (!sideband || !peer) throw fixedRuntimeError("protocol");
+        } finally {
+          try {
+            await signalingStart.terminate(async (ownedResponse) =>
+              ownedResponse.cancel(),
+            );
+          } catch {
+            transportCleanupUnconfirmed = true;
+            throw fixedRuntimeError("cleanup");
+          } finally {
+            await Promise.allSettled([...pendingNetworkReads]);
+          }
+        }
+
+        connection = {
+          startCapture(onSample) {
+            requireEffectAllowed();
+            try {
+              return native.startCapture({
+                onSample(samples) {
+                  if (effectAllowed()) onSample(samples);
+                },
+                onFailure() {
+                  failActive("audio-error", "audio");
+                },
+              });
+            } catch {
+              transportCleanupUnconfirmed = true;
+              throw fixedRuntimeError("protocol");
+            }
+          },
+          sendSample(samples) {
+            if (!peer) throw fixedRuntimeError("cancelled");
+            requireEffectAllowed();
+            peer.pushAudio(samples);
+          },
+          sendData(data) {
+            if (!effectAllowed() || !sideband)
+              return Promise.reject(fixedRuntimeError("cancelled"));
+            if (
+              (data.kind !== "application" && data.kind !== "final") ||
+              typeof data.text !== "string" ||
+              !isValidUtf8String(data.text)
+            )
+              return Promise.reject(fixedRuntimeError("protocol"));
+            const dataKind = data.kind;
+            if (
+              dataKind === "application" &&
+              !byteLengthWithin(data.text, LIVE_LIMITS.textBytes)
+            )
+              return Promise.reject(fixedRuntimeError("protocol"));
+            const delegationId = activeDelegationId;
+            if (dataKind === "final" && !delegationId)
+              return Promise.reject(fixedRuntimeError("protocol"));
+            const boundedText =
+              dataKind === "final" ? truncateLiveFinal(data.text) : data.text;
+            const text =
+              dataKind === "final"
+                ? `"Agent Final Message":\n\n${boundedText}`
+                : boundedText;
+            const deadline = clock.now() + LIVE_SEND_MS;
+            const operation = queueProducer(
+              {
+                kind: "text",
+                text,
+                dataKind,
+                ...(delegationId ? { delegationId } : {}),
+                final: dataKind === "final",
+              },
+              Buffer.byteLength(text, "utf8"),
+              deadline,
+            );
+            if (dataKind === "final")
+              void operation.then(
+                () => {
+                  if (activeDelegationId === delegationId)
+                    activeDelegationId = undefined;
+                },
+                () => undefined,
+              );
+            return operation;
+          },
+          closeSession(request) {
+            if (
+              sessionCloseSent ||
+              request.signal.aborted ||
+              closeController.signal.aborted ||
+              !sideband
+            )
+              return;
+            sessionCloseSent = true;
+            if (clock.now() >= request.deadline) return;
+            const socket = sideband;
+            const payload = '{"type":"session.close"}';
+            const framedBytes =
+              Buffer.byteLength(payload, "utf8") +
+              LIVE_WEBSOCKET_FRAME_OVERHEAD;
+            let buffered: number;
+            try {
+              buffered = socket.bufferedAmount();
+            } catch {
+              return;
+            }
+            if (
+              !Number.isSafeInteger(buffered) ||
+              buffered < 0 ||
+              buffered > LIVE_LIMITS.socketHighWaterBytes ||
+              buffered + pendingEnvelopeBytes + framedBytes >
+                LIVE_LIMITS.socketHighWaterBytes
+            )
+              return;
+            pendingEnvelopeBytes += framedBytes;
+            let operation: Promise<void>;
+            try {
+              operation = socket.sendText(payload);
+            } catch {
+              pendingEnvelopeBytes -= framedBytes;
+              return;
+            }
+            pendingSocketSends.add(operation);
+            void operation.then(
+              () => {
+                pendingSocketSends.delete(operation);
+                pendingEnvelopeBytes -= framedBytes;
+              },
+              () => {
+                pendingSocketSends.delete(operation);
+                pendingEnvelopeBytes -= framedBytes;
+              },
+            );
+            closeSessionPromise = operation.catch(() => {
+              throw fixedRuntimeError("protocol");
+            });
+            return closeSessionPromise;
+          },
+          close: closeResources,
+        };
+        return connection;
+      })().catch((error: unknown) => {
+        const closed =
+          error instanceof LiveRuntimeError
+            ? error
+            : fixedRuntimeError("protocol");
+        if (
+          !startupReported &&
+          !(input.signal.aborted && closed.kind === "cancelled")
+        )
+          failActive(
+            closed.kind === "timeout"
+              ? "connect-timeout"
+              : closed.kind === "cleanup"
+                ? "cleanup-blocked"
+                : "protocol-error",
+            closed.kind === "cleanup" ? "cleanup" : startupPhase,
+          );
+        throw closed;
+      });
+      void operation.catch(() => undefined);
+
+      return {
+        result: operation,
+        async terminate(dispose): Promise<void> {
+          closeController.abort();
+          const cleanup = closeResources();
+          const settled = await operation.then(
+            (value) => ({ kind: "value" as const, value }),
+            () => ({ kind: "error" as const }),
+          );
+          if (settled.kind === "value") await dispose(settled.value);
+          await cleanup;
+        },
+      };
+    },
+  };
+}
+
+interface DefaultNativeCapture {
+  stop(): void;
+}
+
+interface DefaultNativePeer {
+  createOffer(): Promise<string>;
+  acceptAnswer(answer: string): Promise<void>;
+  waitForOpen(timeoutMs?: number): Promise<void>;
+  pushAudio(samples: Float32Array): void;
+  setMuted(muted: boolean): void;
+  close(): Promise<void>;
+}
+
+interface DefaultNativeBindings {
+  AudioCapture: new (
+    sampleRate: number,
+    callback: (error: Error | null, samples: Float32Array) => void,
+  ) => DefaultNativeCapture;
+  LiveWebRtcPeer: new (
+    onEvent: (error: Error | null, payload: string) => void,
+    onLevel: (error: Error | null, level: number) => void,
+    onFailure: (error: Error | null, message: string) => void,
+  ) => DefaultNativePeer;
+  deviceCheckGenerateToken(): Promise<LiveDeviceCheckResult>;
+  __ompInstallTokioRuntime(): void;
+}
+
+const LIVE_NATIVE_PACKAGES = {
+  "darwin-arm64": "@oh-my-pi/pi-natives-darwin-arm64",
+  "darwin-x64": "@oh-my-pi/pi-natives-darwin-x64",
+  "linux-arm64": "@oh-my-pi/pi-natives-linux-arm64",
+  "linux-x64": "@oh-my-pi/pi-natives-linux-x64",
+  "win32-x64": "@oh-my-pi/pi-natives-win32-x64",
+} as const;
+const liveRuntimeRequire = createRequire(import.meta.url);
+let defaultNativeBindings: DefaultNativeBindings | undefined;
+
+function loadDefaultLiveNativeBindings(): DefaultNativeBindings {
+  if (defaultNativeBindings) return defaultNativeBindings;
+  const packageName =
+    LIVE_NATIVE_PACKAGES[
+      `${process.platform}-${process.arch}` as keyof typeof LIVE_NATIVE_PACKAGES
+    ];
+  if (!packageName) throw new Error("Live native target is unsupported.");
+  const loaded: unknown = liveRuntimeRequire(packageName);
+  if (
+    !isUnknownRecord(loaded) ||
+    typeof loaded.AudioCapture !== "function" ||
+    typeof loaded.LiveWebRtcPeer !== "function" ||
+    typeof loaded.deviceCheckGenerateToken !== "function" ||
+    typeof loaded.__ompInstallTokioRuntime !== "function"
+  )
+    throw new Error("Live native bindings are invalid.");
+  const bindings = loaded as unknown as DefaultNativeBindings;
+  bindings.__ompInstallTokioRuntime();
+  defaultNativeBindings = bindings;
+  return bindings;
+}
+
+function createDefaultLiveNativeAdapter(): LiveNativeAdapter {
+  return {
+    deviceCheck: {
+      async generateToken(): Promise<LiveDeviceCheckResult> {
+        return loadDefaultLiveNativeBindings().deviceCheckGenerateToken();
+      },
+    },
+    createPeer(input) {
+      let nativePeer: DefaultNativePeer;
+      try {
+        const bindings = loadDefaultLiveNativeBindings();
+        nativePeer = new bindings.LiveWebRtcPeer(
+          (error, payload) => {
+            if (error) input.onFailure();
+            else input.onEvent(payload);
+          },
+          (error, level) => {
+            if (error) input.onFailure();
+            else input.onOutputLevel(level);
+          },
+          () => input.onFailure(),
+        );
+      } catch {
+        throw new Error("Live native peer could not be constructed.");
+      }
+      const peer: LiveNativePeer = {
+        createOffer: () => nativePeer.createOffer(),
+        acceptAnswer: (answer) => nativePeer.acceptAnswer(answer),
+        waitForOpen: () => nativePeer.waitForOpen(),
+        pushAudio: (samples) => nativePeer.pushAudio(samples),
+        setMuted: (muted) => nativePeer.setMuted(muted),
+        async close(): Promise<boolean> {
+          try {
+            await nativePeer.close();
+          } catch {
+            return false;
+          }
+          // The pinned native promise does not join every hidden peer/speaker task.
+          return false;
+        },
+      };
+      let termination: Promise<void> | undefined;
+      return {
+        result: Promise.resolve(peer),
+        terminate(dispose) {
+          termination ??= dispose(peer);
+          return termination;
+        },
+      };
+    },
+    startCapture(input) {
+      let nativeCapture: DefaultNativeCapture;
+      try {
+        const bindings = loadDefaultLiveNativeBindings();
+        nativeCapture = new bindings.AudioCapture(16_000, (error, samples) => {
+          if (error) input.onFailure();
+          else input.onSample(samples);
+        });
+      } catch {
+        throw new Error("Live audio capture could not be constructed.");
+      }
+      let stopped = false;
+      const capture: LiveCapture = {
+        async stop(): Promise<void> {
+          if (stopped) return;
+          stopped = true;
+          nativeCapture.stop();
+        },
+      };
+      let termination: Promise<void> | undefined;
+      return {
+        result: Promise.resolve(capture),
+        terminate(dispose) {
+          termination ??= dispose(capture);
+          return termination;
+        },
+      };
+    },
+  };
+}
+
+interface DefaultWebSocket {
+  readonly readyState: number;
+  readonly bufferedAmount: number;
+  on(event: string, listener: (...args: unknown[]) => void): void;
+  once(event: string, listener: (...args: unknown[]) => void): void;
+  send(payload: string, callback: (error?: Error) => void): void;
+  pong(payload: Uint8Array, callback: (error?: Error) => void): void;
+  close(code?: number, reason?: string): void;
+  terminate(): void;
+}
+
+interface DefaultWebSocketConstructor {
+  new (url: string, options: Record<string, unknown>): DefaultWebSocket;
+}
+
+interface DefaultHttpsProxyAgentConstructor {
+  new (url: string): { destroy(): void };
+}
+
+export interface LiveNetworkDispatcher {
+  destroy(): Promise<void>;
+}
+
+export interface LiveNetworkFetchResponse {
+  status: number;
+  statusText: string;
+  headers: { get(name: string): string | null };
+  body: (AsyncIterable<Uint8Array> & { cancel(): Promise<void> }) | null;
+}
+
+export interface LiveDefaultHttpDependencies {
+  createHttpAgent(): LiveNetworkDispatcher;
+  createHttpProxyAgent(url: string): LiveNetworkDispatcher;
+  fetch(
+    url: string,
+    input: {
+      method: "POST";
+      redirect: "manual";
+      headers: Record<string, string>;
+      body: string;
+      signal: AbortSignal;
+      dispatcher: LiveNetworkDispatcher;
+    },
+  ): Promise<LiveNetworkFetchResponse>;
+}
+
+export interface LiveDefaultNetworkDependencies extends LiveDefaultHttpDependencies {
+  loadHttp?(): Promise<LiveDefaultHttpDependencies>;
+  createWebSocket(
+    url: string,
+    options: Record<string, unknown>,
+  ): DefaultWebSocket;
+  createWebSocketProxyAgent(url: string): { destroy(): void | Promise<void> };
+}
+
+function classifyWebSocketFailure(error: unknown): LiveSidebandFailure {
+  const code =
+    isUnknownRecord(error) && typeof error.code === "string"
+      ? error.code
+      : undefined;
+  return code === "ECONNRESET" ||
+    code === "ECONNREFUSED" ||
+    code === "ETIMEDOUT" ||
+    code === "EAI_AGAIN" ||
+    code === "ENETUNREACH" ||
+    code === "EHOSTUNREACH" ||
+    code === "EPIPE" ||
+    code === "UND_ERR_CONNECT_TIMEOUT"
+    ? { kind: "transient" }
+    : { kind: "malformed" };
+}
+
+function webSocketBytes(
+  value: unknown,
+  maximum: number,
+): Uint8Array | undefined {
+  if (value instanceof Uint8Array)
+    return value.byteLength <= maximum ? value : undefined;
+  if (value instanceof ArrayBuffer) {
+    if (value.byteLength > maximum) return undefined;
+    return new Uint8Array(value);
+  }
+  if (
+    Array.isArray(value) &&
+    value.every((part) => part instanceof Uint8Array)
+  ) {
+    const length = value.reduce((total, part) => total + part.byteLength, 0);
+    if (length > maximum) return undefined;
+    const joined = new Uint8Array(length);
+    let offset = 0;
+    for (const part of value) {
+      joined.set(part, offset);
+      offset += part.byteLength;
+    }
+    return joined;
+  }
+  return undefined;
+}
+
+async function loadDefaultLiveHttpDependencies(): Promise<LiveDefaultHttpDependencies> {
+  const undici = await import("undici");
+  return {
+    createHttpAgent: () => new undici.Agent(),
+    createHttpProxyAgent: (url) => new undici.ProxyAgent(url),
+    fetch: async (url, input) =>
+      (await undici.fetch(url, {
+        method: input.method,
+        redirect: input.redirect,
+        headers: input.headers,
+        body: input.body,
+        signal: input.signal,
+        dispatcher: input.dispatcher as Dispatcher,
+      })) as unknown as LiveNetworkFetchResponse,
+  };
+}
+
+export function createDefaultLiveNetworkAdapter(
+  dependencies?: LiveDefaultNetworkDependencies,
+): LiveNetworkAdapter {
+  return {
+    signal(input) {
+      const controller = new AbortController();
+      const signal = AbortSignal.any([input.signal, controller.signal]);
+      let dispatcher: LiveNetworkDispatcher | undefined;
+      let response: LiveHttpResponse | undefined;
+      const result = (async (): Promise<LiveHttpResponse> => {
+        if (signal.aborted) throw fixedRuntimeError("cancelled");
+        const http = dependencies?.loadHttp
+          ? await dependencies.loadHttp()
+          : (dependencies ?? (await loadDefaultLiveHttpDependencies()));
+        if (signal.aborted) throw fixedRuntimeError("cancelled");
+        dispatcher = input.proxyUrl
+          ? http.createHttpProxyAgent(input.proxyUrl)
+          : http.createHttpAgent();
+        if (signal.aborted) throw fixedRuntimeError("cancelled");
+        const fetched = await http.fetch(input.url, {
+          method: input.method,
+          redirect: input.redirect,
+          headers: input.headers,
+          body: input.body,
+          signal,
+          dispatcher,
+        });
+        if (signal.aborted) throw fixedRuntimeError("cancelled");
+        const body = fetched.body;
+        const bodyIterator = body?.[Symbol.asyncIterator]();
+        let bodyClaimed = false;
+        const ownedBody: AsyncIterable<Uint8Array> = bodyIterator
+          ? {
+              [Symbol.asyncIterator](): AsyncIterator<Uint8Array> {
+                if (bodyClaimed) throw fixedRuntimeError("protocol");
+                bodyClaimed = true;
+                return bodyIterator;
+              },
+            }
+          : (async function* () {})();
+        let cancellation: Promise<void> | undefined;
+        response = {
+          status: fetched.status,
+          statusText: fetched.statusText,
+          location: fetched.headers.get("location") ?? undefined,
+          body: ownedBody,
+          cancel(): Promise<void> {
+            cancellation ??= (async () => {
+              controller.abort();
+              await bodyIterator?.return?.();
+            })();
+            return cancellation;
+          },
+        };
+        return response;
+      })();
+      void result.catch(() => undefined);
+      let termination: Promise<void> | undefined;
+      return {
+        result,
+        terminate(dispose) {
+          termination ??= (async () => {
+            const cleanupErrors: unknown[] = [];
+            if (!response) controller.abort();
+            const settled = await result.then(
+              (value) => value,
+              () => undefined,
+            );
+            if (settled) {
+              try {
+                await dispose(settled);
+              } catch (error) {
+                cleanupErrors.push(error);
+              }
+            }
+            try {
+              await dispatcher?.destroy();
+            } catch (error) {
+              cleanupErrors.push(error);
+            }
+            if (cleanupErrors.length > 0) throw fixedRuntimeError("cleanup");
+          })();
+          return termination;
+        },
+      };
+    },
+    openSideband(input) {
+      const controller = new AbortController();
+      const signal = AbortSignal.any([input.signal, controller.signal]);
+      let socket: DefaultWebSocket | undefined;
+      let proxyAgent: { destroy(): void | Promise<void> } | undefined;
+      let opened = false;
+      let closing = false;
+      let closeObserved = false;
+      let constructionUnconfirmed = false;
+      let socketClosure: Promise<boolean> | undefined;
+      let resolveClosed: (() => void) | undefined;
+      const closed = new Promise<void>((resolve) => {
+        resolveClosed = resolve;
+      });
+      const closeSocket = (): Promise<boolean> => {
+        if (socketClosure) return socketClosure;
+        closing = true;
+        socketClosure = (async () => {
+          if (!socket) return !constructionUnconfirmed && !input.proxyUrl;
+          if (closeObserved) return !input.proxyUrl;
+          try {
+            if (
+              socket.readyState === 0 ||
+              socket.readyState === 1 ||
+              socket.readyState === 2
+            )
+              socket.terminate();
+            else return false;
+          } catch {
+            return false;
+          }
+          await closed;
+          return !input.proxyUrl;
+        })();
+        return socketClosure;
+      };
+      const result = (async (): Promise<LiveSidebandSocket> => {
+        if (signal.aborted) throw { kind: "cancelled" as const };
+        try {
+          if (input.proxyUrl)
+            proxyAgent = dependencies
+              ? dependencies.createWebSocketProxyAgent(input.proxyUrl)
+              : new (
+                  liveRuntimeRequire("https-proxy-agent") as {
+                    HttpsProxyAgent: DefaultHttpsProxyAgentConstructor;
+                  }
+                ).HttpsProxyAgent(input.proxyUrl);
+          const socketOptions = {
+            headers: input.headers,
+            followRedirects: input.followRedirects,
+            maxPayload: input.maxPayloadBytes,
+            autoPong: input.autoPong,
+            ...(proxyAgent ? { agent: proxyAgent } : {}),
+          };
+          if (dependencies) {
+            socket = dependencies.createWebSocket(input.url, socketOptions);
+          } else {
+            const loadedWebSocket: unknown = liveRuntimeRequire("ws");
+            const WebSocket =
+              typeof loadedWebSocket === "function"
+                ? (loadedWebSocket as DefaultWebSocketConstructor)
+                : (
+                    loadedWebSocket as {
+                      default: DefaultWebSocketConstructor;
+                    }
+                  ).default;
+            socket = new WebSocket(input.url, socketOptions);
+          }
+        } catch {
+          constructionUnconfirmed = true;
+          throw { kind: "malformed" as const };
+        }
+        const created = socket;
+        const openedPromise = new Promise<LiveSidebandSocket>(
+          (resolve, reject) => {
+            const failBeforeOpen = (failure: LiveSidebandFailure) => {
+              if (!opened) reject(failure);
+            };
+            created.once("open", () => {
+              opened = true;
+              const adapter: LiveSidebandSocket = {
+                bufferedAmount: () => created.bufferedAmount,
+                sendText(payload) {
+                  return new Promise<void>((resolveSend, rejectSend) => {
+                    try {
+                      created.send(payload, (error) => {
+                        if (error) rejectSend(fixedRuntimeError("protocol"));
+                        else resolveSend();
+                      });
+                    } catch {
+                      rejectSend(fixedRuntimeError("protocol"));
+                    }
+                  });
+                },
+                sendPong(payload) {
+                  return new Promise<void>((resolveSend, rejectSend) => {
+                    try {
+                      created.pong(payload, (error) => {
+                        if (error) rejectSend(fixedRuntimeError("protocol"));
+                        else resolveSend();
+                      });
+                    } catch {
+                      rejectSend(fixedRuntimeError("protocol"));
+                    }
+                  });
+                },
+                close: closeSocket,
+              };
+              resolve(adapter);
+            });
+            created.on("message", (...args) => {
+              const bytes = webSocketBytes(args[0], input.maxPayloadBytes);
+              if (!bytes) {
+                input.onBinary(new Uint8Array(input.maxPayloadBytes + 1));
+                return;
+              }
+              if (args[1] === true) input.onBinary(bytes);
+              else input.onText(bytes);
+            });
+            created.on("ping", (...args) => {
+              const bytes = webSocketBytes(args[0], LIVE_CONTROL_FRAME_BYTES);
+              input.onPing(
+                bytes ?? new Uint8Array(LIVE_CONTROL_FRAME_BYTES + 1),
+              );
+            });
+            created.on("pong", (...args) => {
+              const bytes = webSocketBytes(args[0], LIVE_CONTROL_FRAME_BYTES);
+              input.onPong(
+                bytes ?? new Uint8Array(LIVE_CONTROL_FRAME_BYTES + 1),
+              );
+            });
+            created.on("unexpected-response", (...args) => {
+              const responseValue = args[1];
+              const status =
+                isUnknownRecord(responseValue) &&
+                typeof responseValue.statusCode === "number"
+                  ? responseValue.statusCode
+                  : 0;
+              const readable = responseValue as
+                { resume?: () => void; destroy?: () => void } | undefined;
+              readable?.resume?.();
+              readable?.destroy?.();
+              failBeforeOpen({ kind: "http", status });
+            });
+            created.on("error", (...args) => {
+              const failure = classifyWebSocketFailure(args[0]);
+              if (opened) input.onFailure(failure);
+              else failBeforeOpen(failure);
+            });
+            created.on("close", (...args) => {
+              closeObserved = true;
+              resolveClosed?.();
+              if (opened && !closing) input.onClose();
+              else if (!opened) {
+                const code = typeof args[0] === "number" ? args[0] : 0;
+                failBeforeOpen(
+                  code === 1006 || code === 1012 || code === 1013
+                    ? { kind: "transient" }
+                    : { kind: "malformed" },
+                );
+              }
+            });
+            const onAbort = () => {
+              void closeSocket();
+              failBeforeOpen({ kind: "cancelled" });
+            };
+            if (signal.aborted) onAbort();
+            else signal.addEventListener("abort", onAbort, { once: true });
+          },
+        );
+        return openedPromise;
+      })();
+      void result.catch(() => undefined);
+      let termination: Promise<void> | undefined;
+      return {
+        result,
+        terminate(dispose) {
+          termination ??= (async () => {
+            controller.abort();
+            let confirmed = false;
+            let cleanupFailed = false;
+            const settled = await result.then(
+              (value) => value,
+              () => undefined,
+            );
+            try {
+              if (settled) {
+                await dispose(settled);
+                confirmed = closeObserved && !input.proxyUrl;
+              } else {
+                confirmed = await closeSocket();
+              }
+            } catch {
+              cleanupFailed = true;
+            }
+            try {
+              await proxyAgent?.destroy();
+            } catch {
+              cleanupFailed = true;
+            }
+            if (!confirmed || cleanupFailed) throw fixedRuntimeError("cleanup");
+          })();
+          return termination;
+        },
+      };
     },
   };
 }
@@ -1086,7 +3900,7 @@ export function createLiveLifecycle(
     current: CallAttempt,
     connection: LiveConnection,
     captureToken: object,
-  ): (samples: readonly number[]) => void {
+  ): (samples: Float32Array) => void {
     return (samples) => {
       if (attempt !== current) return;
       refreshProjection();
@@ -1100,6 +3914,28 @@ export function createLiveLifecycle(
         (state !== "connecting" && state !== "active")
       )
         return;
+      if (
+        !(samples instanceof Float32Array) ||
+        samples.length > LIVE_LIMITS.microphoneSamples ||
+        samples.some((sample) => !Number.isFinite(sample))
+      ) {
+        void beginStop(current, "audio-error");
+        return;
+      }
+      if (samples.length === 0) return;
+      const now = clock.now();
+      const elapsed = Math.max(0, now - current.microphoneBucketAt);
+      current.microphoneTokens = Math.min(
+        LIVE_LIMITS.microphoneBucket,
+        current.microphoneTokens +
+          (elapsed / 1_000) * LIVE_LIMITS.microphoneRefillPerSecond,
+      );
+      current.microphoneBucketAt = now;
+      if (samples.length > current.microphoneTokens) {
+        void beginStop(current, "audio-error");
+        return;
+      }
+      current.microphoneTokens -= samples.length;
       try {
         const sent = connection.sendSample(samples);
         if (sent !== undefined)
@@ -1524,6 +4360,8 @@ export function createLiveLifecycle(
       muted: false,
       deliveryFenced: false,
       closeSent: false,
+      microphoneTokens: LIVE_LIMITS.microphoneBucket,
+      microphoneBucketAt: clock.now(),
     };
     attempt = current;
     state = "consent";
@@ -1663,7 +4501,10 @@ export function createLiveLifecycle(
           !sharedContinuationAllowed(current)
         )
           throw new Error("call attempt fenced");
-        return resources.attestation({ signal: current.controller.signal });
+        return resources.attestation({
+          signal: current.controller.signal,
+          credentials: credentialResult.value,
+        });
       },
       attestationDeadline,
     );
@@ -1681,7 +4522,6 @@ export function createLiveLifecycle(
     const connectionDeadline = Math.min(
       current.connectDeadline,
       current.callDeadline!,
-      clock.now() + RESOURCE_PHASE_MS,
     );
     if (clock.now() >= connectionDeadline) {
       void beginStop(current, "connect-timeout");
@@ -1691,7 +4531,18 @@ export function createLiveLifecycle(
     try {
       connectionStart = trackedStart(
         current,
-        () => resources.connect({ signal: current.controller.signal }),
+        () =>
+          resources.connect({
+            signal: current.controller.signal,
+            deadline: connectionDeadline,
+            credentials: credentialResult.value,
+            attestation: attestationResult.value,
+            voice: current.voice,
+            onFailure(diagnostic) {
+              if (attempt === current && currentAttempt(current))
+                void beginStop(current, diagnostic);
+            },
+          }),
         (connection) => connection.close(),
       );
     } catch {

@@ -19,6 +19,8 @@ import {
   createFakeResources,
   createLiveFixture,
   deferred,
+  fixtureAttestation,
+  fixtureCredentials,
   ManualClock as TestClock,
   settledStart,
 } from "./test-support/live-fixture.ts";
@@ -65,11 +67,11 @@ test("the dormant lifecycle is lazy and refuses unsupported admission before con
     resources: {
       credentials() {
         effects.push("credentials");
-        return Promise.resolve();
+        return Promise.resolve(fixtureCredentials);
       },
       attestation() {
         effects.push("attestation");
-        return Promise.resolve();
+        return Promise.resolve(fixtureAttestation);
       },
       connect() {
         throw new Error("resource construction must stay lazy");
@@ -566,7 +568,7 @@ test("pooling timing before active uses exact terminal diagnostics and leaves no
 test("data-only cancellation releases ownership, while an unquiet resource start becomes process-sticky blocked", async (t) => {
   const fixture = await createLiveFixture(t);
   const credentialEntered = deferred<void>();
-  const neverData = deferred<void>();
+  const neverData = deferred<typeof fixtureCredentials>();
   const dataOnly = fixture.createLifecycle(approvingConsent, {
     clock: fixture.clock,
     resources: createFakeResources(fixture.connection, {
@@ -648,9 +650,11 @@ test("preparation invocation and settlement are fenced before the next startup e
       else clock.onClear = fence;
       fixture.resources.credentials = async () => {
         effects.push("credentials");
+        return fixtureCredentials;
       };
       fixture.resources.attestation = async () => {
         effects.push("attestation");
+        return fixtureAttestation;
       };
       fixture.resources.connect = () => {
         effects.push("connect");
@@ -772,7 +776,7 @@ test("resource construction is tracked before a synchronous callback can reenter
   });
   const connection = createFakeConnection({
     startCapture(callback) {
-      callback([1]);
+      callback(new Float32Array([1]));
       return settledStart(capture);
     },
     sendSample() {
@@ -1070,7 +1074,7 @@ test("quiescence at the exact stop deadline blocks and prohibits every release o
 
 test("old-generation sample and data callbacks cannot send or affect a later call", async (t) => {
   const fixture = await createLiveFixture(t);
-  const callbacks: Array<(samples: readonly number[]) => void> = [];
+  const callbacks: Array<(samples: Float32Array) => void> = [];
   const sends: string[] = [];
   const dataSends: string[] = [];
   const closes: string[] = [];
@@ -1111,13 +1115,13 @@ test("old-generation sample and data callbacks cannot send or affect a later cal
   assert.equal((await lifecycle.start()).kind, "started");
   const firstDataSender = lifecycle.createOutgoingSender();
   assert.ok(firstDataSender);
-  callbacks[0]?.([1]);
+  callbacks[0]?.(new Float32Array([1]));
   assert.equal(firstDataSender({ kind: "application", text: "first" }), true);
   assert.deepEqual(sends, ["sample-1"]);
   assert.deepEqual(dataSends, ["application-1:first"]);
   const firstStop = lifecycle.stop();
   const joinedStop = lifecycle.stop();
-  callbacks[0]?.([2]);
+  callbacks[0]?.(new Float32Array([2]));
   assert.equal(firstDataSender({ kind: "final", text: "late" }), false);
   assert.deepEqual(await firstStop, { status: "off" });
   assert.deepEqual(await joinedStop, { status: "off" });
@@ -1126,8 +1130,8 @@ test("old-generation sample and data callbacks cannot send or affect a later cal
 
   assert.equal((await lifecycle.start()).kind, "started");
   assert.equal(firstDataSender({ kind: "application", text: "stale" }), false);
-  callbacks[0]?.([3]);
-  callbacks[1]?.([4]);
+  callbacks[0]?.(new Float32Array([3]));
+  callbacks[1]?.(new Float32Array([4]));
   const secondDataSender = lifecycle.createOutgoingSender();
   assert.ok(secondDataSender);
   assert.equal(secondDataSender({ kind: "final", text: "second" }), true);
@@ -1147,7 +1151,7 @@ test("old-generation sample and data callbacks cannot send or affect a later cal
 test("mute gates samples immediately and a pending stop plus unmute creates no overlapping capture", async (t) => {
   const fixture = await createLiveFixture(t);
   const allowFirstStop = deferred<void>();
-  const callbacks: Array<(samples: readonly number[]) => void> = [];
+  const callbacks: Array<(samples: Float32Array) => void> = [];
   const sent: number[] = [];
   let capturesStarted = 0;
   let activeCaptures = 0;
@@ -1179,7 +1183,7 @@ test("mute gates samples immediately and a pending stop plus unmute creates no o
 
   const muting = lifecycle.setMuted(true);
   assert.equal(lifecycle.snapshot().muted, true);
-  callbacks[0]?.([1]);
+  callbacks[0]?.(new Float32Array([1]));
   assert.deepEqual(sent, []);
   const unmuting = lifecycle.setMuted(false);
   assert.equal(lifecycle.snapshot().muted, false);
@@ -1187,8 +1191,8 @@ test("mute gates samples immediately and a pending stop plus unmute creates no o
   await Promise.all([muting, unmuting]);
   assert.equal(capturesStarted, 2);
   assert.equal(activeCaptures, 1);
-  callbacks[0]?.([2]);
-  callbacks[1]?.([3]);
+  callbacks[0]?.(new Float32Array([2]));
+  callbacks[1]?.(new Float32Array([3]));
   assert.deepEqual(sent, [3]);
 
   assert.deepEqual(await lifecycle.toggle(), { status: "off" });
@@ -1274,12 +1278,12 @@ test("a fenced ownership recheck cannot create capture after cleanup snapshots w
   await assert.rejects(stat(fixture.lock), { code: "ENOENT" });
 });
 
-test("data and resource phases use their five and ten second budgets", async (t) => {
+test("data phases use five seconds and lifecycle connection uses the common total budget", async (t) => {
   await t.test("credential phase", async (t) => {
     const fixture = await createLiveFixture(t);
     const clock = fixture.clock;
     const entered = deferred<void>();
-    const never = deferred<void>();
+    const never = deferred<typeof fixtureCredentials>();
     fixture.resources.credentials = () => {
       entered.resolve();
       return never.promise;
@@ -1297,7 +1301,7 @@ test("data and resource phases use their five and ten second budgets", async (t)
     assert.equal(lifecycle.snapshot().lastFailure, "connect-timeout");
   });
 
-  await t.test("resource setup phase", async (t) => {
+  await t.test("total connection phase", async (t) => {
     const fixture = await createLiveFixture(t);
     const clock = fixture.clock;
     const entered = deferred<void>();
@@ -1314,7 +1318,7 @@ test("data and resource phases use their five and ten second budgets", async (t)
     });
     const starting = lifecycle.start();
     await entered.promise;
-    clock.advance(9_999);
+    clock.advance(29_999);
     assert.equal(lifecycle.snapshot().state, "connecting");
     clock.advance(1);
     assert.equal((await starting).kind, "cancelled");
@@ -1329,7 +1333,7 @@ test("CORE: absolute lifecycle deadlines hold when timer delivery is delayed or 
     async (t) => {
       const fixture = await createLiveFixture(t);
       const clock = fixture.clock;
-      const credentials = deferred<void>();
+      const credentials = deferred<typeof fixtureCredentials>();
       const entered = deferred<void>();
       let attestationCalls = 0;
       fixture.resources.credentials = () => {
@@ -1338,6 +1342,7 @@ test("CORE: absolute lifecycle deadlines hold when timer delivery is delayed or 
       };
       fixture.resources.attestation = async () => {
         attestationCalls += 1;
+        return fixtureAttestation;
       };
       const lifecycle = fixture.createLifecycle(approvingConsent, {
         clock: fixture.clock,
@@ -1346,7 +1351,7 @@ test("CORE: absolute lifecycle deadlines hold when timer delivery is delayed or 
       const starting = lifecycle.start();
       await entered.promise;
       clock.elapseWithoutTimers(5_000);
-      credentials.resolve();
+      credentials.resolve(fixtureCredentials);
       assert.equal((await starting).kind, "cancelled");
       await eventually(() => lifecycle.snapshot().state === "off");
       assert.equal(attestationCalls, 0);
@@ -1355,7 +1360,7 @@ test("CORE: absolute lifecycle deadlines hold when timer delivery is delayed or 
   );
 
   await t.test(
-    "resource settlement after ten seconds is disposed, not adopted",
+    "connection settlement after the total deadline is disposed, not adopted",
     async (t) => {
       const fixture = await createLiveFixture(t);
       const clock = fixture.clock;
@@ -1388,7 +1393,7 @@ test("CORE: absolute lifecycle deadlines hold when timer delivery is delayed or 
 
       const starting = lifecycle.start();
       await entered.promise;
-      clock.elapseWithoutTimers(10_000);
+      clock.elapseWithoutTimers(30_000);
       pendingConnection.resolve(connection);
       assert.equal((await starting).kind, "cancelled");
       await eventually(() => lifecycle.snapshot().state === "off");

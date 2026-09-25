@@ -18,17 +18,25 @@ it, `mute` and `unmute` report that calling is unavailable, and `status` reports
 metadata compatibility. Voice selection writes only the private Pi Live
 preference file and preserves unknown fields when possible.
 
-The extension does not import the native addon, open audio devices, read
+The shipped extension does not import the native addon, open audio devices, read
 credentials, authenticate, contact a provider, or start a live session. Its
 compatibility check reads package metadata only. Nothing in this repository is
 an installation, device, service, or real-home authorization.
 
 Issue #3 adds a dormant lifecycle module with fixture-tested ownership,
 cancellation, mute, deadlines, asynchronous release, and Pi lifecycle binding.
-The default factory does not construct it. Real media/transport, operational
-home certification, and enabling the call UI remain later work. See the
-[lifecycle verification](docs/ISSUE-3-VERIFICATION.md) and the
-[current test-cleanup record](docs/TEST-CLEANUP-VERIFICATION.md).
+The default factory does not construct it. Issue #4 adds dormant extracted auth,
+attestation, signaling, native/sideband adapters and bounded transport, verified
+with fake native/network resources and the real SDK's fake credential store.
+It does not enable calls or change the pinned upstream/dependency versions.
+
+The real native close and proxied-sideband close interfaces do not establish
+confirmed cleanup. Those adapters therefore report unconfirmed shutdown and the
+lifecycle retains blocked ownership, rather than claiming a safe restart. Real
+access, production home certification and enabled controls remain later work.
+See the [transport verification and limits](docs/ISSUE-4-VERIFICATION.md),
+[lifecycle verification](docs/ISSUE-3-VERIFICATION.md) and
+[test-cleanup record](docs/TEST-CLEANUP-VERIFICATION.md).
 
 The preference writer uses an optimistic read/compare/retry sequence and atomic
 same-directory rename. That does **not** guarantee that every concurrent change

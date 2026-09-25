@@ -10,9 +10,11 @@ import {
   type HomeAuthority,
   type HomeCertificationObservation,
   type LiveAdmissionFacts,
+  type LiveAttestation,
   type LiveCapture,
   type LiveClock,
   type LiveConnection,
+  type LiveCredentials,
   type LiveCoordination,
   type LiveLifecycle,
   type LiveLifecycleOptions,
@@ -233,13 +235,23 @@ export function createFakeConnection(
   };
 }
 
+export const fixtureCredentials: LiveCredentials = {
+  accessToken: "fixture-token",
+  accountId: "fixture-account",
+};
+
+export const fixtureAttestation: LiveAttestation = {
+  header: "fixture-attestation",
+  supported: false,
+};
+
 export function createFakeResources(
   connection = createFakeConnection(),
   overrides: Partial<LiveResources> = {},
 ): LiveResources {
   return {
-    credentials: async () => undefined,
-    attestation: async () => undefined,
+    credentials: async () => fixtureCredentials,
+    attestation: async () => fixtureAttestation,
     connect: () => settledStart(connection),
     ...overrides,
   };

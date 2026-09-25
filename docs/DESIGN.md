@@ -4,9 +4,10 @@
 
 Pi Live is a standalone, private, setup-only Pi extension. The repository owns
 its development now; dotfiles is only the retained extraction source. Issue #3
-adds a dormant, fixture-tested call lifecycle, not an enabled voice runtime.
-The shipped factory stays setup-only. No installer, host adoption, or publication
-is implied.
+adds a dormant, fixture-tested call lifecycle. Issue #4 adds dormant extracted
+auth/media/transport adapters and application bounds, not an enabled voice
+runtime. The shipped factory stays setup-only. No installer, host adoption or
+publication is implied.
 
 This document separates implemented behavior from accepted decisions and future
 proposals. Historical reports are evidence, not current instructions.
@@ -30,9 +31,10 @@ The current command surface is intentionally inert:
 - non-TUI use refuses before call behavior.
 
 Compatibility checking validates Node, platform, architecture, Pi package
-metadata, and native package metadata. It does not import the addon. No current
-path opens audio, resolves credentials, authenticates, constructs a provider
-transport, sends a session identifier, or makes a voice request.
+metadata, and native package metadata. It does not import the addon. No shipped
+command or discovery path opens audio, resolves credentials, authenticates,
+constructs a provider transport, sends a session identifier or makes a voice
+request.
 
 Preferences live below Pi's agent directory in `pi-live/config.json`. Missing
 state defaults to `sol` without writing. Existing directories/files must be
@@ -79,6 +81,35 @@ and real SDK operations. They do not prove native shutdown, transport behavior,
 UI readiness or suitability of this host's actual home. The default factory's
 inert registration and presentation remain unchanged.
 
+## Dormant extracted transport
+
+`createLiveRuntimeResources` in `src/live.ts` supplies the existing lifecycle's
+preparation and connection operations. Credentials and attestation are passed
+between phases within one attempt; the SDK remains the only credential/refresh
+owner. Native and network dependencies stay lazy and replaceable by test fakes.
+The factory does not construct these resources.
+
+The extraction retains the pinned experimental endpoints, headers, identifiers,
+voice payloads, proxy selection and final-context convention. Application code
+adds bounded bodies/events/samples, classified pre-open retries, replay tracking,
+latest transcript tails, a capacity-aware incremental writer and closed
+non-secret diagnostics. Queued producers are discarded at stop while actual
+in-flight work remains tracked. #5 still owns Pi admission/correlation and which
+final is eligible; this transport does not read session history or dispatch Pi
+work.
+
+The retained native peer close does not prove hidden task/speaker termination;
+the proxy agent likewise leaves CONNECT cleanup uncertain. Their real adapters
+invoke cleanup but report it unconfirmed, so lifecycle ownership stays blocked.
+Fake adapters can positively confirm shutdown and exercise the successful release
+path. This is an explicit acceptance gap, not an upstream repair project or proof
+that a real call can safely restart. Native internal buffering and DeviceCheck's
+timeout allocation remain disclosed dependency limitations.
+
+See the [extraction plan](ISSUE-4-PLAN.md) and
+[verification record](ISSUE-4-VERIFICATION.md). No real credentials, DeviceCheck,
+media, provider request or native addon execution was used for this work.
+
 ## Accepted decisions
 
 - Pi Live is a standalone extension repository, not a standalone application,
@@ -110,9 +141,9 @@ reported prompt remains open after consent. It cannot immediately cancel for an
 unreported nested prompt. #5 must disclose these limits in the actual consent/UI;
 users needing guaranteed capture/delivery stoppage must stop voice first.
 
-The dormant lifecycle above is implemented under separate #3 approval. Real
-microphone controls, DeviceCheck, authentication, signaling, WebRTC, result
-correlation, enabling the Pi UI, provisioning, rollout, and a native/audio canary
+The dormant lifecycle and extracted transport above were implemented under
+separate #3/#4 approval. Enabling controls, result correlation, real credential/
+DeviceCheck/media/provider use, provisioning, rollout and the native/audio canary
 remain later work requiring separate scope and fresh evidence. Archived harnesses
 are not production code.
 
@@ -139,8 +170,9 @@ The standalone commands are local development checks over the checkout or
 disposable fixtures, not a real-home installer. The explicit pnpm policy in the
 root README also applies to script invocation, not only dependency restoration.
 
-[The lifecycle verification record](ISSUE-3-VERIFICATION.md) owns the current
-fake-resource results; [transfer verification](VERIFICATION.md) is historical.
+[Transport verification](ISSUE-4-VERIFICATION.md) owns the current extraction
+checks and remaining gaps. [Lifecycle verification](ISSUE-3-VERIFICATION.md)
+and [transfer verification](VERIFICATION.md) retain their historical scope.
 [The extraction receipt](history/extraction/transfer-receipt.json) owns copied
 source identity, adaptations, and historical evidence custody. Those are distinct
 from live-runtime or adoption evidence. No general native/audio/auth/provider
