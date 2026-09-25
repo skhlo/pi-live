@@ -167,7 +167,7 @@ export async function createSdkFixture(
     sentSamples: 0,
     acquisitionCalls: 0,
   };
-  let sampleHandler: ((samples: readonly number[]) => void) | undefined;
+  let sampleHandler: ((samples: Float32Array) => void) | undefined;
   let randomSequence = 0;
 
   const capture = createFakeCapture({
@@ -366,7 +366,7 @@ export async function createSdkFixture(
     clock,
     runtime,
     bindings,
-    emitSample(samples: readonly number[] = [0.25]) {
+    emitSample(samples: Float32Array = new Float32Array([0.25])) {
       sampleHandler?.(samples);
     },
     current() {

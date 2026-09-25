@@ -18,8 +18,10 @@ or waive the issue's cleanup/privacy requirements.
 The contract remains [issue #4](https://github.com/skhlo/pi-live/issues/4), the
 [parent SPEC](https://github.com/skhlo/pi-live/issues/1) section 7 budgets, and
 [#3](https://github.com/skhlo/pi-live/issues/3)'s accepted lifecycle refinements.
-Package and lifecycle evidence are accepted. This turn authorizes revising and
-committing the plan, not runtime implementation or real-access testing.
+Package and lifecycle evidence are accepted. After the plan commit, the user
+authorized its execution. Local dormant implementation and fake-resource tests
+are authorized; real-access testing and publication remain separate. Results and
+remaining acceptance gaps are recorded in [verification](ISSUE-4-VERIFICATION.md).
 
 ## Keep the change small
 
