@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    name: Portable (Node ${{ matrix.node }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22.19.0", "26.6.0"]
+    env:
+      GIT_NO_LAZY_FETCH: "1"
+      GIT_TERMINAL_PROMPT: "0"
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          clean: false # Hosted runners start with a fresh workspace.
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          package-manager-cache: false
+
+      - name: Set up pinned pnpm from package.json
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          run_install: false
+          cache: false
+          standalone: false
+
+      - name: Verify toolchain and historical prerequisite
+        env:
+          EXPECTED_NODE_VERSION: ${{ matrix.node }}
+        run: |
+          node --input-type=module -e 'import assert from "node:assert/strict"; assert.equal(process.versions.node, process.env.EXPECTED_NODE_VERSION);'
+          node --version
+          pnpm --version
+          git --no-lazy-fetch --version
+          git --no-lazy-fetch cat-file -e 'f421dad09d376c02482924170d3796e516670021^{commit}'
+
+      - name: Install frozen dependencies without scripts or automatic peers
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts --config.auto-install-peers=false --config.enable-global-virtual-store=false
+          git diff --exit-code -- package.json pnpm-lock.yaml
+
+      - name: Verify source, package, tests, types and formatting
+        env:
+          NODE_OPTIONS: --no-addons
+        run: |
+          pnpm --config.auto-install-peers=false --config.ignore-scripts=true --config.enable-global-virtual-store=false --config.verify-deps-before-run=error check:source
+          pnpm --config.auto-install-peers=false --config.ignore-scripts=true --config.enable-global-virtual-store=false --config.verify-deps-before-run=error check:package
+          pnpm --config.auto-install-peers=false --config.ignore-scripts=true --config.enable-global-virtual-store=false --config.verify-deps-before-run=error test
+          pnpm --config.auto-install-peers=false --config.ignore-scripts=true --config.enable-global-virtual-store=false --config.verify-deps-before-run=error typecheck
+          pnpm --config.auto-install-peers=false --config.ignore-scripts=true --config.enable-global-virtual-store=false --config.verify-deps-before-run=error format:check
+          git diff --exit-code -- package.json pnpm-lock.yaml
