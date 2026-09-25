@@ -83,11 +83,10 @@ for (const scope of ["global", "project"] as const)
     });
   }
 
-test("live controls require disclosed consent and connect the real parser to owned final delivery with replay protection", async (t) => {
+test("live controls obtain consent and return Pi replies through the real parser and writer", async (t) => {
   const media = fakeMedia();
   const provider = fakeProvider({ tool: true });
   let toolExecutions = 0;
-  const notifications: string[] = [];
   const widgets: unknown[] = [];
   const fixture = await createSdkFixture(t, {
     controls: true,
@@ -128,7 +127,6 @@ test("live controls require disclosed consent and connect the real parser to own
         assert.equal(media.counts().resourcesCreated, 0);
         return true;
       }),
-      notify: (text) => notifications.push(text),
       setWidget: ((_key: string, widget: unknown) =>
         widgets.push(widget)) as ExtensionUIContext["setWidget"],
     },
@@ -143,23 +141,16 @@ test("live controls require disclosed consent and connect the real parser to own
     "final frame",
   );
   await fixture.runtime.session.waitForIdle();
-  media.request("one", "Inspect the fixture");
-  await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(provider.calls(), 2);
   assert.equal(toolExecutions, 1);
   assert.equal(fixture.current().lifecycle.snapshot().state, "active");
-  media.request("one", "Changed request");
-  await waitUntil(
-    () => fixture.current().lifecycle.snapshot().state === "off",
-    "changed-ID stop",
-  );
+  await fixture.runtime.session.prompt("/live stop");
   assert.equal(widgets.at(-1), undefined);
   assert.equal(fixture.clock.timers.size, 0);
-  assert.ok(notifications.some((n) => n.includes("protocol")));
   assert.ok(!media.frames.join("\n").includes("private"));
   assert.equal(
     finalText(media.frames),
-    '"Agent Final Message":\n\nOwned final result',
+    '"Agent Final Message":\n\nPi final reply',
   );
 });
 

@@ -1,139 +1,74 @@
-# Issue #5 - delegation and control verification
+# Issue #5 - voice as ordinary Pi input
 
-## Review blocker - acceptance withdrawn
+## Current contract
 
-The fresh-context review of `494676ca8531c4568626b15c1e3c5cd46ecd7c3e`
-found that a later `context_with_system` handler can change model input after the
-adapter's observation, without a persisted branch change. The retained real-SDK
-regression fails its no-forwarding assertion. **The results below are historical
-candidate receipts, not full G3/G4 acceptance or authorization to deliver this
-automatic-forwarding implementation.** See [the blocker](ISSUE-5-BLOCKER.md).
+The user explicitly asked to remove the extra restrictions and keep voice as
+another input to ordinary Pi. This supersedes the earlier #5 single-flight,
+receipt, exclusive-result-ownership and context-audit requirements. The earlier
+SDK counterexample is now an extension-compatibility test: both load orders must
+work. The obsolete blocker document is removed; history retains that decision.
 
-The separate configured-source wiring finding is corrected: production now reads
-global/trusted-project package declarations through Pi's public settings parser
-over bounded read-only snapshots. Four added SDK cases pass in both load orders
-and verify no file/lock mutation. The new final-context tests pass for an earlier
-handler and fail for a later handler. That failing test is retained intact.
-The latest network-denied suite reports **408 passed, one failed**: only that
-ownership regression fails. Typecheck, formatting, package and isolated loader
-checks pass after the configured-source correction. This is not a green delivery
-candidate.
+Voice requests call `pi.sendMessage` directly, including while Pi is busy. Typed
+input, installed extensions, tool execution, retries and context processing remain
+Pi's responsibility. When Pi settles, its reply returns through the upstream
+`Agent Final Message` protocol. An error/abort without a reply produces a short
+fixed notice to check Pi, without ending the voice call or exposing raw errors.
 
-## Scope
+The bridge has no request receipt, history fingerprint, branch snapshot, pending
+request limit, replay history, request quota, five-second receipt deadline or
+thirty-minute coding timer. The service delegation ID is only a wire reply
+address. Repeated request events are ordinary input. The bounded transport writer
+can handle successive replies without a final-specific single-flight restriction.
 
-Implemented after the user's explicit instruction to implement issue #5, from
-`4802a59a7e64ae0811d08542498ec5f777984864` on `feat/issue-5-delegation`.
-The existing lifecycle and transport now connect to commands, standard consent,
-the render-only widget and conservative single-flight Pi delegation. The
-implementation remains in the owned deep module, `src/live.ts`.
+Consent, microphone mute, call cleanup, transport bounds and host compatibility
+remain. Stopping voice stops its delivery and audio; Pi work continues. Existing
+Pi lifecycle teardown still closes the call, and reported dialogs retain their
+existing behavior and disclosed shortcut/nesting limits. No new confirmation step
+or SDK extension is needed.
 
-The contract is [issue #5](https://github.com/skhlo/pi-live/issues/5), the parent
-SPEC with standalone overrides, and the accepted #3 lifecycle amendments.
-This does not complete native-cleanup acceptance: #4's real native/proxy adapters
-still report unconfirmed cleanup and retain blocked ownership. The default home
-certifier still refuses; #6 owns actual-home setup/recovery. No real provider,
-credentials, DeviceCheck, audio, native-addon execution or installed-home rollout
-was used or authorized by this work. No dependency was added or installed.
+## Verification
 
-## Delivery G3
+Current checks pass: **394 tests** (389 under OS network denial, four loader
+tests with their own sandbox, and the existing permission-bit case separately),
+typecheck, formatting, source/package checks and isolated real-Pi loading.
+All 18 PTY scenarios and the actual Paseo controls/conversation checks pass.
 
-The integrated fake-native/network transport uses the actual parser and writer.
-It admits a visible origin-marked custom message through Pi and sends only the
-owned final via `Agent Final Message`. Tests inspect every recorded frame, keep
-thinking/commentary/raw tool results in Pi, verify unchanged-ID deduplication
-after settlement, reject changed-ID content, and bound multibyte/escaped final
-text with a visible truncation marker. Existing #4 protocol/UTF-8/ID/count/rate
-and backpressure boundary tests remain part of the suite.
+The real Pi 0.87.1 SDK tests use an in-process provider and fake media under OS
+network denial, empty fixture homes and `--no-addons`. They cover:
 
-The replay mutation bypasses the existing per-call seen-ID guard in an isolated
-source copy. The real-SDK/transport integration test then fails behaviorally:
-the duplicate request causes a third provider call where the one tool/final
-request permits exactly two. The positive case passed before mutation. Retained
-mutation receipt: `/private/tmp/pi-live-issue-5-dedup-cm1iu9pt/receipt.json`.
+- starting voice while Pi is busy, multiple voice requests and typed clarification
+  in one conversation, followed by Pi's reply;
+- context enrichment by extensions loaded before and after Pi Live;
+- Pi-owned retry, error and abort handling, and unrelated typed work;
+- actual custom-tool execution, final reply frames and UTF-8 truncation;
+- consent cancel/late Yes, mute/unmute, unchanged settings during conflict checks,
+  and Pi completion after stopping voice;
+- ordinary successive wire requests/replies alongside existing byte, rate,
+  backpressure and cleanup checks.
 
-## G4a - actual Pi SDK 0.87.1
+The old tests requiring those removed policies were replaced or removed with
+those policies. Audio cleanup and transport-bound regressions remain intact.
+The old replay mutation receipt belongs to the superseded contract.
 
-The deterministic in-process provider and fake media exercise:
+The PTY harness includes a conversation case that sends more voice input and a
+normal typed clarification while the fixture tool runs. The actual Paseo terminal
+is also checked with fake media. Existing Unicode/resize, editor, consent, dialog,
+shortcut-exception and stop checks still exercise the current controls.
 
-- one persisted custom receipt, actual custom-tool execution and successful final;
-- a real competing dispatch inserted between admission and the void send call;
-- competing typed input and a non-trigger custom append;
-- another extension's continuation, persistent context edit and compaction draft,
-  and an unpersisted context-handler edit;
-- a failed provider request followed by a successful automatic retry, permanent
-  errors and user abort;
-- tree movement at the SDK's permitted settled boundary, reload, new, fork and
-  resume; Pi refuses tree navigation while streaming;
-- stopped-call settlement, a second request while busy, the five-second receipt
-  deadline at 4,999/5,000 ms, and thirty-minute voice-only work expiry.
+Current results, source identities and terminal receipts are recorded in
+`/private/tmp/pi-live-issue-5/preview/issue-5-simple/MANIFEST.md`.
+Earlier receipts under `preview/issue-5-checks` describe their recorded snapshots.
+All pnpm commands use the README's four explicit policy flags. The production
+unit test uses its stub package manager; the real production install/fetch check
+is not run.
 
-Assertions check final delivery/discard, persisted messages and continued Pi
-work. The extension does not call Pi abort. Real-SDK lifecycle regressions retain
-both conflict load orders, pooling announcement validation, consent ownership,
-reported-dialog stopping and canceled/late consent behavior.
+## Remaining scope
 
-## G4b - PTY and actual Paseo terminal
+No real credentials, DeviceCheck, native-addon execution, microphone/speaker or
+provider access was used. Dependencies, package/lock, upstream snapshot and
+notices are unchanged. Actual-home certification still belongs to #6 and the
+real-access trial to #7. Native/proxied cleanup uncertainty remains as documented
+in #4; it is independent of treating voice as Pi input.
 
-`scripts/pi-live-tui-probe.ts` runs actual Pi `InteractiveMode` with the current
-adapter. Its fake provider/media and fixture-certified temporary home are
-explicit. Before startup, it proves a loopback connection receives `EPERM` under
-the OS network sandbox; native addons are disabled. The PTY driver uses standard
-library Python via `uv`, without adding dependencies.
-
-The PTY matrix covers normal and shifted-key toggle, consent cancel and a late
-Yes stopped before acceptance, sample-driven waveform/current role transcripts,
-38/60/100/120-column resizing, Unicode and unchanged editor typing, mute/unmute,
-and each reported dialog primitive with normal answers and cancellation.
-Confirm covers Yes/No/cancel; select covers keyboard selection/cancel; input,
-editor and custom cover typed/key input and cancel. Reported notification fences
-further fake samples. A stopped coding task finishes in Pi without new frames.
-
-An actual task-owned Paseo terminal separately verifies Unicode editor text and
-widget/footer coexistence, all five reported dialogs, and task completion after
-voice stop. Both PTY and Paseo reproduce the unreported shortcut-confirmation
-exception: samples remain active, normal No/cancel results are preserved, then
-explicit stop removes the widget and leaves zero call timers. The package adds
-no animation timer. Actual terminal captures include the full consent disclosure,
-waveform/transcripts, dialogs, working state and completion with the original
-footer. No private runner patch or invented prompt coverage is used.
-
-Run the explicit PTY fixture with:
-
-```sh
-uv run --offline --no-project --no-managed-python scripts/check-pi-live-tui.py all
-```
-
-On macOS this needs permission to create its child OS sandbox and PTY. The
-script starts only disposable fake-media sessions. It never runs a real call.
-
-## Repository checks and evidence
-
-The complete suite passed: **408 tests**, comprising 403 under OS network denial,
-four loader tests using their own stricter sandboxes, and the one existing
-permission-bit case separately. Typecheck, formatting, source/package and real
-loader checks passed. The replay mutation failed behaviorally, and the current
-positive case passed again in the complete suite. No test was removed to obtain
-a pass. The package-isolation fixture initially rejected a temporary root inside
-the worktree's dependency ancestry; the final run used an external temporary root.
-
-Effective runtime SHA-256:
-`c29d5ec930726b9b3e4b79b576d2d405803845a483b7bfc3866583f9786be9cf`.
-
-Current final-check results and source hashes are recorded in the retained local
-manifest at
-`/private/tmp/pi-live-issue-5/preview/issue-5-checks/MANIFEST.md`.
-SDK/provider/resource tests run with empty external HOME/agent roots,
-`node --no-addons`, and OS network denial. Self-sandboxing loader tests and the
-previously documented sandbox-incompatible permission-bit case run separately.
-The production-check unit test still uses a stub package manager; the real
-production install/fetch check is not run.
-
-All pnpm invocations use the README's four peer/script/store/refusal flags.
-The root package/lock, upstream source, native/dependency pins and notice corpus
-are unchanged. The standalone factory's registration tests now expect required
-public lifecycle/delivery listeners rather than only inert shutdown handling.
-
-Retained artifacts: the task worktree and dependency symlink, ignored preparation
-and check receipts, disposable mutation copy, PTY event/raw logs, and the Paseo
-terminal/captures. The shared checkout remains on main. Publication and a real
-device/provider canary are separate decisions.
+The task branch/worktree, dependency symlink, verification receipts and Paseo
+terminal are retained. Nothing is pushed or published by this work.

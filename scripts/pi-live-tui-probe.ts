@@ -169,6 +169,7 @@ const resourceLoader = new DefaultResourceLoader({
           record("agent-settled", {
             ...snapshot(),
             framesContent: media.frames,
+            inputs: provider.contexts,
           }),
         );
         pi.registerCommand("fixture", {
@@ -193,10 +194,12 @@ const resourceLoader = new DefaultResourceLoader({
               record("speech", snapshot());
               return;
             }
-            if (kind === "task") {
+            if (kind === "task" || kind === "followup") {
               media.request(
-                "terminal-one",
-                "Run the harmless fixture tool and report the result",
+                kind === "task" ? "terminal-one" : "terminal-two",
+                kind === "task"
+                  ? "Run the harmless fixture tool and report the result"
+                  : "Voice follow-up while Pi is working",
               );
               return;
             }

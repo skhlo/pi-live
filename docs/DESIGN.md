@@ -2,14 +2,10 @@
 
 ## Status
 
-Issue #5 remains under spec review. Its automatic final-forwarding candidate
-fails the retained later-context-edit regression; the earlier positive receipts
-do not establish result ownership. See [the blocker](ISSUE-5-BLOCKER.md).
-
 Pi Live is a standalone, private Pi extension. The repository owns development;
 dotfiles is only the retained extraction source. Issues #3/#4 supply lifecycle
 and bounded auth/media/transport. Issue #5 connects public Pi controls and
-conservative delegation to those owners. Actual-home certification still refuses,
+ordinary Pi input to those owners. Actual-home certification still refuses,
 and real native/proxied cleanup remains unconfirmed. Fake success does not imply
 usable real calls, provisioning, rollout or adoption.
 
@@ -54,14 +50,14 @@ semantics.
 
 `src/live.ts` also contains `createLiveLifecycle` and `bindPiLiveLifecycle`.
 The default factory binds them without starting a call. Callers use controls,
-interruptions, generation-owned outgoing/settlement capabilities, and a read-only
+interruptions, call-scoped outgoing delivery, and a read-only
 snapshot; ownership records and cleanup decisions stay inside the module.
 
 The approved plan and detailed contract live in
 [`ISSUE-3-PLAN.md`](ISSUE-3-PLAN.md). In brief:
 
 - Fresh consent precedes ownership and resource setup. The connection and call
-  budgets start at entry to acquiring; delegation expiry starts at admission.
+  budgets start at entry to acquiring.
 - Ownership uses exclusive mkdir under a certified canonical OS-account home,
   independent of Pi agent directories. The default certifier refuses. Only
   fixture homes have been used; #6 owns production certification and recovery.
@@ -71,7 +67,7 @@ The approved plan and detailed contract live in
   reports release-pending and refuses same-process starts across reload. Only
   successful final removal reports off. A timeout cannot cancel a deletion.
 - A stopped generation cannot send samples/data, adopt resources, or cancel a
-  later generation's work timer. Mute controls capture, not playback. Voice stop
+  later call. Mute controls capture, not playback. Voice stop
   does not call Pi abort or cancel admitted coding work.
 - The Pi binding uses public 0.87.1 lifecycle operations, retires outgoing
   bindings, and refuses observed conflicts. Discovery is limited to supplied
@@ -91,11 +87,11 @@ The factory constructs call-scoped resources only after consent and certified ow
 
 The extraction retains the pinned experimental endpoints, headers, identifiers,
 voice payloads, proxy selection and final-context convention. Application code
-adds bounded bodies/events/samples, classified pre-open retries, replay tracking,
+adds bounded bodies/events/samples, classified pre-open retries,
 latest transcript tails, a capacity-aware incremental writer and closed
 non-secret diagnostics. Queued producers are discarded at stop while actual
-in-flight work remains tracked. The Pi adapter below owns admission/correlation and final eligibility; transport
-does not read session history or dispatch Pi work.
+in-flight work remains tracked. The short Pi bridge below submits requests and returns replies; transport does
+not read session history or schedule Pi work.
 
 The retained native peer close does not prove hidden task/speaker termination;
 the proxy agent likewise leaves CONNECT cleanup uncertain. Their real adapters
@@ -126,37 +122,31 @@ media, provider request or native addon execution was used for this work.
 - No transfer artifact is a new home installation, extension registration,
   native/device/service authorization, provider call, or adoption decision.
 
-## Pi delegation and result eligibility
+## Voice as ordinary Pi input
 
-The transport parser owns bounded structure/UTF-8 validation and replay tracking
-for the entire call, including after settlement. Its callback asks the Pi adapter
-to admit one request only when the call is active, Pi is idle with no pending
-messages or active signal, and session/leaf identity still matches. A busy/new
-request stops voice; it never queues, steers or aborts accepted coding work.
+The user's simplification instruction supersedes #5's former ownership-proof and
+single-flight requirements. Voice is another input to the current Pi conversation.
+Installed extensions, typed clarifications, retries and context processing are
+part of ordinary Pi execution and can influence the answer returned to voice.
 
-Before the single void `pi.sendMessage`, the adapter snapshots session, branch
-prefix, leaf-derived position and entry IDs, and arms versioned local receipt
-details containing source, call generation, delegation ID and a random token.
-The visible `better-openai-live-delegation` message has `display: true`,
-`triggerTurn: true` and an explicit voice-origin marker. Its content is not
-expanded as a slash command or treated as an approval.
+The bridge has one path in and one path out. A voice request calls
+`pi.sendMessage` with the existing visible custom-message type and a voice-origin
+label. Pi decides how input joins current work. `message_end` remembers the
+assistant's reply; `agent_settled` sends it back to voice using the retained
+`Agent Final Message` convention. If Pi has no successful reply, a fixed notice
+directs the user to the terminal. Raw errors, thinking and tool output stay there.
 
-Eligibility requires exactly one matching custom-message start/end pair and
-persisted active-branch receipt within five seconds. New branch entries and
-projection catch non-trigger appends that bypass extension hooks. Unknown input,
-multiple runs/finals, context edits, compaction, retry failures, errors, aborts or
-navigation invalidate delivery. The post-context public event compares non-system
-model context with Pi's projection; Pi-owned system deltas remain allowed.
-This is conservative observed correlation, not isolation from another extension
-in the same process or an atomic scheduler reservation.
+There is no separate voice task scheduler, pending-request limit, replay history,
+request quota, local receipt, branch snapshot, transcript hash or context audit.
+Pi being busy does not block starting voice. The extra receipt deadline and
+thirty-minute coding timer are removed. The transport retains the latest service
+delegation ID only to address the wire reply, matching the upstream protocol.
+The bounded writer can drain successive replies normally.
 
-At `agent_settled`, the same call/session must still own one successful final in
-that interval. Only bounded final text is retained for sending; tool/thinking
-observations are fingerprints. The upstream `Agent Final Message` convention
-wraps at most 64 KiB of final body including its visible truncation marker. No
-historical context, intermediate commentary, tool output or errors are forwarded.
-The thirty-minute delegated-work deadline stops voice only. Generation-owned
-senders and abort cleanup prevent later delivery from stopped calls.
+Audio resource ownership, transport bounds, explicit consent, mute and stop keep
+their existing jobs. Stopping voice closes its resources and discards unsent data;
+it does not abort Pi. Pi lifecycle changes tear down the call through the existing
+lifecycle binding. No additional result-confirmation dialog is introduced.
 
 ## Remaining limits
 

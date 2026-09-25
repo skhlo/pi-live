@@ -13,7 +13,7 @@ import time
 
 REPO = Path(__file__).resolve().parent.parent
 POLICY = "(version 1) (allow default) (deny network*)"
-CASES = ["cancel", "late", "controls", "shortcut-no", "shortcut-cancel", "task-stop"] + [
+CASES = ["cancel", "late", "controls", "shortcut-no", "shortcut-cancel", "task-stop", "conversation"] + [
     f"{kind}-{answer}"
     for kind, answers in {
         "confirm": ["yes", "no", "cancel"], "select": ["beta", "cancel"],
@@ -147,6 +147,20 @@ def run(case):
             command("/live stop")
             pause()
             assert state()["state"] == "off"
+        elif case == "conversation":
+            start()
+            before = len(events())
+            command("/fixture task")
+            wait("tool-start", before)
+            command("/fixture followup")
+            command("Typed clarification while Pi is working")
+            settled = wait("agent-settled", before)
+            assert settled["state"] == "active"
+            for text in ["Voice follow-up while Pi is working", "Typed clarification while Pi is working"]:
+                assert any(text in context for context in settled["inputs"]), text
+            assert any('"delegation_item_id":"terminal-two"' in frame for frame in settled["framesContent"])
+            command("/live stop")
+            pause()
         elif case == "task-stop":
             start()
             command("/fixture task")

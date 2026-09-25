@@ -50,8 +50,7 @@ async function runtimeHarness(
     sendText?: (payload: string) => Promise<void>;
     sendPong?: (payload: Uint8Array) => Promise<void>;
     onSocketClose?: () => void;
-    admitRequests?: boolean;
-    onRequest?: (request: { id: string; text: string }) => boolean;
+    onRequest?: (request: { id: string; text: string }) => void;
     onNativeCallbacks?: (
       callbacks: Parameters<LiveNativeAdapter["createPeer"]>[0],
     ) => void;
@@ -131,7 +130,7 @@ async function runtimeHarness(
     callbacks: {
       onRequest(request) {
         requests.push(request);
-        return options.onRequest?.(request) ?? options.admitRequests === true;
+        options.onRequest?.(request);
       },
       onTranscript: (transcript) => transcripts.push(transcript),
       onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
@@ -359,25 +358,30 @@ test("malformed UTF-8 and oversized raw delegation text fail before callbacks", 
   assert.equal(padded.diagnostics.at(-1)?.code, "protocol-error");
 });
 
-test("an active delegation is refused before a second request callback executes", async (t) => {
-  const harness = await runtimeHarness(t, { admitRequests: true });
+test("voice requests pass through while earlier Pi work is pending", async (t) => {
+  const harness = await runtimeHarness(t);
   harness.sideband.onText(delegation("first", "first task"));
   harness.sideband.onText(delegation("second", "second task"));
-  assert.deepEqual(harness.requests, [{ id: "first", text: "first task" }]);
-  assert.equal(harness.diagnostics.at(-1)?.code, "protocol-error");
+  assert.deepEqual(harness.requests, [
+    { id: "first", text: "first task" },
+    { id: "second", text: "second task" },
+  ]);
+  assert.deepEqual(harness.diagnostics, []);
 });
 
-test("a reentrant request callback cannot execute a second admission", async (t) => {
+test("a nested voice request becomes the current wire reply destination", async (t) => {
   let harness!: RuntimeHarness;
   harness = await runtimeHarness(t, {
-    onRequest() {
-      harness.sideband.onText(delegation("nested", "nested task"));
-      return true;
+    onRequest(request) {
+      if (request.id === "outer")
+        harness.sideband.onText(delegation("nested", "nested task"));
     },
   });
   harness.sideband.onText(delegation("outer", "outer task"));
-  assert.deepEqual(harness.requests, [{ id: "outer", text: "outer task" }]);
-  assert.equal(harness.diagnostics.at(-1)?.code, "protocol-error");
+  await harness.connection.sendData?.({ kind: "final", text: "Pi reply" });
+  assert.equal(harness.requests.length, 2);
+  assert.ok(harness.sent[0]?.includes('"delegation_item_id":"nested"'));
+  assert.deepEqual(harness.diagnostics, []);
 });
 
 test("a request callback that reentrantly closes transport cannot adopt its result", async (t) => {
@@ -397,26 +401,15 @@ test("a request callback that reentrantly closes transport cannot adopt its resu
   assert.deepEqual(harness.sent, []);
 });
 
-test("delegation IDs are replay-safe, byte-bounded and never evicted", async (t) => {
-  const harness = await runtimeHarness(t);
-  harness.sideband.onText(delegation("rtc-request", "do the task"));
-  harness.sideband.onText(delegation("rtc-request", "do the task"));
-  assert.deepEqual(harness.requests, [
-    { id: "rtc-request", text: "do the task" },
-  ]);
-  harness.sideband.onText(delegation("rtc-request", "changed task"));
-  assert.equal(harness.diagnostics.at(-1)?.code, "protocol-error");
-
+test("each voice request is input, without replay history or a call-wide request quota", async (t) => {
   const clock = new ManualClock();
-  const exhausted = await runtimeHarness(t, { clock });
-  for (let index = 0; index < 256; index += 1) {
-    exhausted.sideband.onText(delegation(`request-${index}`, "task"));
+  const harness = await runtimeHarness(t, { clock });
+  for (let index = 0; index < 300; index++) {
+    harness.sideband.onText(delegation("reused-wire-id", `request ${index}`));
     clock.advance(5);
   }
-  assert.equal(exhausted.requests.length, 256);
-  exhausted.sideband.onText(delegation("request-256", "task"));
-  assert.equal(exhausted.requests.length, 256);
-  assert.equal(exhausted.diagnostics.at(-1)?.code, "protocol-error");
+  assert.equal(harness.requests.length, 300);
+  assert.deepEqual(harness.diagnostics, []);
 });
 
 test("transcripts retain only the latest UTF-8 tail per role", async (t) => {
@@ -437,7 +430,7 @@ test("transcripts retain only the latest UTF-8 tail per role", async (t) => {
 });
 
 test("final writer truncates with a marker, chunks lazily at 500 UTF-8 bytes and permits over 256 KiB lifetime", async (t) => {
-  const exact = await runtimeHarness(t, { admitRequests: true });
+  const exact = await runtimeHarness(t);
   exact.sideband.onText(delegation("exact-final-id", "task"));
   await exact.connection.sendData?.({
     kind: "final",
@@ -457,7 +450,7 @@ test("final writer truncates with a marker, chunks lazily at 500 UTF-8 bytes and
     64 * 1_024,
   );
 
-  const harness = await runtimeHarness(t, { admitRequests: true });
+  const harness = await runtimeHarness(t);
   harness.sideband.onText(delegation("final-id", "task"));
   await harness.connection.sendData?.({
     kind: "final",
@@ -486,7 +479,7 @@ test("final writer truncates with a marker, chunks lazily at 500 UTF-8 bytes and
 });
 
 test("context chunking uses an inclusive 500-byte UTF-8 limit", async (t) => {
-  const exact = await runtimeHarness(t, { admitRequests: true });
+  const exact = await runtimeHarness(t);
   exact.sideband.onText(delegation("chunk-exact", "task"));
   await exact.connection.sendData?.({
     kind: "application",
@@ -498,7 +491,7 @@ test("context chunking uses an inclusive 500-byte UTF-8 limit", async (t) => {
   };
   assert.equal(Buffer.byteLength(exactMessage.content[0]!.text), 500);
 
-  const over = await runtimeHarness(t, { admitRequests: true });
+  const over = await runtimeHarness(t);
   over.sideband.onText(delegation("chunk-over", "task"));
   await over.connection.sendData?.({
     kind: "application",
@@ -524,7 +517,6 @@ test("materialized envelope admission is bounded and stop promptly discards queu
   let socketCloses = 0;
   let sendCalls = 0;
   const harness = await runtimeHarness(t, {
-    admitRequests: true,
     async sendText() {
       sendCalls += 1;
       if (sendCalls === 1) await sendGate;
@@ -580,56 +572,60 @@ test("materialized envelope admission is bounded and stop promptly discards queu
   assert.equal(harness.sent.length, 1);
 });
 
-test("only one lazy final producer is retained while its future envelopes remain unmaterialized", async (t) => {
+test("successive Pi replies share the bounded writer and drain in order", async (t) => {
   let releaseSend!: () => void;
   const sendGate = new Promise<void>((resolve) => {
     releaseSend = resolve;
   });
   let sendCalls = 0;
   const harness = await runtimeHarness(t, {
-    admitRequests: true,
     async sendText() {
-      sendCalls += 1;
-      if (sendCalls === 1) await sendGate;
+      if (++sendCalls === 1) await sendGate;
     },
   });
-  harness.sideband.onText(delegation("lazy-final", "task"));
-  const sending = harness.connection.sendData?.({
+  t.after(() => releaseSend());
+  harness.sideband.onText(delegation("first", "first task"));
+  const first = harness.connection.sendData?.({
     kind: "final",
     text: "\u0001".repeat(64 * 1_024),
   });
-  assert.ok(sending);
-  await waitForCondition(() => sendCalls === 1, "final send did not start");
-  assert.equal(harness.sent.length, 1);
-
-  const duplicate = harness.connection.sendData?.({
+  await waitForCondition(() => sendCalls === 1, "first reply did not start");
+  harness.sideband.onText(delegation("second", "second task"));
+  const second = harness.connection.sendData?.({
     kind: "final",
-    text: "duplicate",
+    text: "Second reply",
   });
-  assert.ok(duplicate);
-  try {
-    const duplicateOutcome = await Promise.race([
-      duplicate.then(
-        () => "fulfilled" as const,
-        (error: unknown) => error,
-      ),
-      new Promise<"pending">((resolve) =>
-        setTimeout(() => resolve("pending"), 50),
-      ),
-    ]);
-    assert.notEqual(duplicateOutcome, "pending");
-    assert.ok(duplicateOutcome instanceof Error);
-    assert.equal(duplicateOutcome.message, "Live transport protocol failed.");
-  } finally {
-    releaseSend();
-  }
-
-  await sending;
+  assert.equal(harness.sent.length, 1);
+  releaseSend();
+  await Promise.all([first, second]);
   assert.ok(harness.sent.length > 100);
   assert.ok(
-    harness.sent.reduce((total, wire) => total + Buffer.byteLength(wire), 0) >
-      256 * 1_024,
+    harness.sent
+      .slice(0, -1)
+      .every((frame) => frame.includes('"delegation_item_id":"first"')),
   );
+  assert.ok(harness.sent.at(-1)?.includes('"delegation_item_id":"second"'));
+  assert.ok(harness.sent.at(-1)?.includes("Second reply"));
+});
+
+test("a reused wire ID receives its reply after an earlier send drains", async (t) => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  t.after(() => release());
+  const harness = await runtimeHarness(t, { sendText: () => gate });
+  harness.sideband.onText(delegation("same-id", "first input"));
+  const first = harness.connection.sendData?.({
+    kind: "final",
+    text: "First reply",
+  });
+  harness.sideband.onText(delegation("same-id", "next input"));
+  release();
+  await first;
+  await harness.connection.sendData?.({ kind: "final", text: "Next reply" });
+  assert.equal(harness.sent.length, 2);
+  assert.ok(harness.sent[1]?.includes("Next reply"));
 });
 
 test("writer bounds queued retained bytes and captures only admitted bounded data", async (t) => {
@@ -709,7 +705,6 @@ test("ping replies use the bounded writer and checked failures expose no raw err
 
   const secret = "synthetic-send-secret";
   const failureHarness = await runtimeHarness(t, {
-    admitRequests: true,
     async sendText() {
       throw new Error(secret);
     },
@@ -749,7 +744,6 @@ test("writer resumes after buffered bytes drain without eager chunk generation",
   let buffered = 256 * 1_024;
   const harness = await runtimeHarness(t, {
     clock,
-    admitRequests: true,
     bufferedAmount: () => buffered,
   });
   harness.sideband.onText(delegation("draining-id", "task"));
@@ -834,7 +828,6 @@ test("writer waits for socket capacity within one five-second send budget", asyn
   const clock = new ManualClock();
   const harness = await runtimeHarness(t, {
     clock,
-    admitRequests: true,
     bufferedAmount: () => 256 * 1_024,
   });
   harness.sideband.onText(delegation("stalled-id", "task"));

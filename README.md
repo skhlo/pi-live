@@ -1,12 +1,12 @@
 # pi-live
 
-Private, experimental Pi extension extracted for standalone development. Live
-controls and conservative coding delegation are implemented and verified with
-fake media, but **automatic final forwarding is not accepted for delivery**:
-review reproduced an unobservable later context edit. See the
-[issue #5 blocker](docs/ISSUE-5-BLOCKER.md). Actual-home certification remains unavailable, so the shipped
-package still refuses real call setup. No microphone/provider trial or rollout
-has been performed.
+Private, experimental Pi extension. Voice feeds requests into the current Pi
+conversation and receives Pi's reply. Pi handles typed and spoken input together,
+including its normal extensions, tools and retries.
+
+The controls are tested with fake media. Actual-home certification remains
+unavailable, so the shipped package still refuses real call setup. No real
+microphone/provider trial or rollout has been performed.
 
 ## Current behavior
 
@@ -26,10 +26,10 @@ resolve credentials, create call timers, touch ownership or contact a provider.
 - The render-only `pi-live` widget shows input level, current role transcripts,
   mute and working state. It does not replace the footer/editor or intercept
   their keys. Teardown removes it; there is no widget animation timer.
-- One idle-only coding request can be admitted at a time. Its visible message
-  identifies voice as the source. Only an unambiguously owned successful final
-  result can return to voice; ordinary coding output remains in Pi. Stopping
-  voice does not abort accepted coding work.
+- Voice requests become visible Pi messages, including while Pi is working.
+  Pi handles follow-ups and typed input normally. When it settles, its successful
+  reply returns to voice; if it has no reply, voice gets a short notice to check
+  the terminal. Stopping voice stops audio and delivery, while Pi work continues.
 
 Consent identifies the execution host, experimental OpenAI service, microphone
 and speakers, final-result and Pi session-identifier sharing, attestation

@@ -25,7 +25,6 @@ import {
   createIsolatedLiveCoordination,
   createNodeOwnershipFileSystem,
   type LiveLifecycleBinding,
-  type LiveOutgoingData,
   type LiveLifecycleBindingOptions,
   type LiveDependencies,
 } from "../../src/live.ts";
@@ -106,12 +105,10 @@ interface SdkFixtureOptions {
   sourceInfoByInlineName?: ReadonlyMap<string, SourceInfo>;
   cleanupTimeoutMs?: number;
   provider?: Parameters<ModelRuntime["registerProvider"]>[1];
-  sendData?: (data: LiveOutgoingData) => void;
   tools?: NonNullable<Parameters<typeof createAgentSession>[0]>["customTools"];
   controls?: boolean;
   resources?: NonNullable<LiveDependencies["runtime"]>["resources"];
   retry?: boolean;
-  beforeDispatch?: () => void;
   configuredSourcesFromSettings?: boolean;
 }
 
@@ -202,9 +199,6 @@ export async function createSdkFixture(
       sendSample() {
         counts.sentSamples += 1;
       },
-      sendData(data) {
-        options.sendData?.(data);
-      },
       async closeSession(): Promise<void> {
         counts.closeSessionCalls += 1;
       },
@@ -219,21 +213,15 @@ export async function createSdkFixture(
   const bindingFactory: InlineExtension = {
     name: "pi-live-lifecycle-test",
     factory(pi) {
-      const bindingApi =
-        options.getCommandsOverride || options.beforeDispatch
-          ? (new Proxy(pi, {
-              get(target, property, receiver) {
-                if (property === "getCommands" && options.getCommandsOverride)
-                  return options.getCommandsOverride;
-                if (property === "sendMessage" && options.beforeDispatch)
-                  return (...args: Parameters<typeof pi.sendMessage>) => {
-                    options.beforeDispatch?.();
-                    return pi.sendMessage(...args);
-                  };
-                return Reflect.get(target, property, receiver);
-              },
-            }) as typeof pi)
-          : pi;
+      const bindingApi = options.getCommandsOverride
+        ? (new Proxy(pi, {
+            get(target, property, receiver) {
+              if (property === "getCommands" && options.getCommandsOverride)
+                return options.getCommandsOverride;
+              return Reflect.get(target, property, receiver);
+            },
+          }) as typeof pi)
+        : pi;
       const bindingOptions: LiveLifecycleBindingOptions = {
         facts: {
           check: () => ({

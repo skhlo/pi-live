@@ -92,7 +92,7 @@ export function fakeProvider(
                 : [
                     {
                       type: "text",
-                      text: options.final ?? "Owned final result",
+                      text: options.final ?? "Pi final reply",
                     },
                   ],
             usage: {

@@ -189,8 +189,6 @@ export function admitted(): LiveAdmissionFacts {
     compatible: true,
     conflict: false,
     dialog: false,
-    idle: true,
-    pendingWork: false,
   };
 }
 

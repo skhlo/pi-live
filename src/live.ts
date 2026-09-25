@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { constants, type Stats } from "node:fs";
 import {
   lstat,
@@ -17,8 +17,6 @@ import path from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
-  MessageEndEvent,
-  SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import {
   CONFIG_DIR_NAME,
@@ -81,7 +79,6 @@ const LIVE_LIMITS = {
   contextChunkBytes: 500,
   textBytes: 64 * 1_024,
   contentEntries: 64,
-  seenIds: 256,
   pendingProducers: 256,
   retainedProducerBytes: 256 * 1_024,
   pendingFragments: 256,
@@ -460,8 +457,6 @@ export interface LiveAdmissionFacts {
   compatible: boolean;
   conflict: boolean;
   dialog: boolean;
-  idle: boolean;
-  pendingWork: boolean;
 }
 
 export interface OwnershipIdentity {
@@ -660,7 +655,7 @@ export interface LiveRuntimeResourcesOptions {
   ) => string | undefined | Promise<string | undefined>;
   callbacks?: {
     onLevel?(level: number): void;
-    onRequest?(request: { id: string; text: string }): boolean;
+    onRequest?(request: { id: string; text: string }): void;
     onTranscript?(transcript: {
       role: "user" | "assistant";
       text: string;
@@ -742,10 +737,6 @@ export type LiveStopResult = {
 
 export type LiveOutgoingSender = (data: LiveOutgoingData) => boolean;
 
-export type LiveDelegationAdmissionResult =
-  | { kind: "updated"; state: "active"; settle(): void }
-  | { kind: "refused"; state: LiveState; diagnostic: LiveDiagnostic };
-
 export interface LiveLifecycle {
   snapshot(): LiveSnapshot;
   createOutgoingSender(): LiveOutgoingSender | undefined;
@@ -755,7 +746,6 @@ export interface LiveLifecycle {
   setMuted(muted: boolean): Promise<LiveMutationResult>;
   selectVoice(voice: string): Promise<LiveMutationResult>;
   interrupt(reason: LiveInterruptionReason): Promise<LiveStopResult>;
-  delegationAdmitted(): LiveDelegationAdmissionResult;
 }
 
 interface Deferred<T> {
@@ -808,7 +798,6 @@ interface CallAttempt {
   closeController?: AbortController;
   microphoneTokens: number;
   microphoneBucketAt: number;
-  delegation?: { token: object; timer?: LiveTimer; deadline: number };
 }
 
 const DEFAULT_ADMISSION: LiveAdmissionFacts = {
@@ -816,15 +805,12 @@ const DEFAULT_ADMISSION: LiveAdmissionFacts = {
   compatible: false,
   conflict: false,
   dialog: false,
-  idle: true,
-  pendingWork: false,
 };
 const CONNECT_MS = 30_000;
 const DATA_PHASE_MS = 5_000;
 const RESOURCE_PHASE_MS = 10_000;
 const STOP_MS = 5_000;
 const CALL_MS = 60 * 60_000;
-const DELEGATION_MS = 30 * 60_000;
 const OWNER_RECORD_LIMIT = 4_096;
 const GLOBAL_COORDINATION_KEY = "__pi_live_lifecycle_coordination_v1__";
 
@@ -1485,10 +1471,8 @@ export function createLiveRuntimeResources(
 
       let eventTokens: number = LIVE_LIMITS.eventBucket;
       let eventBucketAt = clock.now();
-      const seenRequests = new Map<string, string>();
       const latestTranscripts = new Map<"user" | "assistant", string>();
-      let activeDelegationId: string | undefined;
-      let requestAdmissionPending = false;
+      let replyTo: string | undefined;
       type WriterFragment = {
         kind: "text" | "pong";
         payload: string | Uint8Array;
@@ -1507,7 +1491,6 @@ export function createLiveRuntimeResources(
         retainedBytes: number;
         retained: boolean;
         deadline: number;
-        final: boolean;
         settled: boolean;
         resolve(): void;
         reject(error: LiveRuntimeError): void;
@@ -1516,7 +1499,6 @@ export function createLiveRuntimeResources(
       let activeProducer: WriterProducer | undefined;
       let writerRunning = false;
       let writerStopped = false;
-      let finalProducerPending = false;
       let pendingProducers = 0;
       let queuedRetainedBytes = 0;
       let pendingEnvelopeCount = 0;
@@ -1656,36 +1638,12 @@ export function createLiveRuntimeResources(
               protocolFailure();
               return;
             }
-            const fingerprint = JSON.stringify(content);
-            const previous = seenRequests.get(item.id);
-            if (previous !== undefined) {
-              if (previous !== fingerprint) protocolFailure();
-              return;
-            }
-            if (seenRequests.size >= LIVE_LIMITS.seenIds) {
-              protocolFailure();
-              return;
-            }
-            seenRequests.set(item.id, fingerprint);
-            if (activeDelegationId !== undefined || requestAdmissionPending) {
-              protocolFailure();
-              return;
-            }
-            let admitted = false;
-            requestAdmissionPending = true;
+            replyTo = item.id;
             try {
-              admitted =
-                options.callbacks?.onRequest?.({
-                  id: item.id,
-                  text: request,
-                }) === true;
+              options.callbacks?.onRequest?.({ id: item.id, text: request });
             } catch {
-              // #5 owns request admission; callback failures stay outside wire data.
-            } finally {
-              requestAdmissionPending = false;
+              protocolFailure();
             }
-            if (!effectAllowed()) return;
-            if (admitted) activeDelegationId = item.id;
             return;
           }
           case "error":
@@ -1769,7 +1727,6 @@ export function createLiveRuntimeResources(
         producer.text = undefined;
         producer.pong = undefined;
         producer.delegationId = undefined;
-        if (producer.final) finalProducerPending = false;
         if (error) producer.reject(error);
         else producer.resolve();
       }
@@ -2093,9 +2050,8 @@ export function createLiveRuntimeResources(
               text: string;
               dataKind: "application" | "final";
               delegationId?: string;
-              final: boolean;
             }
-          | { kind: "pong"; pong: Uint8Array; final: false },
+          | { kind: "pong"; pong: Uint8Array },
         retainedBytes: number,
         deadline: number,
       ): Promise<void> => {
@@ -2106,8 +2062,7 @@ export function createLiveRuntimeResources(
           retainedBytes < 0 ||
           pendingProducers >= LIVE_LIMITS.pendingProducers ||
           queuedRetainedBytes + retainedBytes >
-            LIVE_LIMITS.retainedProducerBytes ||
-          (specification.final && finalProducerPending)
+            LIVE_LIMITS.retainedProducerBytes
         )
           return Promise.reject(fixedRuntimeError("protocol"));
         let resolveProducer!: () => void;
@@ -2129,7 +2084,6 @@ export function createLiveRuntimeResources(
         };
         pendingProducers += 1;
         queuedRetainedBytes += retainedBytes;
-        if (producer.final) finalProducerPending = true;
         producerQueue.push(producer);
         materializeWaitingProducers();
         startWriter();
@@ -2148,7 +2102,7 @@ export function createLiveRuntimeResources(
         }
         const retainedPayload = payload.slice();
         void queueProducer(
-          { kind: "pong", pong: retainedPayload, final: false },
+          { kind: "pong", pong: retainedPayload },
           retainedPayload.byteLength,
           clock.now() + LIVE_SEND_MS,
         ).catch(() => protocolFailure());
@@ -2597,9 +2551,9 @@ export function createLiveRuntimeResources(
               !byteLengthWithin(data.text, LIVE_LIMITS.textBytes)
             )
               return Promise.reject(fixedRuntimeError("protocol"));
-            const delegationId = activeDelegationId;
-            if (dataKind === "final" && !delegationId)
-              return Promise.reject(fixedRuntimeError("protocol"));
+            const delegationId = replyTo;
+            if (dataKind === "final" && !delegationId) return Promise.resolve();
+            if (dataKind === "final") replyTo = undefined;
             const boundedText =
               dataKind === "final" ? truncateLiveFinal(data.text) : data.text;
             const text =
@@ -2613,19 +2567,10 @@ export function createLiveRuntimeResources(
                 text,
                 dataKind,
                 ...(delegationId ? { delegationId } : {}),
-                final: dataKind === "final",
               },
               Buffer.byteLength(text, "utf8"),
               deadline,
             );
-            if (dataKind === "final")
-              void operation.then(
-                () => {
-                  if (activeDelegationId === delegationId)
-                    activeDelegationId = undefined;
-                },
-                () => undefined,
-              );
             return operation;
           },
           closeSession(request) {
@@ -3321,8 +3266,7 @@ function certificationMatches(
 function admissionDiagnostic(
   facts: LiveAdmissionFacts,
 ): LiveDiagnostic | undefined {
-  if (facts.conflict || facts.dialog || !facts.idle || facts.pendingWork)
-    return "busy";
+  if (facts.conflict || facts.dialog) return "busy";
   if (!facts.tui || !facts.compatible) return "denied";
   return undefined;
 }
@@ -3458,12 +3402,6 @@ export function createLiveLifecycle(
         )
           void beginStop(attempt);
         else if (
-          attempt.delegation !== undefined &&
-          clock.now() >= attempt.delegation.deadline
-        ) {
-          attempt.delegation = undefined;
-          void beginStop(attempt);
-        } else if (
           (state === "acquiring" || state === "connecting") &&
           attempt.connectDeadline !== undefined &&
           clock.now() >= attempt.connectDeadline
@@ -4208,7 +4146,6 @@ export function createLiveLifecycle(
     current.stopDeadline = stopDeadline;
     current.stopObservation = stopObservation;
     state = "stopping";
-    current.delegation = undefined;
     current.controller.abort();
     current.cancelled.resolve();
     clearAttemptTimers(current);
@@ -4674,54 +4611,6 @@ export function createLiveLifecycle(
             : undefined,
       );
     },
-    delegationAdmitted(): LiveDelegationAdmissionResult {
-      refreshProjection();
-      const current = attempt;
-      if (!current || state !== "active" || current.delegation)
-        return { kind: "refused", state, diagnostic: "busy" };
-      const token = {};
-      const deadline = clock.now() + DELEGATION_MS;
-      const observeDelegationDeadline = () => {
-        const delegation = current.delegation;
-        if (attempt !== current || !delegation || delegation.token !== token)
-          return;
-        if (clock.now() < deadline) {
-          delegation.timer = schedule(
-            current,
-            deadline - clock.now(),
-            observeDelegationDeadline,
-          );
-          return;
-        }
-        current.delegation = undefined;
-        void beginStop(current);
-      };
-      const delegation: NonNullable<CallAttempt["delegation"]> = {
-        token,
-        deadline,
-      };
-      current.delegation = delegation;
-      const timer = schedule(current, DELEGATION_MS, observeDelegationDeadline);
-      if (
-        attempt === current &&
-        state === "active" &&
-        current.delegation === delegation
-      )
-        delegation.timer = timer;
-      else clearAttemptTimer(current, timer);
-      return {
-        kind: "updated",
-        state: "active",
-        settle(): void {
-          if (attempt !== current) return;
-          const delegation = current.delegation;
-          if (!delegation || delegation.token !== token) return;
-          clearAttemptTimer(current, delegation.timer);
-          current.delegation = undefined;
-          if (clock.now() >= delegation.deadline) void beginStop(current);
-        },
-      };
-    },
   };
   return lifecycle;
 }
@@ -4876,9 +4765,9 @@ export function createLiveDependencies(
 }
 
 const LIVE_DISCLOSURE =
-  "Uses the execution host microphone and speakers with the experimental OpenAI service. Audio, speech transcripts, the Pi session identifier (linking calls from that session), and only the final coding result are shared. DeviceCheck attestation and locale/timezone metadata are sent. Existing HTTP/WebSocket proxy settings do not establish WebRTC/ICE media proxying. Pi reports only outermost extension dialogs, with a microtask delay; shortcut-opened dialogs and unreported nested dialogs may leave voice active. Stop voice first before opening such dialogs when capture and delivery must stop. Muting stops microphone capture; speakers may continue. Voice requests do not grant approvals. Native/proxy cleanup may remain unconfirmed and block restart; home certification and recovery require standalone setup.";
+  "Uses the execution host microphone and speakers with the experimental OpenAI service. Audio, speech transcripts, the Pi session identifier (linking calls from that session), and the final coding result are shared. Typed input and installed Pi extensions can influence that result. DeviceCheck attestation and locale/timezone metadata are sent. Existing HTTP/WebSocket proxy settings do not establish WebRTC/ICE media proxying. Pi reports only outermost extension dialogs, with a microtask delay; shortcut-opened dialogs and unreported nested dialogs may leave voice active. Stop voice first before opening such dialogs when capture and delivery must stop. Muting stops microphone capture; speakers may continue. Voice requests do not grant approvals. Native/proxy cleanup may remain unconfirmed and block restart; home certification and recovery require standalone setup.";
 
-const LIVE_INSTRUCTIONS = `You are Pi Live, the voice surface of the user's coding assistant. Reply briefly in speech-friendly language. For coding, repository investigation, tools, commands or verification, create one client delegation containing the complete request and relevant spoken context. The Pi coding session owns its model, tools and approvals. Voice does not grant approval. Wait for that request's final result before delegating another request. Text beginning with "Agent Final Message" is the final answer from the coding session. Present its useful result naturally. For ordinary conversation needing no tools, respond directly.`;
+const LIVE_INSTRUCTIONS = `You are Pi Live, the voice interface to the user's current Pi conversation. Reply briefly in speech-friendly language. Send coding, repository, tool and verification requests to the client. Pi handles those requests together with typed input, its configured extensions and its usual tools and approvals. Present results marked "Agent Final Message" naturally to the user. Voice does not grant approvals.`;
 
 export function registerPiLive(
   pi: ExtensionAPI,
@@ -4890,6 +4779,8 @@ export function registerPiLive(
   let preparing = false;
   let widgetVisible = false;
   let level = 0;
+  let working = false;
+  let final: string | undefined;
   let transcripts: Partial<Record<"user" | "assistant", string>> = {};
   let activeSignal: AbortSignal | undefined;
   const resources = new WeakMap<AbortSignal, LiveResources>();
@@ -4907,7 +4798,7 @@ export function registerPiLive(
       state.state === "active"
         ? state.muted
           ? "muted"
-          : binding.delegation.working()
+          : working
             ? "working"
             : "listening"
         : state.state;
@@ -4916,7 +4807,7 @@ export function registerPiLive(
         ? "▁▂▃▄▅▆▇█"[Math.min(7, Math.floor(level * 8))]!.repeat(8)
         : "--------";
     const lines = [
-      `Pi Live: ${phase}${state.muted && binding.delegation.working() ? " / working" : ""} | ${wave} | ${state.voice}`,
+      `Pi Live: ${phase}${state.muted && working ? " / working" : ""} | ${wave} | ${state.voice}`,
       ...(transcripts.user ? [`You: ${transcripts.user}`] : []),
       ...(transcripts.assistant ? [`Voice: ${transcripts.assistant}`] : []),
     ];
@@ -4936,6 +4827,7 @@ export function registerPiLive(
     facts: {
       async check(current) {
         ctx = current;
+        working = !current.isIdle();
         return {
           compatible: (await dependencies.compatibility.check()).supported,
           configuredPackageSources:
@@ -4947,6 +4839,7 @@ export function registerPiLive(
     consent: {
       async request(input) {
         activeSignal = input.signal;
+        final = undefined;
         transcripts = {};
         level = 0;
         paint();
@@ -4984,11 +4877,15 @@ export function registerPiLive(
             LiveRuntimeResourcesOptions["callbacks"]
           > = {
             onRequest(request) {
-              if (input.signal.aborted || activeSignal !== input.signal)
-                return false;
-              const admitted = binding.delegation.request(request);
-              paint();
-              return admitted;
+              if (input.signal.aborted || activeSignal !== input.signal) return;
+              pi.sendMessage(
+                {
+                  customType: DELEGATION_MESSAGE_TYPE,
+                  content: `[Voice coding request]\n${request.text}`,
+                  display: true,
+                },
+                { triggerTurn: true },
+              );
             },
             onTranscript(transcript) {
               if (input.signal.aborted || activeSignal !== input.signal) return;
@@ -5183,7 +5080,27 @@ export function registerPiLive(
     description: "Toggle Pi Live voice",
     handler: (current) => handle("", current),
   });
-  pi.on("agent_settled", () => paint());
+  pi.on("agent_start", () => {
+    working = true;
+    final = undefined;
+    paint();
+  });
+  pi.on("message_end", ({ message }) => {
+    if (message.role !== "assistant") return;
+    final =
+      message.stopReason === "stop"
+        ? truncateLiveFinal(delegationText(message.content))
+        : undefined;
+  });
+  pi.on("agent_settled", () => {
+    working = false;
+    binding.lifecycle.createOutgoingSender()?.({
+      kind: "final",
+      text: final || "Pi finished without a reply. Check the terminal.",
+    });
+    final = undefined;
+    paint();
+  });
   pi.on("session_shutdown", (_event, current) => {
     retired = true;
     ++controlVersion;
@@ -5235,408 +5152,7 @@ export interface LiveLifecycleBindingOptions {
 
 export interface LiveLifecycleBinding {
   lifecycle: LiveLifecycle;
-  delegation: {
-    request(request: { id: string; text: string }): boolean;
-    working(): boolean;
-  };
   enter(ctx: ExtensionContext): void;
-}
-
-/** Transport owns wire validation/replay; this adapter owns Pi result eligibility. */
-function bindPiLiveDelegation(
-  pi: ExtensionAPI,
-  lifecycle: LiveLifecycle,
-  clock: LiveClock,
-) {
-  type Message = MessageEndEvent["message"];
-  type Receipt = {
-    version: 1;
-    source: "pi-live";
-    generation: string;
-    delegationId: string;
-    receipt: string;
-  };
-  interface Call {
-    generation: string;
-    ctx: ExtensionContext;
-    signal: AbortSignal;
-    session: string;
-    leaf: string | null;
-  }
-  interface Pending {
-    call: Call;
-    details: Receipt;
-    content: string;
-    before: Set<string>;
-    branch: string[];
-    starts: number;
-    ends: number;
-    runs: number;
-    final?: { fingerprint: string; text: string };
-    observed: Set<string>;
-    completed: boolean;
-    timer?: LiveTimer;
-    deadline: number;
-    send: LiveOutgoingSender;
-    settle(): void;
-  }
-  let call: Call | undefined;
-  let pending: Pending | undefined;
-  const fingerprint = (message: Message): string =>
-    createHash("sha256").update(JSON.stringify(message)).digest("hex");
-  const clear = (): void => {
-    const old = pending;
-    pending = undefined;
-    if (old?.timer) clock.clearTimer(old.timer);
-    old?.settle();
-  };
-  const refuse = (): void => {
-    // Fence first; no Pi abort, queue, steering or retry operation is used here.
-    void lifecycle.interrupt("failure");
-    clear();
-  };
-  function matches(
-    value: {
-      customType: string;
-      content: unknown;
-      display: boolean;
-      details?: unknown;
-    },
-    a: Pending,
-  ): boolean {
-    const details = value.details;
-    return (
-      value.customType === DELEGATION_MESSAGE_TYPE &&
-      value.content === a.content &&
-      value.display === true &&
-      isUnknownRecord(details) &&
-      details.version === 1 &&
-      details.source === "pi-live" &&
-      details.generation === a.details.generation &&
-      details.delegationId === a.details.delegationId &&
-      details.receipt === a.details.receipt &&
-      Object.keys(details).length === 5
-    );
-  }
-  function newBranch(
-    a: Pending,
-    ctx: ExtensionContext,
-  ): SessionEntry[] | undefined {
-    const manager = ctx.sessionManager;
-    if (manager.getSessionId() !== a.call.session) return;
-    const branch = manager.getBranch();
-    if (a.branch.some((id, i) => branch[i]?.id !== id)) return;
-    const newer = branch.slice(a.branch.length);
-    if (newer.some((e) => a.before.has(e.id))) return;
-    // New off-branch entries mean a movement or competing append occurred.
-    const branchIds = new Set(newer.map((e) => e.id));
-    if (
-      manager
-        .getEntries()
-        .some((e) => !a.before.has(e.id) && !branchIds.has(e.id))
-    )
-      return;
-    return newer;
-  }
-  function receiptPresent(a: Pending, ctx: ExtensionContext): boolean {
-    const entries = newBranch(a, ctx);
-    return (
-      entries !== undefined &&
-      entries.filter((e) => e.type === "custom_message" && matches(e, a))
-        .length === 1
-    );
-  }
-  function checkReceipt(a: Pending): void {
-    if (pending !== a) return;
-    if (clock.now() >= a.deadline || !receiptPresent(a, a.call.ctx)) {
-      refuse();
-      return;
-    }
-    if (a.timer) clock.clearTimer(a.timer);
-    a.timer = undefined;
-  }
-  pi.on("agent_start", () => {
-    if (pending && ++pending.runs !== 1) refuse();
-  });
-  pi.on("input", () => {
-    if (pending) refuse();
-  });
-  pi.on("message_start", (event) => {
-    const a = pending;
-    if (!a) return;
-    const m = event.message;
-    if (m.role === "custom" && matches(m, a)) {
-      if (++a.starts !== 1 || a.ends !== 0 || clock.now() >= a.deadline)
-        refuse();
-    } else if (
-      m.role === "user" ||
-      m.role === "custom" ||
-      (m.role !== "system" && (a.starts !== 1 || a.ends !== 1))
-    )
-      refuse();
-  });
-  pi.on("message_end", (event) => {
-    const a = pending;
-    if (!a) return;
-    const m = event.message;
-    if (m.role === "custom" && matches(m, a)) {
-      if (a.starts !== 1 || ++a.ends !== 1 || clock.now() >= a.deadline)
-        refuse();
-      return;
-    }
-    if (m.role === "user" || m.role === "custom") {
-      refuse();
-      return;
-    }
-    if (m.role === "assistant") {
-      if (
-        a.starts !== 1 ||
-        a.ends !== 1 ||
-        (m.stopReason !== "stop" && m.stopReason !== "toolUse")
-      ) {
-        refuse();
-        return;
-      }
-      if (m.stopReason === "stop") {
-        if (a.final) {
-          refuse();
-          return;
-        }
-        // Retain bounded final text and fingerprints, never raw tool output or
-        // thinking. One extra byte is enough to select the truncation marker.
-        let text = "";
-        for (const block of m.content) {
-          if (block.type !== "text") continue;
-          if (text) text += "\n";
-          const remaining = LIVE_LIMITS.textBytes + 4 - Buffer.byteLength(text);
-          text += utf8Prefix(block.text, Math.max(0, remaining));
-          if (Buffer.byteLength(text) > LIVE_LIMITS.textBytes) break;
-        }
-        a.final = {
-          fingerprint: fingerprint(m),
-          text: truncateLiveFinal(text),
-        };
-      }
-    } else if (m.role !== "system" && m.role !== "toolResult") {
-      refuse();
-      return;
-    }
-    a.observed.add(fingerprint(m));
-  });
-  // message_end fires before persistence. The next public turn/context boundary
-  // observes the actual stored receipt instead of predicting its entry ID.
-  pi.on("context", (_event, ctx) => {
-    const a = pending;
-    if (a && a.timer) {
-      if (receiptPresent(a, ctx)) checkReceipt(a);
-      else refuse();
-    }
-  });
-  pi.on("context_with_system", (event, ctx) => {
-    if (!pending) return;
-    // This event runs after all ordinary context handlers. Pi-owned system
-    // deltas may change; altered model-visible user/custom/tool history may not.
-    const actual = event.messages
-      .filter((m) => m.role !== "system")
-      .map(fingerprint);
-    const expected = ctx.sessionManager
-      .buildSessionProjection()
-      .messages.filter((m) => m.role !== "system")
-      .map(fingerprint);
-    if (
-      actual.length !== expected.length ||
-      actual.some((value, i) => value !== expected[i])
-    )
-      refuse();
-  });
-  pi.on("turn_end", (event, ctx) => {
-    const a = pending;
-    if (!a) return;
-    if (
-      event.outcome !== "completed" ||
-      event.continue ||
-      event.entries.some((e) => e.type !== "custom") ||
-      event.context.pendingMessages.length > 0
-    ) {
-      refuse();
-      return;
-    }
-    if (a.timer) checkReceipt(a);
-    if (!newBranch(a, ctx)) refuse();
-  });
-  pi.on("agent_before_settle", (event) => {
-    if (!pending) return;
-    if (
-      event.outcome !== "completed" ||
-      event.continue ||
-      event.entries.some((e) => e.type !== "custom") ||
-      event.context.pendingMessages.length > 0
-    )
-      refuse();
-    else pending.completed = true;
-  });
-  pi.on("agent_settled", (_event, ctx) => {
-    const a = pending;
-    if (!a) return;
-    const entries = newBranch(a, ctx);
-    const receipts =
-      entries?.filter((e) => e.type === "custom_message" && matches(e, a)) ??
-      [];
-    const final = a.final;
-    const finalIndex =
-      entries?.findIndex(
-        (e) =>
-          e.type === "message" && fingerprint(e.message) === final?.fingerprint,
-      ) ?? -1;
-    const receiptIndex =
-      entries?.findIndex((e) => e.id === receipts[0]?.id) ?? -1;
-    const projected = ctx.sessionManager
-      .buildSessionProjection()
-      .entries.filter((e) => e.sourceEntry.id === receipts[0]?.id);
-    const valid =
-      call === a.call &&
-      !a.call.signal.aborted &&
-      lifecycle.snapshot().state === "active" &&
-      a.starts === 1 &&
-      a.ends === 1 &&
-      a.runs === 1 &&
-      a.completed &&
-      !ctx.hasPendingMessages() &&
-      receipts.length === 1 &&
-      entries !== undefined &&
-      finalIndex > receiptIndex &&
-      entries.every((e) => {
-        if (e.type === "custom_message") return matches(e, a);
-        if (e.type === "message") return a.observed.has(fingerprint(e.message));
-        return (
-          e.type === "custom" ||
-          e.type === "label" ||
-          e.type === "session_info" ||
-          e.type === "usage"
-        );
-      }) &&
-      projected.length === 1 &&
-      projected[0]?.messages.length === 1 &&
-      projected[0].messages[0]?.role === "custom" &&
-      matches(projected[0].messages[0], a) &&
-      final !== undefined;
-    const text = final?.text ?? "";
-    if (!valid || !text.trim() || !isValidUtf8String(text)) {
-      refuse();
-      return;
-    }
-    clear();
-    a.call.leaf = ctx.sessionManager.getLeafId();
-    a.send({ kind: "final", text: truncateLiveFinal(text) });
-  });
-  const invalidate = (): void => {
-    if (pending) refuse();
-  };
-  pi.on("session_before_compact", invalidate);
-  pi.on("session_compact", invalidate);
-  pi.on("session_compact_failed", invalidate);
-  pi.on("session_before_tree", invalidate);
-  pi.on("session_tree", invalidate);
-  pi.on("session_before_switch", invalidate);
-  pi.on("session_before_fork", invalidate);
-  pi.on("session_shutdown", invalidate);
-  pi.on("session_start", invalidate);
-  return {
-    begin(
-      generation: string,
-      ctx: ExtensionContext,
-      signal: AbortSignal,
-    ): void {
-      clear();
-      const current: Call = {
-        generation,
-        ctx,
-        signal,
-        session: ctx.sessionManager.getSessionId(),
-        leaf: ctx.sessionManager.getLeafId(),
-      };
-      call = current;
-      signal.addEventListener(
-        "abort",
-        () => {
-          if (call !== current) return;
-          call = undefined;
-          clear();
-        },
-        { once: true },
-      );
-    },
-    working: () => pending !== undefined,
-    request(request: { id: string; text: string }): boolean {
-      const current = call;
-      const ctx = current?.ctx;
-      if (
-        !current ||
-        !ctx ||
-        current.signal.aborted ||
-        pending ||
-        lifecycle.snapshot().state !== "active" ||
-        !validCredentialField(request.id, LIVE_LIMITS.idBytes) ||
-        !byteLengthWithin(request.text, LIVE_LIMITS.textBytes) ||
-        !isValidUtf8String(request.text) ||
-        !request.text.trim() ||
-        !ctx.isIdle() ||
-        ctx.hasPendingMessages() ||
-        ctx.signal ||
-        ctx.sessionManager.getSessionId() !== current.session ||
-        ctx.sessionManager.getLeafId() !== current.leaf
-      ) {
-        refuse();
-        return false;
-      }
-      const admission = lifecycle.delegationAdmitted();
-      const send = lifecycle.createOutgoingSender();
-      if (admission.kind !== "updated" || !send) {
-        refuse();
-        return false;
-      }
-      const a: Pending = {
-        call: current,
-        details: {
-          version: 1,
-          source: "pi-live",
-          generation: current.generation,
-          delegationId: request.id,
-          receipt: randomUUID(),
-        },
-        content: `[Voice coding request]\n${request.text}`,
-        before: new Set(ctx.sessionManager.getEntries().map((e) => e.id)),
-        branch: ctx.sessionManager.getBranch().map((e) => e.id),
-        starts: 0,
-        ends: 0,
-        runs: 0,
-        observed: new Set(),
-        completed: false,
-        deadline: clock.now() + 5_000,
-        send,
-        settle: admission.settle,
-      };
-      pending = a;
-      a.timer = clock.setTimer(() => {
-        if (pending === a) refuse();
-      }, 5_000);
-      try {
-        pi.sendMessage(
-          {
-            customType: DELEGATION_MESSAGE_TYPE,
-            content: a.content,
-            display: true,
-            details: a.details,
-          },
-          { triggerTurn: true },
-        );
-      } catch {
-        refuse();
-        return false;
-      }
-      return true;
-    },
-  };
 }
 
 function isSourceInfoObservation(value: unknown): boolean {
@@ -5772,8 +5288,6 @@ export function bindPiLiveLifecycle(
           compatible: facts.compatible,
           conflict: observedCommandConflict || facts.conflict === true,
           dialog: reportedPromptOpen !== undefined || facts.dialog === true,
-          idle: ctx.isIdle(),
-          pendingWork: ctx.hasPendingMessages() || ctx.signal !== undefined,
         };
       },
     },
@@ -5861,7 +5375,6 @@ export function bindPiLiveLifecycle(
             consent.promptAmbiguous
           )
             return false;
-          if (accepted) delegation.begin(input.generation, ctx, input.signal);
           return accepted;
         } finally {
           if (activeConsent === consent) activeConsent = undefined;
@@ -5945,16 +5458,8 @@ export function bindPiLiveLifecycle(
     void interrupt("pooling").catch(() => undefined);
   });
 
-  // Lifecycle handlers must fence synchronously before any other handler can
-  // yield through Pi's sequential event dispatcher.
-  const delegation = bindPiLiveDelegation(
-    pi,
-    lifecycle,
-    options.lifecycle?.clock ?? defaultClock(),
-  );
   return {
     lifecycle,
-    delegation,
     enter: (ctx) => {
       // Pi shortcuts receive an unwrapped UI. Keep the session-event context so
       // our own consent still uses Pi's reported confirm primitive.
