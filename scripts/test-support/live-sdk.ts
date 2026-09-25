@@ -20,9 +20,13 @@ import {
 
 import {
   bindPiLiveLifecycle,
+  registerPiLive,
   createIsolatedLiveCoordination,
   createNodeOwnershipFileSystem,
   type LiveLifecycleBinding,
+  type LiveOutgoingData,
+  type LiveLifecycleBindingOptions,
+  type LiveDependencies,
 } from "../../src/live.ts";
 import {
   ManualClock,
@@ -100,6 +104,13 @@ interface SdkFixtureOptions {
   getCommandsOverride?: () => unknown;
   sourceInfoByInlineName?: ReadonlyMap<string, SourceInfo>;
   cleanupTimeoutMs?: number;
+  provider?: Parameters<ModelRuntime["registerProvider"]>[1];
+  sendData?: (data: LiveOutgoingData) => void;
+  tools?: NonNullable<Parameters<typeof createAgentSession>[0]>["customTools"];
+  controls?: boolean;
+  resources?: NonNullable<LiveDependencies["runtime"]>["resources"];
+  retry?: boolean;
+  beforeDispatch?: () => void;
 }
 
 export async function createSdkFixture(
@@ -184,6 +195,9 @@ export async function createSdkFixture(
       sendSample() {
         counts.sentSamples += 1;
       },
+      sendData(data) {
+        options.sendData?.(data);
+      },
       async closeSession(): Promise<void> {
         counts.closeSessionCalls += 1;
       },
@@ -198,56 +212,90 @@ export async function createSdkFixture(
   const bindingFactory: InlineExtension = {
     name: "pi-live-lifecycle-test",
     factory(pi) {
-      const bindingApi = options.getCommandsOverride
-        ? (new Proxy(pi, {
-            get(target, property, receiver) {
-              if (property === "getCommands")
-                return options.getCommandsOverride;
-              return Reflect.get(target, property, receiver);
-            },
-          }) as typeof pi)
-        : pi;
-      bindings.push(
-        bindPiLiveLifecycle(bindingApi, {
-          facts: {
-            check: () => ({
-              compatible: true,
-              configuredPackageSources: options.configuredPackageSources,
-            }),
-          },
-          consent:
-            options.consent ??
-            ({
-              request: ({ openConfirm }) =>
-                openConfirm("Pi Live consent", "Start the fixture call?"),
-            } satisfies NonNullable<SdkFixtureOptions["consent"]>),
-          lifecycle: {
-            clock,
-            coordination,
-            randomId: () => `fixture-${++randomSequence}`,
-            home: certifiedHome(home),
-            ownershipFileSystem: {
-              ...nodeOwnership,
-              async mkdirExclusive(target, mode): Promise<void> {
-                counts.acquisitionCalls += 1;
-                await nodeOwnership.mkdirExclusive(target, mode);
+      const bindingApi =
+        options.getCommandsOverride || options.beforeDispatch
+          ? (new Proxy(pi, {
+              get(target, property, receiver) {
+                if (property === "getCommands" && options.getCommandsOverride)
+                  return options.getCommandsOverride;
+                if (property === "sendMessage" && options.beforeDispatch)
+                  return (...args: Parameters<typeof pi.sendMessage>) => {
+                    options.beforeDispatch?.();
+                    return pi.sendMessage(...args);
+                  };
+                return Reflect.get(target, property, receiver);
               },
-              async rmdir(target): Promise<void> {
-                await nodeOwnership.rmdir(target);
-                options.onRmdirRemoved?.();
-                await options.delayRmdirCallback?.promise;
+            }) as typeof pi)
+          : pi;
+      const bindingOptions: LiveLifecycleBindingOptions = {
+        facts: {
+          check: () => ({
+            compatible: true,
+            configuredPackageSources: options.configuredPackageSources,
+          }),
+        },
+        consent:
+          options.consent ??
+          ({
+            request: ({ openConfirm }) =>
+              openConfirm("Pi Live consent", "Start the fixture call?"),
+          } satisfies NonNullable<SdkFixtureOptions["consent"]>),
+        lifecycle: {
+          clock,
+          coordination,
+          randomId: () => `fixture-${++randomSequence}`,
+          home: certifiedHome(home),
+          ownershipFileSystem: {
+            ...nodeOwnership,
+            async mkdirExclusive(target, mode): Promise<void> {
+              counts.acquisitionCalls += 1;
+              await nodeOwnership.mkdirExclusive(target, mode);
+            },
+            async rmdir(target): Promise<void> {
+              await nodeOwnership.rmdir(target);
+              options.onRmdirRemoved?.();
+              await options.delayRmdirCallback?.promise;
+            },
+          },
+          resources: createFakeResources(connection),
+        },
+      };
+      if (options.controls) {
+        let voice: "sol" | "vale" = "sol";
+        bindings.push(
+          registerPiLive(bindingApi, {
+            preferences: {
+              load: async () => ({ voice, fields: {} }),
+              setVoice: async (next) => {
+                assert.ok(next === "sol" || next === "vale");
+                voice = next;
               },
             },
-            resources: createFakeResources(connection),
-          },
-        }),
-      );
+            compatibility: {
+              check: async () => ({ supported: true, issues: [] }),
+            },
+            truncateToWidth: (text, width) => text.slice(0, width),
+            runtime: {
+              lifecycle: bindingOptions.lifecycle,
+              executionHost: () => "fixture-host",
+              resources:
+                options.resources ?? (() => createFakeResources(connection)),
+            },
+          }),
+        );
+      } else bindings.push(bindPiLiveLifecycle(bindingApi, bindingOptions));
     },
   };
 
   const settingsManager = SettingsManager.inMemory({
     cacheWarming: "off",
     compaction: { enabled: false },
+    retry: {
+      enabled: options.retry ?? false,
+      maxRetries: 1,
+      baseDelayMs: 1,
+      maxAgentDelayMs: 1,
+    },
   });
   const modelRuntime = await ModelRuntime.create({
     credentials: {
@@ -260,6 +308,8 @@ export async function createSdkFixture(
     refreshOnCreate: false,
     allowModelNetwork: false,
   });
+  if (options.provider)
+    modelRuntime.registerProvider("live-fixture", options.provider);
   const resourceLoader = new DefaultResourceLoader({
     cwd,
     agentDir,
@@ -308,7 +358,11 @@ export async function createSdkFixture(
       resourceLoader,
       sessionManager,
       sessionStartEvent,
-      noTools: "all",
+      noTools: options.tools ? "builtin" : "all",
+      ...(options.provider
+        ? { model: modelRuntime.getModel("live-fixture", "fixture") }
+        : {}),
+      customTools: options.tools,
     });
     return {
       ...result,

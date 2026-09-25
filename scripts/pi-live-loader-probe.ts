@@ -244,7 +244,28 @@ async function main(): Promise<void> {
     [...extension.messageRenderers.keys()],
     ["better-openai-live-delegation"],
   );
-  assert.deepEqual([...extension.handlers.keys()], ["session_shutdown"]);
+  assert.deepEqual([...extension.handlers.keys()].sort(), [
+    "agent_before_settle",
+    "agent_settled",
+    "agent_start",
+    "context",
+    "context_with_system",
+    "input",
+    "message_end",
+    "message_start",
+    "session_before_compact",
+    "session_before_fork",
+    "session_before_switch",
+    "session_before_tree",
+    "session_compact",
+    "session_compact_failed",
+    "session_shutdown",
+    "session_start",
+    "session_tree",
+    "turn_end",
+    "ui_prompt_end",
+    "ui_prompt_start",
+  ]);
   assert.deepEqual([...extension.tools.keys()], []);
   assert.deepEqual([...extension.flags.keys()], []);
   for (const directory of [

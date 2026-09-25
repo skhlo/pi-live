@@ -2,39 +2,36 @@
 
 ## Status
 
-Pi Live is a standalone, private, setup-only Pi extension. The repository owns
-its development now; dotfiles is only the retained extraction source. Issue #3
-adds a dormant, fixture-tested call lifecycle. Issue #4 adds dormant extracted
-auth/media/transport adapters and application bounds, not an enabled voice
-runtime. The shipped factory stays setup-only. No installer, host adoption or
-publication is implied.
-
-This document separates implemented behavior from accepted decisions and future
-proposals. Historical reports are evidence, not current instructions.
+Pi Live is a standalone, private Pi extension. The repository owns development;
+dotfiles is only the retained extraction source. Issues #3/#4 supply lifecycle
+and bounded auth/media/transport. Issue #5 connects public Pi controls and
+conservative delegation to those owners. Actual-home certification still refuses,
+and real native/proxied cleanup remains unconfirmed. Fake success does not imply
+usable real calls, provisioning, rollout or adoption.
 
 ## Implemented behavior
 
-The package has one default extension factory. It registers `/live`,
-`Ctrl+Shift+L`, one historical message renderer, and a `session_shutdown`
-presentation cleanup handler. It registers no tool or provider and does not
-replace Pi's footer, editor, model, authentication, or MCP configuration.
+One default factory registers `/live`, `Ctrl+Shift+L`, the historical request
+renderer and required public lifecycle/dialog/delegation listeners. It registers
+no tool or provider and does not replace Pi's model, instructions, footer,
+editor, authentication, memory or MCP configuration. Discovery remains free of
+native import, credentials, ownership, timers and provider operations.
 
-The current command surface is intentionally inert:
+The controls share the existing lifecycle. Each new attempt requires standard
+TUI consent after compatibility/admission checks and before ownership, credentials
+or native initialization. Unsupported modes/host/Pi refuse early. Start and stop
+are idempotent; toggle cancels a pending attempt and cannot queue a replacement.
+Mute stops capture, not speakers. Voice changes require off. Status/help remain
+read-only. Async preference/compatibility preparation is cancelable, so a stop
+cannot be undone by a late initial read.
 
-- start/toggle reads preferences and compatibility metadata, shows a static
-  **off (setup-only)** widget, and reports that calling is unavailable;
-- stop clears that widget;
-- mute/unmute report that no call is active;
-- status reports the selected voice and metadata compatibility;
-- voice selection validates the retained nine-name enum and writes only the
-  private Pi Live preference file; and
-- non-TUI use refuses before call behavior.
-
-Compatibility checking validates Node, platform, architecture, Pi package
-metadata, and native package metadata. It does not import the addon. No shipped
-command or discovery path opens audio, resolves credentials, authenticates,
-constructs a provider transport, sends a session identifier or makes a voice
-request.
+Consent names the execution host and all specified data/proxy limitations. Own
+consent uses the session-event context, including when invoked through a shortcut,
+so it still passes through Pi's reported confirm primitive. Other shortcuts keep
+their unwrapped UI and disclosed behavior. Only `pi-live` is painted: bounded
+current transcripts and sample-driven input level, with explicit connecting,
+listening, muted and working states. Failure is reported with fixed diagnostics;
+teardown removes the widget. No animation timer or input handler is installed.
 
 Preferences live below Pi's agent directory in `pi-live/config.json`. Missing
 state defaults to `sol` without writing. Existing directories/files must be
@@ -49,10 +46,10 @@ concurrent changes. The transfer restores deterministic coverage of an observed 
 final file or two concurrent successful writes alone does not prove no-lost-update
 semantics.
 
-## Dormant call lifecycle
+## Call lifecycle
 
 `src/live.ts` also contains `createLiveLifecycle` and `bindPiLiveLifecycle`.
-Neither is constructed by the default extension factory. Callers use controls,
+The default factory binds them without starting a call. Callers use controls,
 interruptions, generation-owned outgoing/settlement capabilities, and a read-only
 snapshot; ownership records and cleanup decisions stay inside the module.
 
@@ -72,31 +69,29 @@ The approved plan and detailed contract live in
 - A stopped generation cannot send samples/data, adopt resources, or cancel a
   later generation's work timer. Mute controls capture, not playback. Voice stop
   does not call Pi abort or cancel admitted coding work.
-- The dormant Pi binding uses public 0.87.1 lifecycle operations, retires outgoing
+- The Pi binding uses public 0.87.1 lifecycle operations, retires outgoing
   bindings, and refuses observed conflicts. Discovery is limited to supplied
   configured-source facts and command provenance, not a complete extension list.
 
 Tests use certified temporary homes, fake resources/clocks, real child contenders
 and real SDK operations. They do not prove native shutdown, transport behavior,
-UI readiness or suitability of this host's actual home. The default factory's
-inert registration and presentation remain unchanged.
+UI readiness or suitability of this host's actual home. Issue #5 verifies their connection to the current controls and presentation.
 
-## Dormant extracted transport
+## Extracted transport
 
 `createLiveRuntimeResources` in `src/live.ts` supplies the existing lifecycle's
 preparation and connection operations. Credentials and attestation are passed
 between phases within one attempt; the SDK remains the only credential/refresh
 owner. Native and network dependencies stay lazy and replaceable by test fakes.
-The factory does not construct these resources.
+The factory constructs call-scoped resources only after consent and certified ownership.
 
 The extraction retains the pinned experimental endpoints, headers, identifiers,
 voice payloads, proxy selection and final-context convention. Application code
 adds bounded bodies/events/samples, classified pre-open retries, replay tracking,
 latest transcript tails, a capacity-aware incremental writer and closed
 non-secret diagnostics. Queued producers are discarded at stop while actual
-in-flight work remains tracked. #5 still owns Pi admission/correlation and which
-final is eligible; this transport does not read session history or dispatch Pi
-work.
+in-flight work remains tracked. The Pi adapter below owns admission/correlation and final eligibility; transport
+does not read session history or dispatch Pi work.
 
 The retained native peer close does not prove hidden task/speaker termination;
 the proxy agent likewise leaves CONNECT cleanup uncertain. Their real adapters
@@ -127,25 +122,55 @@ media, provider request or native addon execution was used for this work.
 - No transfer artifact is a new home installation, extension registration,
   native/device/service authorization, provider call, or adoption decision.
 
-## Proposed future runtime
+## Pi delegation and result eligibility
 
-The historical hardened spec proposes real speech, explicit microphone controls,
-a render-only widget, one idle-only coding delegation, final-only result sharing,
-Pi-owned credentials, bounded transport, and conservative ownership/cleanup.
-Pi 0.87.1 reports only the outermost blocking prompt, with delayed notification;
-shortcut-opened dialogs and dialogs nested inside another prompt are not
-individually reported. The user accepted the nested-dialog limitation during
-#3 implementation. The dormant binding narrowly tracks its own confirm
-invocation, refuses ambiguous notification timing, and refuses startup if a
-reported prompt remains open after consent. It cannot immediately cancel for an
-unreported nested prompt. #5 must disclose these limits in the actual consent/UI;
-users needing guaranteed capture/delivery stoppage must stop voice first.
+The transport parser owns bounded structure/UTF-8 validation and replay tracking
+for the entire call, including after settlement. Its callback asks the Pi adapter
+to admit one request only when the call is active, Pi is idle with no pending
+messages or active signal, and session/leaf identity still matches. A busy/new
+request stops voice; it never queues, steers or aborts accepted coding work.
 
-The dormant lifecycle and extracted transport above were implemented under
-separate #3/#4 approval. Enabling controls, result correlation, real credential/
-DeviceCheck/media/provider use, provisioning, rollout and the native/audio canary
-remain later work requiring separate scope and fresh evidence. Archived harnesses
-are not production code.
+Before the single void `pi.sendMessage`, the adapter snapshots session, branch
+prefix, leaf-derived position and entry IDs, and arms versioned local receipt
+details containing source, call generation, delegation ID and a random token.
+The visible `better-openai-live-delegation` message has `display: true`,
+`triggerTurn: true` and an explicit voice-origin marker. Its content is not
+expanded as a slash command or treated as an approval.
+
+Eligibility requires exactly one matching custom-message start/end pair and
+persisted active-branch receipt within five seconds. New branch entries and
+projection catch non-trigger appends that bypass extension hooks. Unknown input,
+multiple runs/finals, context edits, compaction, retry failures, errors, aborts or
+navigation invalidate delivery. The post-context public event compares non-system
+model context with Pi's projection; Pi-owned system deltas remain allowed.
+This is conservative observed correlation, not isolation from another extension
+in the same process or an atomic scheduler reservation.
+
+At `agent_settled`, the same call/session must still own one successful final in
+that interval. Only bounded final text is retained for sending; tool/thinking
+observations are fingerprints. The upstream `Agent Final Message` convention
+wraps at most 64 KiB of final body including its visible truncation marker. No
+historical context, intermediate commentary, tool output or errors are forwarded.
+The thirty-minute delegated-work deadline stops voice only. Generation-owned
+senders and abort cleanup prevent later delivery from stopped calls.
+
+## Remaining limits
+
+Pi 0.87.1 reports only outermost blocking extension prompts after a microtask
+notification delay. Unreported nested prompts and shortcut-opened dialogs can
+leave voice active. Consent/help disclose this; users needing capture/delivery
+stopped must stop voice first. The adapter keeps lifecycle handlers first so its
+stop fence does not acquire another event-handler delay.
+
+Known package-source/command observations and validated pooling announcements
+reuse the existing binding. Source observations can be supplied by the host;
+command provenance is inspected through public `pi.getCommands()` in the shipped
+path. This is not a complete extension or shortcut inventory.
+
+The user's #5 implementation instruction authorizes local work and fake-resource
+verification. Actual-home certification/recovery remains #6, real-access trial
+remains #7, and native/proxy cleanup uncertainty from #4 remains explicit. See
+[issue #5 verification](ISSUE-5-VERIFICATION.md) for current evidence.
 
 ## Historical statements that are superseded
 
@@ -170,8 +195,9 @@ The standalone commands are local development checks over the checkout or
 disposable fixtures, not a real-home installer. The explicit pnpm policy in the
 root README also applies to script invocation, not only dependency restoration.
 
-[Transport verification](ISSUE-4-VERIFICATION.md) owns the current extraction
-checks and remaining gaps. [Lifecycle verification](ISSUE-3-VERIFICATION.md)
+[Delegation/control verification](ISSUE-5-VERIFICATION.md) owns current adapter
+checks. [Transport verification](ISSUE-4-VERIFICATION.md) retains its extraction
+evidence and remaining gaps. [Lifecycle verification](ISSUE-3-VERIFICATION.md)
 and [transfer verification](VERIFICATION.md) retain their historical scope.
 [The extraction receipt](history/extraction/transfer-receipt.json) owns copied
 source identity, adaptations, and historical evidence custody. Those are distinct

@@ -1,42 +1,51 @@
 # pi-live
 
-Private, experimental Pi extension extracted for standalone development. It is
-setup-only: it does not make voice calls.
+Private, experimental Pi extension extracted for standalone development. Live
+controls and conservative coding delegation are implemented and verified with
+fake media. Actual-home certification remains unavailable, so the shipped
+package still refuses real call setup. No microphone/provider trial or rollout
+has been performed.
 
 ## Current behavior
 
-The package exports one Pi extension factory. Loading it registers:
+The package exports one Pi extension factory. Discovery registers `/live`,
+`Ctrl+Shift+L`, the historical live-message renderer and public lifecycle,
+dialog and delegation listeners. Discovery does not load the native addon,
+resolve credentials, create call timers, touch ownership or contact a provider.
 
-- `/live` with `start`, `stop`, `mute`, `unmute`, `voice`, `status`, and `help`
-  subcommands;
-- `Ctrl+Shift+L` as the same setup-only toggle path;
-- one renderer for historical live-delegation messages; and
-- a shutdown handler that clears its widget.
+- `/live` toggles voice; `start` and `stop` are explicit forms. Each new attempt
+  requires ordinary TUI consent. The shifted shortcut follows the same path;
+  commands remain the fallback for unsupported shifted-key encoding.
+- `mute` stops microphone capture while speaker playback may continue. `unmute`
+  reopens capture only within the same active call.
+- `voice <name>` changes the host-local preference while off. `status` reports
+  state, mute, voice, compatibility and a fixed last-failure code. `help` explains
+  controls, data sharing and limitations.
+- The render-only `pi-live` widget shows input level, current role transcripts,
+  mute and working state. It does not replace the footer/editor or intercept
+  their keys. Teardown removes it; there is no widget animation timer.
+- One idle-only coding request can be admitted at a time. Its visible message
+  identifies voice as the source. Only an unambiguously owned successful final
+  result can return to voice; ordinary coding output remains in Pi. Stopping
+  voice does not abort accepted coding work.
 
-`/live` and `/live start` display an **off (setup-only)** widget. `stop` clears
-it, `mute` and `unmute` report that calling is unavailable, and `status` reports
-metadata compatibility. Voice selection writes only the private Pi Live
-preference file and preserves unknown fields when possible.
+Consent identifies the execution host, experimental OpenAI service, microphone
+and speakers, final-result and Pi session-identifier sharing, attestation
+metadata, and proxy limitations. Reported non-live extension dialogs fence
+voice when their delayed notification arrives. Shortcut-opened and unreported
+nested dialogs can leave voice active; stop voice before opening them when
+capture and delivery must stop. Voice never answers or grants an approval.
 
-The shipped extension does not import the native addon, open audio devices, read
-credentials, authenticate, contact a provider, or start a live session. Its
-compatibility check reads package metadata only. Nothing in this repository is
-an installation, device, service, or real-home authorization.
+The default home certifier refuses. Issue #6 owns production home certification
+and recovery. Real native and proxied-sideband close interfaces still cannot
+confirm cleanup: their adapters report uncertainty and retain blocked ownership.
+Fake adapters positively confirm cleanup for tests. Issue #5 does not repair
+those dependencies or establish safe real-call restart.
 
-Issue #3 adds a dormant lifecycle module with fixture-tested ownership,
-cancellation, mute, deadlines, asynchronous release, and Pi lifecycle binding.
-The default factory does not construct it. Issue #4 adds dormant extracted auth,
-attestation, signaling, native/sideband adapters and bounded transport, verified
-with fake native/network resources and the real SDK's fake credential store.
-It does not enable calls or change the pinned upstream/dependency versions.
-
-The real native close and proxied-sideband close interfaces do not establish
-confirmed cleanup. Those adapters therefore report unconfirmed shutdown and the
-lifecycle retains blocked ownership, rather than claiming a safe restart. Real
-access, production home certification and enabled controls remain later work.
-See the [transport verification and limits](docs/ISSUE-4-VERIFICATION.md),
-[lifecycle verification](docs/ISSUE-3-VERIFICATION.md) and
-[test-cleanup record](docs/TEST-CLEANUP-VERIFICATION.md).
+See [delegation/control verification](docs/ISSUE-5-VERIFICATION.md),
+[transport limits](docs/ISSUE-4-VERIFICATION.md), and
+[lifecycle verification](docs/ISSUE-3-VERIFICATION.md). Real credentials,
+DeviceCheck, media/provider access, provisioning and adoption remain separate.
 
 The preference writer uses an optimistic read/compare/retry sequence and atomic
 same-directory rename. That does **not** guarantee that every concurrent change
