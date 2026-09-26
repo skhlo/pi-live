@@ -5,9 +5,10 @@
 Pi Live is a standalone, private Pi extension. The repository owns development;
 dotfiles is only the retained extraction source. Issues #3/#4 supply lifecycle
 and bounded auth/media/transport. Issue #5 connects public Pi controls and
-ordinary Pi input to those owners. Actual-home certification still refuses,
-and real native/proxied cleanup remains unconfirmed. Fake success does not imply
-usable real calls, provisioning, rollout or adoption.
+ordinary Pi input to those owners. Issue #6 adds `/live setup`, which
+certifies the account home, and trusts the native close so a finished call
+releases its lock. Proxied-sideband cleanup remains unconfirmed. The #7 canary
+and the adoption decision are still ahead.
 
 ## Implemented behavior
 
@@ -59,10 +60,11 @@ The approved plan and detailed contract live in
 - Fresh consent precedes ownership and resource setup. The connection and call
   budgets start at entry to acquiring.
 - Ownership uses exclusive mkdir under a certified canonical OS-account home,
-  independent of Pi agent directories. The default certifier refuses unless the
-  development-only `PI_LIVE_DEV_TRUST_HOME=1` is set, which trusts a manually
-  prepared home after the same ownership and mode checks. #6 owns production
-  certification and recovery.
+  independent of Pi agent directories. The default certifier accepts a home
+  only when `setup.json`, written by `/live setup`, names the observed home and
+  state directory (device, inode, owner). Setup creates the private state
+  directory, refuses redirected or foreign-owned paths, and checks the mount's
+  `local` flag with macOS `df` and `mount`. It never touches a lock.
 - Stop fences delivery before external callbacks. Unconfirmed resource shutdown
   at the five-second observer deadline becomes process-sticky blocked, retaining
   the lock. Confirmed shutdown permits asynchronous releasing; pending removal
@@ -102,12 +104,13 @@ non-secret diagnostics. Queued producers are discarded at stop while actual
 in-flight work remains tracked. The short Pi bridge below submits requests and returns replies; transport does
 not read session history or schedule Pi work.
 
-The retained native peer close does not prove hidden task/speaker termination;
-the proxy agent likewise leaves CONNECT cleanup uncertain. Their real adapters
-invoke cleanup but report it unconfirmed, so lifecycle ownership stays blocked.
-Fake adapters can positively confirm shutdown and exercise the successful release
-path. This is an explicit acceptance gap, not an upstream repair project or proof
-that a real call can safely restart. Native internal buffering remains a
+The native peer close stops the speaker device and closes the peer, but it
+ignores their errors, joins the microphone send task for at most one second and
+never joins the remote-audio task. At the operator's direction (#6) the real
+adapter treats a resolved close as confirmed, so the lock is released; the
+unjoined task cannot play once the speaker is stopped. The proxy agent leaves
+CONNECT cleanup uncertain, so a proxied sideband still reports cleanup
+unconfirmed and blocks the process. Native internal buffering remains a
 disclosed dependency limitation.
 
 See the [extraction plan](ISSUE-4-PLAN.md) and
@@ -179,9 +182,9 @@ through public `pi.getCommands()`. This is not a complete extension or shortcut
 inventory, and no settings or lock file is written by source inspection.
 
 The user's #5 implementation instruction authorizes local work and fake-resource
-verification. Actual-home certification/recovery remains #6, real-access trial
-remains #7, and native/proxy cleanup uncertainty from #4 remains explicit. See
-[issue #5 verification](ISSUE-5-VERIFICATION.md) for current evidence.
+verification. See [issue #5 verification](ISSUE-5-VERIFICATION.md) and
+[issue #6 verification](ISSUE-6-VERIFICATION.md) for current evidence; the
+real-access canary remains #7.
 
 ## Historical statements that are superseded
 
