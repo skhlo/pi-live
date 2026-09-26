@@ -884,7 +884,7 @@ test("the shipped factory registers live bindings without starting a call", asyn
     "ui_prompt_end",
     "ui_prompt_start",
   ]);
-  assert.deepEqual([...extension.tools.keys()], []);
+  assert.deepEqual([...extension.tools.keys()], ["live_browser"]);
   assert.deepEqual([...extension.flags.keys()], []);
   assert.equal(await pathExists(agentDir), false);
 });

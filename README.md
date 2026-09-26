@@ -79,6 +79,45 @@ its remote-audio task is not awaited, which is an accepted limit. Behind an
 HTTPS proxy, the sideband's cleanup cannot be confirmed, so each call there ends
 with `cleanup-blocked`.
 
+### Browser mode (experimental)
+
+`/live browser` starts a call that sends quick browser commands to a fast
+browser controller and everything else to Pi
+([#16](https://github.com/skhlo/pi-live/issues/16)). It needs
+[voice-browser](https://github.com/moritzkremb/jev-voice-browser) running
+separately on the same host (for example `npm start` in its checkout). Pi Live
+connects to `ws://127.0.0.1:8787`; set `PI_LIVE_BROWSER_URL` to another `ws://`
+loopback address if needed. Pi needs `TYPESAFE_API_KEY` (or `JEV_API_KEY`) in its
+environment for routing. When voice-browser drives a Chrome started with remote
+debugging, set `PI_LIVE_BROWSER_CDP` (for example `http://127.0.0.1:9333`) to give
+Pi a `live_browser` tool on that Chrome.
+
+For each handoff, Pi Live asks TypeSafe's Jev model what kind of work the user's
+request is:
+
+- A single browser step (open a site, search, click a named link, scroll, type,
+  go back, confirm, pick a number) goes to voice-browser, and voice says the
+  observed outcome: done with the resulting page, a confirmation question, or a
+  numbered choice.
+- A longer web task (several steps, comparing, reading a page, filling a form)
+  goes to Pi with the page on screen. Pi uses `live_browser`, whose every action
+  waits for the page and returns what it now shows, and runs at low thinking
+  until it settles; then the previous level returns.
+- Anything else, such as coding, goes to Pi unchanged.
+
+When voice-browser refuses or fails a request, Pi gets it too. Without a
+TypeSafe key, every request tries voice-browser first. `live_browser` appears
+in Pi's tools once a browser-mode call has connected it and stays for the rest
+of that Pi session, so handed-off work can finish after voice ends.
+
+A newer browser request replaces one still waiting; work already handed to Pi
+continues. Stopping voice does not undo a browser action already started.
+GPT-Live's client handoff carries no text, so the voice model cannot rewrite a
+vague request into a command; it is instructed to suggest a concrete option and
+let the user say it. voice-browser follows only tabs it opened itself: after Pi
+switches or opens a tab, quick commands still act on voice-browser's tab, so
+`live_browser` keeps links in the current tab and opens new tabs only on request.
+
 ### Recovery
 
 - **Setup refused:** the message says why, for example a folder that is not

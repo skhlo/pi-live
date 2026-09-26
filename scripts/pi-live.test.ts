@@ -164,7 +164,7 @@ test("the default factory registers only live controls and required listeners wi
     "ui_prompt_end",
     "ui_prompt_start",
   ]);
-  assert.deepEqual([...extension.tools.keys()], []);
+  assert.deepEqual([...extension.tools.keys()], ["live_browser"]);
   assert.deepEqual([...extension.flags.keys()], []);
   assert.equal(await isMissing(agentDir), true);
 });
@@ -201,7 +201,7 @@ test("the in-process Pi 0.87.1 loader API accepts one default factory and side-e
     "ui_prompt_end",
     "ui_prompt_start",
   ]);
-  assert.deepEqual([...extension.tools.keys()], []);
+  assert.deepEqual([...extension.tools.keys()], ["live_browser"]);
   assert.deepEqual([...extension.flags.keys()], []);
 });
 
@@ -339,11 +339,13 @@ test("help discloses calling limits and voice changes only the off-state prefere
     "progress note",
     "shortcut-opened dialogs",
     "stop voice first",
+    "Browser mode",
+    "TypeSafe",
   ]) {
     assert.match(help, new RegExp(phrase, "i"));
   }
   assert.deepEqual(notifications[1], [
-    "Usage: /live [start|stop|end|off|mute|unmute|voice <name>|status|setup|help]",
+    "Usage: /live [start|browser|stop|end|off|mute|unmute|voice <name>|status|setup|help]",
     "error",
   ]);
   assert.deepEqual(notifications[2], [

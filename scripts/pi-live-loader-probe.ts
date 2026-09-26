@@ -257,7 +257,7 @@ async function main(): Promise<void> {
     "ui_prompt_end",
     "ui_prompt_start",
   ]);
-  assert.deepEqual([...extension.tools.keys()], []);
+  assert.deepEqual([...extension.tools.keys()], ["live_browser"]);
   assert.deepEqual([...extension.flags.keys()], []);
   for (const directory of [
     homeDirectory,

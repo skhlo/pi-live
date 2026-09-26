@@ -49,6 +49,15 @@ _Avoid_: Off, retryable failure, releasing call
 A voice request sent into the existing Pi conversation. Pi handles it alongside
 other input. Stopping voice does not stop Pi work.
 
+**Browser delegation**:
+A single-step voice request in a browser-mode call, sent to a separately running
+voice-browser controller instead of Pi. The controller decides and acts; voice
+relays its observed outcome. Web tasks needing more than one step, and requests
+the controller refuses or fails, become coding delegations that Pi handles with
+its `live_browser` tool at low thinking. Stopping voice does not
+undo browser actions.
+_Avoid_: Coding delegation
+
 **Home certification**:
 Setup's evidence that a particular canonical account home is suitable local
 storage for Pi Live ownership. A resolved pathname alone is not certification.

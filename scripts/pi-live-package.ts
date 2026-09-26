@@ -76,6 +76,8 @@ export const PI_LIVE_PAYLOAD_ROOT_FILES = [
 ] as const;
 
 export const PI_LIVE_PAYLOAD_SOURCE_FILES = [
+  "src/browser-tool.ts",
+  "src/browser.ts",
   "src/compatibility.ts",
   "src/live.ts",
   "src/pi-tui.d.ts",
