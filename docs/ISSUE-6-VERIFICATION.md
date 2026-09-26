@@ -112,7 +112,9 @@ install of pnpm 11.8.0 and the nine exact runtime packages, scripts and
 automatic peers disabled, exact native hashes, and an unchanged closure before
 and after the sandboxed `--no-addons` loader.
 
-## Not yet verified
+## Subsequent canary and remaining limit
 
-- A proxied (HTTPS proxy) real call.
-- The #7 canary and the adoption decision.
+- A proxied (HTTPS proxy) real call remains unverified.
+- [Issue #7 verification](ISSUE-7-VERIFICATION.md) records the subsequent MBA
+  canary and personal-use adoption. The operator explicitly waived the real
+  denied-microphone-permission check; it remains unverified.
