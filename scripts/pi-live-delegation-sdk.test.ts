@@ -5,6 +5,7 @@ import { createSdkFixture, waitUntil } from "./test-support/live-sdk.ts";
 import { fakeProvider } from "./test-support/live-provider.ts";
 import { fakeMedia } from "./test-support/live-media.ts";
 import { deferred } from "./test-support/live-fixture.ts";
+import { parseJsonObject } from "./test-json.ts";
 
 // Voice is ordinary Pi input. These tests exercise the complete bridge, not a
 // parallel task scheduler or a proof of exclusive ownership of model context.
@@ -132,9 +133,12 @@ for (const order of ["before", "after"] as const) {
 test("Pi owns retries and voice receives its eventual answer", async (t) => {
   const provider = fakeProvider({ retry: true });
   const media = fakeMedia();
+  // A valid event ID can contain the retry status without exposing its error.
+  const eventId = "7cd927d5-a52a-4c10-a274-b700503f4958";
   const fixture = await createSdkFixture(t, {
     controls: true,
-    resources: media.resources,
+    resources: (options) =>
+      media.resources({ ...options, randomId: () => eventId }),
     provider: provider.provider,
     retry: true,
   });
@@ -147,7 +151,17 @@ test("Pi owns retries and voice receives its eventual answer", async (t) => {
   );
   assert.equal(provider.calls(), 2);
   assert.equal(fixture.current().lifecycle.snapshot().state, "active");
-  assert.ok(!media.frames.join("").includes("503"));
+  assert.deepEqual(
+    media.frames.map((frame) => parseJsonObject(frame, "retry reply frame")),
+    [
+      {
+        type: "session.commentary.append",
+        event_id: eventId,
+        delegation_id: "one",
+        content: "Pi final reply",
+      },
+    ],
+  );
 });
 
 for (const outcome of ["error", "abort"] as const) {
