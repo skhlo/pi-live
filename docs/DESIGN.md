@@ -34,7 +34,7 @@ listening, muted and working states. Failure is reported with fixed diagnostics;
 teardown removes the widget. No animation timer or input handler is installed.
 
 Preferences live below Pi's agent directory in `pi-live/config.json`. Missing
-state defaults to `sol` without writing. Existing directories/files must be
+state defaults to `marin` without writing. Existing directories/files must be
 private and non-redirected; malformed or invalid state is refused rather than
 repaired. Writes use a private same-directory temporary file, sync, compare, and
 rename while preserving unknown fields.
@@ -59,8 +59,10 @@ The approved plan and detailed contract live in
 - Fresh consent precedes ownership and resource setup. The connection and call
   budgets start at entry to acquiring.
 - Ownership uses exclusive mkdir under a certified canonical OS-account home,
-  independent of Pi agent directories. The default certifier refuses. Only
-  fixture homes have been used; #6 owns production certification and recovery.
+  independent of Pi agent directories. The default certifier refuses unless the
+  development-only `PI_LIVE_DEV_TRUST_HOME=1` is set, which trusts a manually
+  prepared home after the same ownership and mode checks. #6 owns production
+  certification and recovery.
 - Stop fences delivery before external callbacks. Unconfirmed resource shutdown
   at the five-second observer deadline becomes process-sticky blocked, retaining
   the lock. Confirmed shutdown permits asynchronous releasing; pending removal

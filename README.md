@@ -4,9 +4,10 @@ Private, experimental Pi extension. Voice feeds requests into the current Pi
 conversation and receives Pi's reply. Pi handles typed and spoken input together,
 including its normal extensions, tools and retries.
 
-The controls are tested with fake media. Actual-home certification remains
-unavailable, so the shipped package still refuses real call setup. No real
-microphone/provider trial or rollout has been performed.
+Home certification is not implemented yet, so the shipped package refuses real
+calls unless the development-only `PI_LIVE_DEV_TRUST_HOME=1` switch is set (see
+below). One real microphone trial has been run on macOS arm64; no rollout has
+been performed.
 
 ## Current behavior
 
@@ -41,7 +42,7 @@ voice when their delayed notification arrives. Shortcut-opened and unreported
 nested dialogs can leave voice active; stop voice before opening them when
 capture and delivery must stop. Voice never answers or grants an approval.
 
-The default home certifier refuses. Issue #6 owns production home certification
+The default home certifier refuses unless the development switch is set. Issue #6 owns production home certification
 and recovery. Real native and proxied-sideband close interfaces still cannot
 confirm cleanup: their adapters report uncertainty and retain blocked ownership.
 Fake adapters positively confirm cleanup for tests. Issue #5 does not repair

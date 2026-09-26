@@ -29,9 +29,12 @@ or SDK extension is needed.
 
 ## Verification
 
-Current checks pass: **395 tests** (390 under OS network denial, four loader
-tests with their own sandbox, and the existing permission-bit case separately),
-typecheck, formatting, source/package checks and isolated real-Pi loading.
+At the #5 simplification (`bb3b3bf`) checks passed: **395 tests** (390 under OS
+network denial, four loader tests with their own sandbox, and the existing
+permission-bit case separately), typecheck, formatting, source/package checks and
+isolated real-Pi loading. After the GPT-Live port the suite has 374 tests, since
+the ChatGPT-token and DeviceCheck tests were removed with that code; see the
+GPT-Live port section below.
 All 18 PTY scenarios and the actual Paseo controls/conversation checks pass.
 
 The real Pi 0.87.1 SDK tests use an in-process provider and fake media under OS
@@ -57,9 +60,9 @@ normal typed clarification while the fixture tool runs. The actual Paseo termina
 is also checked with fake media. Existing Unicode/resize, editor, consent, dialog,
 shortcut-exception and stop checks still exercise the current controls.
 
-Current results, source identities and terminal receipts are recorded in
-`/private/tmp/pi-live-issue-5/preview/issue-5-simple/MANIFEST.md`.
-Earlier receipts under `preview/issue-5-checks` describe their recorded snapshots.
+Results, source identities and terminal receipts were recorded in the local,
+untracked `preview/issue-5-simple/MANIFEST.md` of the task worktree; they are
+not part of the repository.
 All pnpm commands use the README's four explicit policy flags. The production
 unit test uses its stub package manager; the real production install/fetch check
 is not run.
@@ -74,3 +77,23 @@ in #4; it is independent of treating voice as Pi input.
 
 The task branch/worktree, dependency symlink, verification receipts and Paseo
 terminal are retained. Nothing is pushed or published by this work.
+
+## GPT-Live port
+
+The runtime now uses the public GPT-Live API with Pi's `openai` API key; see
+[the design](DESIGN.md#extracted-transport). With fake media and fake provider
+responses, 374 tests, typecheck, formatting, the source/package/loader checks and
+all 18 PTY scenarios pass.
+
+Two real trials ran on macOS arm64 through the development-only
+`PI_LIVE_DEV_TRUST_HOME=1` switch. A no-microphone connection created a session,
+opened WebRTC and the sideband, had a quiet context append acknowledged and heard
+GPT-Live speak; reflected sideband audio arrived at about 9 events per second,
+well inside the 200-event bucket. A microphone call handed a spoken repository
+request to Pi, which ran it and returned its reply to voice. Each real stop left
+the process blocked with its ownership lock, as documented.
+
+Accepted limits: the handoff uses transcript arrival order, so words transcribed
+after the delegation event join the next request; the latest delegation receives
+the next settled reply, so a voice message Pi never runs (for example one dropped
+during compaction) can be answered with another run's reply.

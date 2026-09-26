@@ -332,7 +332,7 @@ test("help discloses calling limits and voice changes only the off-state prefere
     "host microphone and speakers",
     "OpenAI GPT-Live",
     "API key",
-    "progress summaries",
+    "progress note",
     "shortcut-opened dialogs",
     "stop voice first",
   ]) {

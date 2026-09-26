@@ -532,6 +532,24 @@ test("progress is quiet thinking context and the writer permits over 256 KiB lif
   ]);
 });
 
+test("spoken chunks end at a word boundary when one is available", async (t) => {
+  const harness = await runtimeHarness(t);
+  harness.handoff("words", "task");
+  // A hard 500-byte cut would land inside the 84th "alpha".
+  const reply = Array.from({ length: 120 }, () => "alpha").join(" ");
+  await harness.connection.sendData?.({ kind: "final", text: reply });
+  const chunks = harness.sent.map((wire) => appended(wire).content);
+  assert.ok(chunks.length > 1);
+  assert.equal(chunks.join(""), reply);
+  for (const [index, chunk] of chunks.slice(0, -1).entries()) {
+    assert.ok(Buffer.byteLength(chunk) <= 500);
+    assert.ok(
+      chunk.endsWith(" ") || chunks[index + 1]!.startsWith(" "),
+      JSON.stringify(chunk.slice(-12)),
+    );
+  }
+});
+
 test("context chunking uses an inclusive 500-byte UTF-8 limit", async (t) => {
   const exact = await runtimeHarness(t);
   exact.handoff("chunk-exact", "task");

@@ -29,7 +29,7 @@ function eventually(check: () => boolean): Promise<void> {
   return waitForCondition(check, "condition did not settle within 10 seconds");
 }
 
-test("the dormant lifecycle is lazy and refuses unsupported admission before consent or resources", async () => {
+test("the lifecycle is lazy and refuses unsupported admission before consent or resources", async () => {
   const effects: string[] = [];
   const lifecycle = createLiveLifecycle({
     admission: {

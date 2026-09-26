@@ -734,10 +734,6 @@ function byteLengthWithin(value: string, maximum: number): boolean {
   return Buffer.byteLength(value, "utf8") <= maximum;
 }
 
-function validHeaderValue(value: string): boolean {
-  return isValidUtf8String(value) && !/[\u0000-\u001f\u007f]/.test(value);
-}
-
 function combinedHeaderBytes(headers: Record<string, string>): number {
   let total = 0;
   for (const [name, value] of Object.entries(headers))
@@ -989,6 +985,13 @@ function liveTextChunkAt(
     if (bytes + characterBytes > LIVE_LIMITS.contextChunkBytes) break;
     bytes += characterBytes;
     index += characterLength;
+  }
+  // Spoken context is paraphrased per append, so end a full chunk after its
+  // last whitespace rather than inside a word when one is available.
+  if (index < value.length && !/\s/.test(value[index]!)) {
+    const chunk = value.slice(start, index);
+    const lastSpace = Math.max(chunk.lastIndexOf(" "), chunk.lastIndexOf("\n"));
+    if (lastSpace > 0) index = start + lastSpace + 1;
   }
   return { text: value.slice(start, index), next: index };
 }
@@ -2962,8 +2965,9 @@ export function createLiveLifecycle(
     ({
       accountHome: () => userInfo().homedir,
       environmentHome: () => process.env.HOME,
-      // Development-only trust for a manually prepared ~/.local/state/pi-live
-      // (mode 0700). Standalone setup (#6) replaces this with certification.
+      // Refuses unless the development-only PI_LIVE_DEV_TRUST_HOME=1 trusts a
+      // manually prepared ~/.local/state/pi-live (mode 0700). Standalone setup
+      // (#6) replaces this with certification.
       certify: (observation) =>
         process.env.PI_LIVE_DEV_TRUST_HOME === "1"
           ? { certified: true, ...observation }
@@ -4419,7 +4423,7 @@ export function createLiveDependencies(
 }
 
 const LIVE_DISCLOSURE =
-  "Uses the execution host microphone and speakers with OpenAI GPT-Live, billed to the OpenAI API key Pi uses for the openai provider. Audio, speech transcripts, the conversation leading to each request, short progress summaries of Pi's tool use, and Pi's final replies are shared with OpenAI. Typed input and installed Pi extensions can influence those results. Existing HTTP/WebSocket proxy settings do not establish WebRTC/ICE media proxying. Pi reports only outermost extension dialogs, with a microtask delay; shortcut-opened dialogs and unreported nested dialogs may leave voice active. Stop voice first before opening such dialogs when capture and delivery must stop. Muting stops microphone capture; speakers may continue. Voice requests do not grant approvals. Native/proxy cleanup may remain unconfirmed and block restart; home certification and recovery require standalone setup.";
+  "Uses the execution host microphone and speakers with OpenAI GPT-Live, billed to the OpenAI API key Pi uses for the openai provider. Audio, speech transcripts, the conversation leading to each request, a progress note for every tool-using Pi turn (its narration and the tools it ran, including typed work), and Pi's final replies are shared with OpenAI. Typed input and installed Pi extensions can influence those results. Existing HTTP/WebSocket proxy settings do not establish WebRTC/ICE media proxying. Pi reports only outermost extension dialogs, with a microtask delay; shortcut-opened dialogs and unreported nested dialogs may leave voice active. Stop voice first before opening such dialogs when capture and delivery must stop. Muting stops microphone capture; speakers may continue. Voice requests do not grant approvals. Native/proxy cleanup may remain unconfirmed and block restart; home certification and recovery require standalone setup.";
 
 const LIVE_INSTRUCTIONS = `You are Pi Live, the voice interface to the user's current Pi coding session. Reply briefly in speech-friendly language. Delegate coding, repository, tool and verification requests; Pi receives the conversation that led to the handoff and handles it with its usual tools and approvals. While Pi works, its progress arrives as background context: use it when the user asks what Pi is doing. When Pi finishes, its reply arrives for you to tell the user; summarize it naturally instead of reading code or long lists aloud. Voice does not grant approvals.`;
 export function registerPiLive(

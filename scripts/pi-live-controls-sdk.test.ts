@@ -112,7 +112,7 @@ test("live controls obtain consent and return Pi replies through the real parser
           "speakers",
           "OpenAI GPT-Live",
           "API key",
-          "progress summaries",
+          "progress note",
           "final replies",
           "proxy",
           "shortcut-opened",
