@@ -32,14 +32,22 @@ resolve credentials, create call timers, touch ownership or contact a provider.
   the terminal. Stopping voice stops audio and delivery, while Pi work continues.
 
 Voice runs on OpenAI's GPT-Live API (`gpt-live-1`), billed to the OpenAI API
-key Pi uses for its `openai` provider. While Pi works, voice receives short quiet
-progress notes; when Pi finishes, voice summarizes its reply aloud.
+key Pi uses for its `openai` provider. Audio, speech transcripts, the conversation
+leading to each request, progress notes (Pi's narration and tools used, including
+typed work), and Pi's final replies are shared with OpenAI. While Pi works, voice
+receives short quiet progress notes; when Pi finishes, voice summarizes its reply
+aloud. HTTP/WebSocket proxy settings do not establish WebRTC/ICE media proxying.
 
 Consent identifies the execution host, OpenAI GPT-Live, microphone and speakers,
 the conversation, progress and reply sharing, and proxy limitations. Reported non-live extension dialogs fence
 voice when their delayed notification arrives. Shortcut-opened and unreported
 nested dialogs can leave voice active; stop voice before opening them when
 capture and delivery must stop. Voice never answers or grants an approval.
+
+Do not load another live extension alongside Pi Live. It refuses observed
+conflicts with `@monotykamary/pi-better-openai` 0.2.6 and its pinned Git source,
+and refuses account pooling announced by `pi-multiprovider`. These source and
+command checks cannot inventory every extension or conflicting shortcut.
 
 ## Using Pi Live
 
@@ -76,11 +84,21 @@ with `cleanup-blocked`.
 - **Setup refused:** the message says why, for example a folder that is not
   yours, is reached through a link, or is not on a local disk. Fix that and run
   `/live setup` again.
+- **Start failed:** use `/live status` to see compatibility and the last failure
+  code. For `missing-auth`, check Pi's `openai` API key; for unsupported
+  compatibility, restore the checked Node, Pi and dependency versions above.
+  For `denied` or `audio-error`, check consent and the terminal's microphone
+  permission. For `connect-timeout` or `protocol-error`, check network/proxy
+  access and service availability. Quit this Pi invocation after a failed start,
+  correct the cause, then explicitly load the checked version again. If the
+  failure persists, leave Pi Live unloaded or choose a previously verified
+  version. A retained lock requires the manual recovery below.
 - **`cleanup-blocked`:** this Pi process cannot start another call. Quit Pi.
   If a new Pi then reports `busy` while no other Pi has a call running, the lock
   was left behind: remove `~/.local/state/pi-live/active.lock/owner.json`, then
   the `active.lock` folder. Behind an HTTPS proxy this happens after every
-  call. Pi Live never removes a lock itself.
+  call. Pi Live never automatically recovers a retained lock; normal confirmed
+  shutdown removes the call's own lock.
 - **Going back:** start Pi without `-e` to stop using Pi Live. To use an earlier
   version, check out its tag and restore dependencies as in step 1. Before
   v0.1.0 there is no earlier supported version.

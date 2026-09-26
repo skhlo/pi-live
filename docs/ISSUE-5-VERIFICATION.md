@@ -32,9 +32,10 @@ or SDK extension is needed.
 At the #5 simplification (`bb3b3bf`) checks passed: **395 tests** (390 under OS
 network denial, four loader tests with their own sandbox, and the existing
 permission-bit case separately), typecheck, formatting, source/package checks and
-isolated real-Pi loading. After the GPT-Live port the suite has 374 tests, since
-the ChatGPT-token and DeviceCheck tests were removed with that code; see the
-GPT-Live port section below.
+isolated real-Pi loading. At the GPT-Live port merge the suite had 375 tests,
+since the ChatGPT-token and DeviceCheck tests were removed with that code; see
+the GPT-Live port section below. Issue #6 expands this to 387 tests; see its
+[verification record](ISSUE-6-VERIFICATION.md).
 All 18 PTY scenarios and the actual Paseo controls/conversation checks pass.
 
 The real Pi 0.87.1 SDK tests use an in-process provider and fake media under OS

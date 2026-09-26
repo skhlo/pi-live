@@ -62,10 +62,27 @@ home; foreign-owned paths are not tested because that needs another account.
 
 ## Checks
 
+Pre-delivery source revision: `ecf4511ef88483f04b7c8bde0dbdb21c4bcbf0f1`.
+The delivery follow-up changes documentation only.
+
 With fake media and fake provider responses on macOS arm64: 387 tests,
 typecheck, formatting, the source/package/loader checks and all 18 PTY
-scenarios pass. The setup tests use temporary homes, and on macOS one runs the
-real `df`/`mount` local-disk check against a temporary folder.
+scenarios pass. The suite includes lifecycle and ownership, transport, and real
+Pi 0.87.1 SDK auth, controls, delegation and lifecycle coverage. The setup tests
+use temporary homes, and on macOS one runs the real `df`/`mount` local-disk check
+against a temporary folder.
+
+The 387 tests, typecheck, formatting and source/package/loader checks were rerun
+at the source revision above with Node 26.6.0 and pnpm 11.8.0. The fake-media PTY,
+real-call and production-install results are the earlier receipts for the
+unchanged runtime/package, not repeated delivery trials.
+
+The pre-delivery two-axis reviews found documentation gaps: failed-start recovery,
+wording that confused retained locks with normal lock release, the missing
+source revision and coverage names in this record, explicit data-sharing and
+extension-conflict guidance, and a stale historical test count. The docs-only
+follow-up addresses those. Optional naming and deduplication suggestions are left
+unchanged.
 
 Guards proven by breaking them once:
 
