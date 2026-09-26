@@ -339,7 +339,7 @@ test("help discloses calling limits and voice changes only the off-state prefere
     assert.match(help, new RegExp(phrase, "i"));
   }
   assert.deepEqual(notifications[1], [
-    "Usage: /live [start|stop|mute|unmute|voice <name>|status|help]",
+    "Usage: /live [start|stop|end|off|mute|unmute|voice <name>|status|help]",
     "error",
   ]);
   assert.deepEqual(notifications[2], [
@@ -576,6 +576,8 @@ test("every non-TUI command and the shortcut refuse before touching terminal pre
     "",
     "start",
     "stop",
+    "end",
+    "off",
     "mute",
     "unmute",
     "status",
@@ -588,7 +590,7 @@ test("every non-TUI command and the shortcut refuse before touching terminal pre
   }
   await harness.shortcuts.get("ctrl+shift+l")?.handler(ctx);
 
-  assert.equal(notifications.length, 11);
+  assert.equal(notifications.length, 13);
   for (const notification of notifications) {
     assert.deepEqual(notification, [
       "Pi Live requires interactive TUI mode.",

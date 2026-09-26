@@ -16,7 +16,8 @@ The package exports one Pi extension factory. Discovery registers `/live`,
 dialog and delegation listeners. Discovery does not load the native addon,
 resolve credentials, create call timers, touch ownership or contact a provider.
 
-- `/live` toggles voice; `start` and `stop` are explicit forms. Each new attempt
+- `/live` toggles voice; `start` and `stop` are explicit forms, and `end` or
+  `off` also stop. Each new attempt
   requires ordinary TUI consent. The shifted shortcut follows the same path;
   commands remain the fallback for unsupported shifted-key encoding.
 - `mute` stops microphone capture while speaker playback may continue. `unmute`

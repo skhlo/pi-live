@@ -75,14 +75,14 @@ notices are unchanged. Actual-home certification still belongs to #6 and the
 real-access trial to #7. Native/proxied cleanup uncertainty remains as documented
 in #4; it is independent of treating voice as Pi input.
 
-The task branch/worktree, dependency symlink, verification receipts and Paseo
-terminal are retained. Nothing is pushed or published by this work.
+This work was delivered in PR #12. Its verification receipts are kept in the
+repository's ignored `preview/` folder.
 
 ## GPT-Live port
 
 The runtime now uses the public GPT-Live API with Pi's `openai` API key; see
 [the design](DESIGN.md#extracted-transport). With fake media and fake provider
-responses, 374 tests, typecheck, formatting, the source/package/loader checks and
+responses, 375 tests, typecheck, formatting, the source/package/loader checks and
 all 18 PTY scenarios pass.
 
 Two real trials ran on macOS arm64 through the development-only

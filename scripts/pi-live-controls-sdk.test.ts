@@ -167,6 +167,29 @@ test("the integrated final frames bound multibyte text and include a visible tru
   assert.match(final, /The rest of Pi's reply is in the terminal\.\]$/);
 });
 
+test("/live end and /live off stop the call like /live stop", async (t) => {
+  const media = fakeMedia();
+  const widgets: unknown[] = [];
+  const fixture = await createSdkFixture(t, {
+    controls: true,
+    resources: media.resources,
+    ui: {
+      ...emptyUi(async () => true),
+      setWidget: ((_key: string, widget: unknown) =>
+        widgets.push(widget)) as ExtensionUIContext["setWidget"],
+    },
+  });
+  for (const command of ["end", "off"]) {
+    await fixture.runtime.session.prompt("/live start");
+    assert.equal(fixture.current().lifecycle.snapshot().state, "active");
+    await fixture.runtime.session.prompt(`/live ${command}`);
+    assert.equal(fixture.current().lifecycle.snapshot().state, "off", command);
+    assert.equal(widgets.at(-1), undefined);
+  }
+  assert.equal(media.counts().resourcesCreated, 2);
+  assert.equal(fixture.clock.timers.size, 0);
+});
+
 test("cancelled consent and late Yes perform no call setup", async (t) => {
   for (const late of [false, true])
     await t.test(String(late), async (t) => {

@@ -4578,7 +4578,7 @@ export function registerPiLive(
   });
 
   const usage =
-    "Usage: /live [start|stop|mute|unmute|voice <name>|status|help]";
+    "Usage: /live [start|stop|end|off|mute|unmute|voice <name>|status|help]";
   const handleTui = async (
     command: string,
     current: ExtensionContext,
@@ -4588,7 +4588,7 @@ export function registerPiLive(
     const lifecycle = binding.lifecycle;
     if (command === "help") {
       current.ui.notify(
-        `Execution host: ${host()}. ${LIVE_DISCLOSURE} Controls: /live, start, stop, mute, unmute, voice <name>, status, help; Ctrl+Shift+L uses the same toggle. Use commands if shifted keys are unsupported. Do not load another live extension alongside Pi Live; known-source checks cannot inventory every extension.`,
+        `Execution host: ${host()}. ${LIVE_DISCLOSURE} Controls: /live, start, stop (or end, off), mute, unmute, voice <name>, status, help; Ctrl+Shift+L uses the same toggle. Use commands if shifted keys are unsupported. Do not load another live extension alongside Pi Live; known-source checks cannot inventory every extension.`,
         "info",
       );
       return;
@@ -4627,7 +4627,12 @@ export function registerPiLive(
       );
       return;
     }
-    if (command === "stop" || (command === "" && preparing)) {
+    if (
+      command === "stop" ||
+      command === "end" ||
+      command === "off" ||
+      (command === "" && preparing)
+    ) {
       ++controlVersion;
       preparing = false;
       await lifecycle.stop();
