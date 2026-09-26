@@ -75,10 +75,27 @@ Guards proven by breaking them once:
 - Reverting the native adapter to report every close unconfirmed made the new
   native-close test fail; restoring it passed.
 
+## Real trial and production install (2026-09-26)
+
+On the operator's MBA (macOS arm64, Pi 0.87.1), with Pi Live loaded through
+`pi -e` from this branch:
+
+- `/live` before setup refused with `setup-required. Run /live setup first.`
+- `/live setup` reported ready and wrote `setup.json` (mode 0600) in the 0700
+  state directory.
+- One call handed a spoken request to Pi, which ran it, and the reply was
+  spoken; the user interrupted the voice mid-sentence and it yielded. A second
+  request loaded a Pi skill and delegated research.
+- Three separate calls ran in the same Pi session, ended with `/live end`,
+  `/live off` and `/live stop`. Each later call started without `busy` or
+  `cleanup-blocked`, and afterwards the state directory held only `setup.json`.
+
+`check:production` passed with the operator's approval: a disposable frozen
+install of pnpm 11.8.0 and the nine exact runtime packages, scripts and
+automatic peers disabled, exact native hashes, and an unchanged closure before
+and after the sandboxed `--no-addons` loader.
+
 ## Not yet verified
 
-- `/live setup` on the real home, and several real calls in a row in one Pi
-  session with the microphone and speakers.
-- `check:production` (a disposable frozen install that fetches from the
-  registry); it needs its own authorization.
+- A proxied (HTTPS proxy) real call.
 - The #7 canary and the adoption decision.
