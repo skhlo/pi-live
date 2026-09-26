@@ -29,14 +29,40 @@
 - The native peer adapter reports a resolved close as confirmed.
 - `cleanup-blocked` refusals point to the README recovery steps.
 - The package is `0.1.0` with a current description. The transfer check still
-  rejects the developed tree; its test now accepts whichever developed file it
-  meets first.
+  rejects the developed tree; its test now accepts either `package.json` or
+  `src/live.ts` as the first differing file.
 - README gains a setup, recovery and rollback guide; DESIGN and CONTEXT drop
   the development switch.
 
+## Review
+
+A fresh-context review (standards and spec axes) found no high-severity issue.
+Fixed from it:
+
+- Setup checked only permission bits while calls require exactly 0700, so a
+  sticky or setgid bit left setup "ready" and every call refused. Setup now
+  clears those bits and finishes by running the call-time certifier on what it
+  wrote.
+- A home path over about 420 bytes overflowed the 1 KiB record limit; the limit
+  is now 4 KiB (two maximum-length macOS paths fit).
+- The mount check used the first `mount` line for a mount point; the last one
+  covers the others, so a network share mounted over a local point passed.
+- The help text said a proxied `cleanup-blocked` clears when Pi restarts; the
+  lock survives, so it now says to remove it by hand.
+- Setup now checks the home's disk before creating anything, rechecks that
+  voice is off after the confirm prompt, names the error code when it fails,
+  refuses on non-macOS hosts, and removes its temporary file on any failure.
+- New tests cover the native-close mapping, stacked mounts, special mode bits,
+  long home paths, an existing lock left untouched, the setup refusal hint, and
+  `setup` outside the TUI.
+
+Accepted as is: setup tightens an existing state directory to 0700 rather than
+refusing it; the optional `setup` dependency keeps fixtures from touching a real
+home; foreign-owned paths are not tested because that needs another account.
+
 ## Checks
 
-With fake media and fake provider responses on macOS arm64: 383 tests,
+With fake media and fake provider responses on macOS arm64: 387 tests,
 typecheck, formatting, the source/package/loader checks and all 18 PTY
 scenarios pass. The setup tests use temporary homes, and on macOS one runs the
 real `df`/`mount` local-disk check against a temporary folder.
@@ -46,6 +72,8 @@ Guards proven by breaking them once:
 - Removing the `off` alias made the new alias test fail; restoring it passed.
 - Making the setup record's identity match always succeed made the
   replaced-state-directory test fail; restoring it passed.
+- Reverting the native adapter to report every close unconfirmed made the new
+  native-close test fail; restoring it passed.
 
 ## Not yet verified
 

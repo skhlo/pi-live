@@ -668,7 +668,7 @@ export function createNodeOwnershipFileSystem(): OwnershipFileSystem {
 }
 
 const LIVE_SETUP_RECORD = "setup.json";
-const LIVE_SETUP_RECORD_LIMIT = 1_024;
+const LIVE_SETUP_RECORD_LIMIT = OWNER_RECORD_LIMIT;
 
 interface LiveSetupIdentity {
   dev: string;
@@ -763,16 +763,17 @@ export function liveMountIsLocal(
   const row = dfOutput.trim().split("\n").at(-1) ?? "";
   const mountPoint = /^.*?\s+\d+\s+\d+\s+\d+\s+\d+%\s+(\/.*)$/.exec(row)?.[1];
   if (!mountPoint) return false;
+  // A later mount on the same point covers earlier ones, so the last one wins.
+  let local = false;
   for (const line of mountOutput.split("\n")) {
     const match = / on (\/.*) \(([^()]*)\)$/.exec(line);
     if (match?.[1] === mountPoint)
-      return match[2]!.split(", ").includes("local");
+      local = match[2]!.split(", ").includes("local");
   }
-  return false;
+  return local;
 }
 
 async function defaultLocalFilesystem(target: string): Promise<boolean> {
-  if (process.platform !== "darwin") return false;
   const run = (file: string, args: string[]) =>
     new Promise<string>((resolve, reject) =>
       execFile(
@@ -801,10 +802,14 @@ export async function setupLiveHome(
     kind: "refused",
     reason,
   });
+  if (!options.localFilesystem && process.platform !== "darwin")
+    return refused("Pi Live setup supports macOS only.");
+  const localFilesystem = options.localFilesystem ?? defaultLocalFilesystem;
   const expectedUid = process.getuid?.();
   const owned = (info: Stats) =>
     info.isDirectory() &&
     (expectedUid === undefined || info.uid === expectedUid);
+  let temporary: string | undefined;
   try {
     const canonicalHome = await realpath(
       (options.accountHome ?? (() => userInfo().homedir))(),
@@ -819,6 +824,8 @@ export async function setupLiveHome(
       return refused("HOME does not match this account's home directory.");
     if (!owned(await lstat(canonicalHome)))
       return refused(`${canonicalHome} is not a directory you own.`);
+    if (!(await localFilesystem(canonicalHome)))
+      return refused(`${canonicalHome} is not on a local disk.`);
     const stateParent = path.join(canonicalHome, ".local/state/pi-live");
     for (const directory of [
       path.join(canonicalHome, ".local"),
@@ -834,19 +841,27 @@ export async function setupLiveHome(
       if (!owned(info) || (await realpath(directory)) !== directory)
         return refused(`${directory} is not a real directory you own.`);
     }
-    if (((await lstat(stateParent)).mode & 0o777) !== 0o700)
+    // The lifecycle requires exactly 0700, so clear special bits too.
+    if (((await lstat(stateParent)).mode & 0o7777) !== 0o700)
       await chmod(stateParent, 0o700);
-    const localFilesystem = options.localFilesystem ?? defaultLocalFilesystem;
     if (!(await localFilesystem(stateParent)))
       return refused(`${stateParent} is not on a local disk.`);
+    const observation: HomeCertificationObservation = {
+      canonicalHome,
+      stateParent,
+      homeIdentity: identityFromStat(await lstat(canonicalHome)),
+      stateParentIdentity: identityFromStat(await lstat(stateParent)),
+    };
     const record = `${JSON.stringify({
       version: 1,
       canonicalHome,
       stateParent,
-      home: setupIdentity(identityFromStat(await lstat(canonicalHome))),
-      stateDirectory: setupIdentity(identityFromStat(await lstat(stateParent))),
+      home: setupIdentity(observation.homeIdentity),
+      stateDirectory: setupIdentity(observation.stateParentIdentity),
     })}\n`;
-    const temporary = path.join(stateParent, `.setup-${randomUUID()}.tmp`);
+    if (Buffer.byteLength(record) > LIVE_SETUP_RECORD_LIMIT)
+      return refused("The home folder path is too long for Pi Live.");
+    temporary = path.join(stateParent, `.setup-${randomUUID()}.tmp`);
     const handle = await open(
       temporary,
       constants.O_CREAT |
@@ -861,15 +876,19 @@ export async function setupLiveHome(
     } finally {
       await handle.close();
     }
-    try {
-      await rename(temporary, path.join(stateParent, LIVE_SETUP_RECORD));
-    } catch (error) {
-      await unlink(temporary).catch(() => undefined);
-      throw error;
-    }
+    await rename(temporary, path.join(stateParent, LIVE_SETUP_RECORD));
+    temporary = undefined;
+    // Setup succeeds only if the call-time certifier accepts what it wrote.
+    const certificate = await createLiveHomeAuthority().certify(observation);
+    if (!certificate.certified)
+      return refused(`${stateParent} did not pass the call-time check.`);
     return { kind: "ready", stateParent };
-  } catch {
-    return refused("The Pi Live state directory could not be prepared.");
+  } catch (error) {
+    return refused(
+      `The Pi Live state directory could not be prepared (${errorCode(error) ?? "unexpected error"}).`,
+    );
+  } finally {
+    if (temporary) await unlink(temporary).catch(() => undefined);
   }
 }
 
@@ -2576,11 +2595,11 @@ export function createLiveRuntimeResources(
   };
 }
 
-interface DefaultNativeCapture {
+export interface DefaultNativeCapture {
   stop(): void;
 }
 
-interface DefaultNativePeer {
+export interface DefaultNativePeer {
   createOffer(): Promise<string>;
   acceptAnswer(answer: string): Promise<void>;
   waitForOpen(timeoutMs?: number): Promise<void>;
@@ -2589,7 +2608,7 @@ interface DefaultNativePeer {
   close(): Promise<void>;
 }
 
-interface DefaultNativeBindings {
+export interface DefaultNativeBindings {
   AudioCapture: new (
     sampleRate: number,
     callback: (error: Error | null, samples: Float32Array) => void,
@@ -2633,12 +2652,15 @@ function loadDefaultLiveNativeBindings(): DefaultNativeBindings {
   return bindings;
 }
 
-function createDefaultLiveNativeAdapter(): LiveNativeAdapter {
+/** The real native adapter; tests pass fake bindings to `loadBindings`. */
+export function createDefaultLiveNativeAdapter(
+  loadBindings: () => DefaultNativeBindings = loadDefaultLiveNativeBindings,
+): LiveNativeAdapter {
   return {
     createPeer(input) {
       let nativePeer: DefaultNativePeer;
       try {
-        const bindings = loadDefaultLiveNativeBindings();
+        const bindings = loadBindings();
         nativePeer = new bindings.LiveWebRtcPeer(
           (error, payload) => {
             if (error) input.onFailure();
@@ -2684,7 +2706,7 @@ function createDefaultLiveNativeAdapter(): LiveNativeAdapter {
     startCapture(input) {
       let nativeCapture: DefaultNativeCapture;
       try {
-        const bindings = loadDefaultLiveNativeBindings();
+        const bindings = loadBindings();
         nativeCapture = new bindings.AudioCapture(16_000, (error, samples) => {
           if (error) input.onFailure();
           else input.onSample(samples);
@@ -4637,7 +4659,7 @@ export function createLiveDependencies(
 }
 
 const LIVE_DISCLOSURE =
-  "Uses the execution host microphone and speakers with OpenAI GPT-Live, billed to the OpenAI API key Pi uses for the openai provider. Audio, speech transcripts, the conversation leading to each request, a progress note for every tool-using Pi turn (its narration and the tools it ran, including typed work), and Pi's final replies are shared with OpenAI. Typed input and installed Pi extensions can influence those results. Existing HTTP/WebSocket proxy settings do not establish WebRTC/ICE media proxying. Pi reports only outermost extension dialogs, with a microtask delay; shortcut-opened dialogs and unreported nested dialogs may leave voice active. Stop voice first before opening such dialogs when capture and delivery must stop. Muting stops microphone capture; speakers may continue. Voice requests do not grant approvals. Run /live setup once before the first call. Cleanup behind an HTTPS proxy stays unconfirmed and blocks further calls until Pi restarts.";
+  "Uses the execution host microphone and speakers with OpenAI GPT-Live, billed to the OpenAI API key Pi uses for the openai provider. Audio, speech transcripts, the conversation leading to each request, a progress note for every tool-using Pi turn (its narration and the tools it ran, including typed work), and Pi's final replies are shared with OpenAI. Typed input and installed Pi extensions can influence those results. Existing HTTP/WebSocket proxy settings do not establish WebRTC/ICE media proxying. Pi reports only outermost extension dialogs, with a microtask delay; shortcut-opened dialogs and unreported nested dialogs may leave voice active. Stop voice first before opening such dialogs when capture and delivery must stop. Muting stops microphone capture; speakers may continue. Voice requests do not grant approvals. Run /live setup once before the first call. Behind an HTTPS proxy, cleanup cannot be confirmed: each call keeps its lock, which must be removed by hand after quitting Pi (see the README).";
 
 const LIVE_INSTRUCTIONS = `You are Pi Live, the voice interface to the user's current Pi coding session. Reply briefly in speech-friendly language. Delegate coding, repository, tool and verification requests; Pi receives the conversation that led to the handoff and handles it with its usual tools and approvals. While Pi works, its progress arrives as background context: use it when the user asks what Pi is doing. When Pi finishes, its reply arrives for you to tell the user; summarize it naturally instead of reading code or long lists aloud. Voice does not grant approvals.`;
 export function registerPiLive(
@@ -4835,6 +4857,13 @@ export function registerPiLive(
       );
       if (!confirmed) {
         current.ui.notify("Pi Live setup cancelled.", "info");
+        return;
+      }
+      if (preparing || lifecycle.snapshot().state !== "off") {
+        current.ui.notify(
+          "Pi Live: stop voice before running setup.",
+          "warning",
+        );
         return;
       }
       const result = await dependencies.setup();

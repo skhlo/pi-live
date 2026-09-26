@@ -11,7 +11,11 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
 
-import { registerPiLive, createIsolatedLiveCoordination } from "../src/live.ts";
+import {
+  registerPiLive,
+  createIsolatedLiveCoordination,
+  type LiveSetupResult,
+} from "../src/live.ts";
 import { PreferenceError } from "../src/preferences.ts";
 
 type CommandRegistration = {
@@ -581,6 +585,7 @@ test("every non-TUI command and the shortcut refuse before touching terminal pre
     "mute",
     "unmute",
     "status",
+    "setup",
     "help",
     "voice",
     "voice cedar",
@@ -590,7 +595,7 @@ test("every non-TUI command and the shortcut refuse before touching terminal pre
   }
   await harness.shortcuts.get("ctrl+shift+l")?.handler(ctx);
 
-  assert.equal(notifications.length, 13);
+  assert.equal(notifications.length, 14);
   for (const notification of notifications) {
     assert.deepEqual(notification, [
       "Pi Live requires interactive TUI mode.",
@@ -603,10 +608,7 @@ test("every non-TUI command and the shortcut refuse before touching terminal pre
 
 test("/live setup asks first, reports the result, and is unavailable without a setup dependency", async () => {
   const run = async (options: {
-    setup?: () => Promise<
-      | { kind: "ready"; stateParent: string }
-      | { kind: "refused"; reason: string }
-    >;
+    setup?: () => Promise<LiveSetupResult>;
     confirm: boolean;
   }) => {
     const harness = registrationHarness();

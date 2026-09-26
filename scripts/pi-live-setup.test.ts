@@ -97,6 +97,41 @@ test("setup is repeatable and makes an existing state directory private", async 
   await startsAndStops(fixture.lifecycle());
 });
 
+test("setup clears special mode bits the call-time check rejects", async (t) => {
+  const fixture = await emptyHome(t);
+  await mkdir(fixture.stateParent, { recursive: true, mode: 0o700 });
+  for (const mode of [0o1700, 0o2700]) {
+    await chmod(fixture.stateParent, mode);
+    assert.equal((await setupLiveHome(fixture.local)).kind, "ready");
+    assert.equal((await stat(fixture.stateParent)).mode & 0o7777, 0o700);
+    await startsAndStops(fixture.lifecycle());
+  }
+});
+
+test("setup works for a long home path and leaves an existing lock alone", async (t) => {
+  const fixture = await emptyHome(t);
+  const home = path.join(
+    fixture.home,
+    "a".repeat(200),
+    "b".repeat(200),
+    "c".repeat(100),
+  );
+  await mkdir(home, { recursive: true });
+  const canonicalHome = await realpath(home);
+  assert.ok(canonicalHome.length > 420, String(canonicalHome.length));
+  const local: LiveSetupOptions = {
+    accountHome: () => home,
+    environmentHome: () => home,
+    localFilesystem: async () => true,
+  };
+  const stateParent = path.join(canonicalHome, ".local/state/pi-live");
+  const lockOwner = path.join(stateParent, "active.lock/owner.json");
+  await mkdir(path.dirname(lockOwner), { recursive: true, mode: 0o700 });
+  await writeFile(lockOwner, "retained");
+  assert.deepEqual(await setupLiveHome(local), { kind: "ready", stateParent });
+  assert.equal(await readFile(lockOwner, "utf8"), "retained");
+});
+
 test("a replaced state directory or a loosened record needs setup again", async (t) => {
   const fixture = await emptyHome(t);
   assert.equal((await setupLiveHome(fixture.local)).kind, "ready");
@@ -137,10 +172,10 @@ test("setup refuses non-local disks, redirected folders and a divergent HOME", a
     }),
     {
       kind: "refused",
-      reason: `${fixture.stateParent} is not on a local disk.`,
+      reason: `${path.dirname(path.dirname(path.dirname(fixture.stateParent)))} is not on a local disk.`,
     },
   );
-  await assert.rejects(stat(path.join(fixture.stateParent, "setup.json")), {
+  await assert.rejects(stat(path.join(fixture.home, ".local")), {
     code: "ENOENT",
   });
 
@@ -176,6 +211,8 @@ test("mount parsing requires the local flag on the target's own mount", () => {
     "/dev/disk3s5 on /System/Volumes/Data (apfs, local, journaled, nobrowse)",
     "//user@server/share on /Volumes/team share (smbfs, nodev, nosuid, mounted by user)",
     "map auto_home on /System/Volumes/Data/home (autofs, automounted, nobrowse)",
+    "/dev/disk4s1 on /Volumes/Stack (apfs, local, journaled)",
+    "//user@server/over on /Volumes/Stack (smbfs, nodev, nosuid)",
   ].join("\n");
   const df = (filesystem: string, mountPoint: string) =>
     `Filesystem 512-blocks Used Available Capacity Mounted on\n${filesystem} 100 50 50 50% ${mountPoint}\n`;
@@ -190,6 +227,11 @@ test("mount parsing requires the local flag on the target's own mount", () => {
   assert.equal(
     liveMountIsLocal(df("map auto_home", "/System/Volumes/Data/home"), mount),
     false,
+  );
+  assert.equal(
+    liveMountIsLocal(df("//user@server/over", "/Volumes/Stack"), mount),
+    false,
+    "a share mounted over a local mount point is not local",
   );
   assert.equal(liveMountIsLocal(df("/dev/disk9", "/missing"), mount), false);
   assert.equal(liveMountIsLocal("", mount), false);

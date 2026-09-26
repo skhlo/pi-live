@@ -110,6 +110,8 @@ interface SdkFixtureOptions {
   resources?: NonNullable<LiveDependencies["runtime"]>["resources"];
   retry?: boolean;
   configuredSourcesFromSettings?: boolean;
+  /** Home certification refuses, as before `/live setup`. */
+  uncertified?: boolean;
 }
 
 export async function createSdkFixture(
@@ -239,7 +241,12 @@ export async function createSdkFixture(
           clock,
           coordination,
           randomId: () => `fixture-${++randomSequence}`,
-          home: certifiedHome(home),
+          home: options.uncertified
+            ? {
+                ...certifiedHome(home),
+                certify: () => ({ certified: false }),
+              }
+            : certifiedHome(home),
           ownershipFileSystem: {
             ...nodeOwnership,
             async mkdirExclusive(target, mode): Promise<void> {

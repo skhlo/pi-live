@@ -73,13 +73,14 @@ with `cleanup-blocked`.
 
 ### Recovery
 
-- **Setup refused:** the message names the folder and the reason (not yours,
-  redirected through a link, or not on a local disk). Fix that and run
+- **Setup refused:** the message says why, for example a folder that is not
+  yours, is reached through a link, or is not on a local disk. Fix that and run
   `/live setup` again.
 - **`cleanup-blocked`:** this Pi process cannot start another call. Quit Pi.
   If a new Pi then reports `busy` while no other Pi has a call running, the lock
   was left behind: remove `~/.local/state/pi-live/active.lock/owner.json`, then
-  the `active.lock` folder. Pi Live never removes a lock itself.
+  the `active.lock` folder. Behind an HTTPS proxy this happens after every
+  call. Pi Live never removes a lock itself.
 - **Going back:** start Pi without `-e` to stop using Pi Live. To use an earlier
   version, check out its tag and restore dependencies as in step 1. Before
   v0.1.0 there is no earlier supported version.
@@ -91,8 +92,8 @@ you no longer need them.
 See [setup and readiness verification](docs/ISSUE-6-VERIFICATION.md),
 [delegation/control verification](docs/ISSUE-5-VERIFICATION.md),
 [transport limits](docs/ISSUE-4-VERIFICATION.md), and
-[lifecycle verification](docs/ISSUE-3-VERIFICATION.md). The MBA canary and
-adoption decision remain #7.
+[lifecycle verification](docs/ISSUE-3-VERIFICATION.md). The #7 canary and the
+adoption decision are still ahead.
 
 The preference writer uses an optimistic read/compare/retry sequence and atomic
 same-directory rename. That does **not** guarantee that every concurrent change
