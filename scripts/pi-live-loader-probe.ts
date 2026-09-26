@@ -253,6 +253,7 @@ async function main(): Promise<void> {
     "session_before_tree",
     "session_shutdown",
     "session_start",
+    "turn_end",
     "ui_prompt_end",
     "ui_prompt_start",
   ]);

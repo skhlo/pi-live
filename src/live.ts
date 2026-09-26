@@ -32,6 +32,7 @@ import {
 } from "./compatibility.ts";
 import {
   createFilePreferenceStore,
+  DEFAULT_LIVE_VOICE,
   isLiveVoice,
   LIVE_VOICE_VALUES,
   PreferenceError,
@@ -55,6 +56,7 @@ export type LiveDiagnostic =
   | "connect-timeout"
   | "protocol-error"
   | "audio-error"
+  | "remote-ended"
   | "cleanup-blocked";
 
 export interface LiveSnapshot {
@@ -65,20 +67,17 @@ export interface LiveSnapshot {
 }
 
 const LIVE_LIMITS = {
-  accessTokenBytes: 16 * 1_024,
-  accountIdBytes: 256,
-  credentialEnvelopeBytes: 20 * 1_024,
-  deviceCheckTokenBytes: 8 * 1_024,
-  attestationHeaderBytes: 16 * 1_024,
+  apiKeyBytes: 1_024,
   combinedHeaderBytes: 64 * 1_024,
   sdpBytes: 1_024 * 1_024,
   signalingRequestBytes: 2 * 1_024 * 1_024,
+  signalingResponseBytes: 2 * 1_024 * 1_024,
   nonOkBodyBytes: 8 * 1_024,
   inboundBytes: 256 * 1_024,
   idBytes: 256,
   contextChunkBytes: 500,
   textBytes: 64 * 1_024,
-  contentEntries: 64,
+  finalSpeechBytes: 1_500,
   pendingProducers: 256,
   retainedProducerBytes: 256 * 1_024,
   pendingFragments: 256,
@@ -92,8 +91,7 @@ const LIVE_LIMITS = {
 } as const;
 
 export interface LiveCredentials {
-  accessToken: string;
-  accountId: string;
+  apiKey: string;
 }
 
 export interface LiveCredentialRegistry {
@@ -102,7 +100,6 @@ export interface LiveCredentialRegistry {
 
 export interface LiveCredentialResolutionOptions {
   signal?: AbortSignal;
-  now?: () => number;
 }
 
 function isUnknownRecord(value: unknown): value is Record<string, unknown> {
@@ -145,116 +142,6 @@ function validCredentialField(
   );
 }
 
-interface ParsedLiveJwt {
-  accountId: string;
-}
-
-function parseLiveJwt(token: string, now: number): ParsedLiveJwt | undefined {
-  try {
-    if (!isValidUtf8String(token)) return undefined;
-    const parts = token.split(".");
-    const payloadPart = parts[1];
-    if (
-      parts.length !== 3 ||
-      !parts[0] ||
-      !payloadPart ||
-      !parts[2] ||
-      !/^[A-Za-z0-9_-]+$/.test(payloadPart)
-    )
-      return undefined;
-    const decoded = Buffer.from(payloadPart, "base64url");
-    if (
-      decoded.byteLength > LIVE_LIMITS.accessTokenBytes ||
-      decoded.toString("base64url") !== payloadPart
-    )
-      return undefined;
-    const text = decodeUtf8(decoded);
-    if (text === undefined) return undefined;
-    const parsed = JSON.parse(text) as unknown;
-    if (!isUnknownRecord(parsed)) return undefined;
-    const expiry = parsed.exp;
-    if (
-      typeof expiry !== "number" ||
-      !Number.isFinite(expiry) ||
-      expiry <= now / 1_000
-    )
-      return undefined;
-    const auth = parsed["https://api.openai.com/auth"];
-    if (!isUnknownRecord(auth)) return undefined;
-    const accountId = auth.chatgpt_account_id;
-    if (!validCredentialField(accountId, LIVE_LIMITS.accountIdBytes))
-      return undefined;
-    return { accountId };
-  } catch {
-    return undefined;
-  }
-}
-
-function parseLiveRegistryCredentials(
-  raw: string | undefined,
-  now: number,
-): LiveCredentials | undefined {
-  if (
-    typeof raw !== "string" ||
-    raw.length === 0 ||
-    Buffer.byteLength(raw, "utf8") > LIVE_LIMITS.credentialEnvelopeBytes
-  )
-    return undefined;
-  const value = raw.trim();
-  if (!value) return undefined;
-
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (isUnknownRecord(parsed)) {
-      const accessToken =
-        typeof parsed.access === "string"
-          ? parsed.access
-          : typeof parsed.token === "string"
-            ? parsed.token
-            : undefined;
-      const accountId =
-        typeof parsed.accountId === "string"
-          ? parsed.accountId
-          : typeof parsed.account_id === "string"
-            ? parsed.account_id
-            : undefined;
-      const expiry = parsed.expires;
-      if (
-        !validCredentialField(accessToken, LIVE_LIMITS.accessTokenBytes) ||
-        !validCredentialField(accountId, LIVE_LIMITS.accountIdBytes)
-      )
-        return undefined;
-      const tokenLooksLikeJwt = accessToken.split(".").length === 3;
-      if (tokenLooksLikeJwt) {
-        const jwt = parseLiveJwt(accessToken, now);
-        if (!jwt || jwt.accountId !== accountId) return undefined;
-        if (
-          expiry !== undefined &&
-          (typeof expiry !== "number" ||
-            !Number.isFinite(expiry) ||
-            expiry <= now)
-        )
-          return undefined;
-        return { accessToken, accountId };
-      }
-      if (
-        typeof expiry !== "number" ||
-        !Number.isFinite(expiry) ||
-        expiry <= now
-      )
-        return undefined;
-      return { accessToken, accountId };
-    }
-  } catch {
-    // Pi normally returns the plain OAuth access token.
-  }
-
-  if (!validCredentialField(value, LIVE_LIMITS.accessTokenBytes))
-    return undefined;
-  const jwt = parseLiveJwt(value, now);
-  return jwt ? { accessToken: value, accountId: jwt.accountId } : undefined;
-}
-
 export async function resolveLiveRegistryCredentials(
   registry: LiveCredentialRegistry,
   options: LiveCredentialResolutionOptions = {},
@@ -262,7 +149,7 @@ export async function resolveLiveRegistryCredentials(
   if (options.signal?.aborted) return undefined;
   let request: Promise<string | undefined>;
   try {
-    request = registry.getApiKeyForProvider("openai-codex");
+    request = registry.getApiKeyForProvider("openai");
   } catch {
     return undefined;
   }
@@ -286,170 +173,10 @@ export async function resolveLiveRegistryCredentials(
     : await observed;
   removeAbort?.();
   if (result.kind !== "value" || options.signal?.aborted) return undefined;
-  return parseLiveRegistryCredentials(
-    result.value,
-    (options.now ?? Date.now)(),
-  );
-}
-
-export interface LiveDeviceCheckResult {
-  supported: boolean;
-  tokenBase64?: string;
-  error?: string;
-  latencyMs: number;
-}
-
-export interface LiveDeviceCheck {
-  generateToken(): Promise<LiveDeviceCheckResult>;
-}
-
-export interface LiveAttestation {
-  header: string;
-  supported: boolean;
-}
-
-export interface LiveAttestationOptions {
-  locale?: string;
-  timeZone?: string;
-  appSessionId?: string;
-}
-
-function cborHeader(major: number, value: number): Buffer {
-  if (!Number.isSafeInteger(value) || value < 0)
-    throw new Error("Live attestation data is invalid.");
-  if (value < 24) return Buffer.from([major + value]);
-  if (value <= 0xff) return Buffer.from([major + 24, value]);
-  if (value <= 0xffff) {
-    const output = Buffer.allocUnsafe(3);
-    output[0] = major + 25;
-    output.writeUInt16BE(value, 1);
-    return output;
-  }
-  if (value <= 0xffff_ffff) {
-    const output = Buffer.allocUnsafe(5);
-    output[0] = major + 26;
-    output.writeUInt32BE(value, 1);
-    return output;
-  }
-  throw new Error("Live attestation data is invalid.");
-}
-
-function cborUnsigned(value: number): Buffer {
-  return cborHeader(0, value);
-}
-
-function cborText(value: string): Buffer {
-  if (!isValidUtf8String(value))
-    throw new Error("Live attestation data is invalid.");
-  const text = Buffer.from(value, "utf8");
-  return Buffer.concat([cborHeader(96, text.byteLength), text]);
-}
-
-function cborMap(entries: ReadonlyArray<readonly [Buffer, Buffer]>): Buffer {
-  const parts: Buffer[] = [cborHeader(160, entries.length)];
-  for (const [key, value] of entries) parts.push(key, value);
-  return Buffer.concat(parts);
-}
-
-function liveAttestationSignals(options: LiveAttestationOptions): Buffer {
-  const resolved = Intl.DateTimeFormat().resolvedOptions();
-  const locale = (options.locale ?? resolved.locale ?? "unknown").slice(0, 64);
-  const timeZone = (options.timeZone ?? resolved.timeZone ?? "unknown").slice(
-    0,
-    64,
-  );
-  const appSessionId = (options.appSessionId ?? randomUUID()).slice(0, 128);
-  const preferredLanguages = Buffer.concat([
-    cborHeader(128, 1),
-    cborText(locale),
-  ]);
-  return cborMap([
-    [cborUnsigned(0), cborUnsigned(1)],
-    [cborUnsigned(1), preferredLanguages],
-    [cborUnsigned(2), cborText(locale)],
-    [cborUnsigned(3), cborText(timeZone)],
-    [cborUnsigned(4), cborUnsigned(0)],
-    [cborUnsigned(5), cborUnsigned(1)],
-    [cborUnsigned(6), cborText(appSessionId)],
-  ]);
-}
-
-function decodeDeviceCheckToken(value: string): Buffer | undefined {
-  const maximumEncodedLength =
-    Math.ceil(LIVE_LIMITS.deviceCheckTokenBytes / 3) * 4;
-  if (
-    value.length === 0 ||
-    value.length > maximumEncodedLength ||
-    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
-      value,
-    )
-  )
-    return undefined;
-  const decoded = Buffer.from(value, "base64");
-  return decoded.byteLength <= LIVE_LIMITS.deviceCheckTokenBytes &&
-    decoded.toString("base64") === value
-    ? decoded
+  const apiKey = result.value;
+  return validCredentialField(apiKey, LIVE_LIMITS.apiKeyBytes)
+    ? { apiKey }
     : undefined;
-}
-
-function buildLiveClientAttestation(
-  result: LiveDeviceCheckResult,
-  options: LiveAttestationOptions,
-): string {
-  const entries: Array<readonly [Buffer, Buffer]> = [];
-  if (result.supported) {
-    if (
-      result.error !== undefined ||
-      typeof result.tokenBase64 !== "string" ||
-      !decodeDeviceCheckToken(result.tokenBase64)
-    )
-      throw new Error("Live attestation data is invalid.");
-    entries.push([cborText("token"), cborText(result.tokenBase64)]);
-  } else {
-    if (result.error !== undefined || result.tokenBase64 !== undefined)
-      throw new Error("Live attestation data is invalid.");
-    entries.push([cborText("error_code"), cborUnsigned(3)]);
-  }
-  entries.push([cborText("bundle_id"), cborText("com.openai.codex")]);
-  const signals = liveAttestationSignals(options);
-  entries.push([
-    cborText("f"),
-    Buffer.concat([cborHeader(64, signals.byteLength), signals]),
-  ]);
-  if (Number.isFinite(result.latencyMs)) {
-    const latency = Buffer.allocUnsafe(9);
-    latency[0] = 0xfb;
-    latency.writeDoubleBE(result.latencyMs, 1);
-    entries.push([cborText("t"), latency]);
-  }
-  return `v1.${cborMap(entries).toString("base64url")}`;
-}
-
-export async function prepareLiveAttestation(
-  deviceCheck: LiveDeviceCheck,
-  options: LiveAttestationOptions = {},
-): Promise<LiveAttestation> {
-  let result: LiveDeviceCheckResult;
-  try {
-    result = await deviceCheck.generateToken();
-  } catch {
-    throw new Error("Live attestation failed.");
-  }
-  if (
-    typeof result?.supported !== "boolean" ||
-    typeof result.latencyMs !== "number" ||
-    !Number.isFinite(result.latencyMs) ||
-    result.latencyMs < 0 ||
-    (result.tokenBase64 !== undefined &&
-      typeof result.tokenBase64 !== "string") ||
-    (result.error !== undefined && typeof result.error !== "string")
-  )
-    throw new Error("Live attestation data is invalid.");
-  const clientAttestation = buildLiveClientAttestation(result, options);
-  const header = JSON.stringify({ v: 1, s: 0, t: clientAttestation });
-  if (Buffer.byteLength(header, "utf8") > LIVE_LIMITS.attestationHeaderBytes)
-    throw new Error("Live attestation data is invalid.");
-  return { header, supported: result.supported };
 }
 
 export interface LiveAdmissionFacts {
@@ -534,15 +261,10 @@ export interface LiveConnection {
 
 export interface LiveResources {
   credentials(input: { signal: AbortSignal }): Promise<LiveCredentials>;
-  attestation(input: {
-    signal: AbortSignal;
-    credentials: LiveCredentials;
-  }): Promise<LiveAttestation>;
   connect(input: {
     signal: AbortSignal;
     deadline: number;
     credentials: LiveCredentials;
-    attestation: LiveAttestation;
     voice: string;
     onFailure?(diagnostic: LiveDiagnostic): void;
   }): LiveResourceStart<LiveConnection>;
@@ -551,7 +273,6 @@ export interface LiveResources {
 export interface LiveHttpResponse {
   status: number;
   statusText: string;
-  location?: string;
   body: AsyncIterable<Uint8Array>;
   cancel(): void | Promise<void>;
 }
@@ -612,7 +333,6 @@ export interface LiveNativePeer {
 }
 
 export interface LiveNativeAdapter {
-  deviceCheck: LiveDeviceCheck;
   createPeer(input: {
     onEvent(payload: string): void;
     onOutputLevel(level: number): void;
@@ -628,7 +348,6 @@ export interface LiveRuntimeDiagnostic {
   code: LiveDiagnostic;
   phase:
     | "credentials"
-    | "attestation"
     | "offer"
     | "signaling"
     | "answer"
@@ -644,7 +363,6 @@ export interface LiveRuntimeDiagnostic {
 
 export interface LiveRuntimeResourcesOptions {
   registry: LiveCredentialRegistry;
-  sessionId: string;
   instructions: string;
   native?: LiveNativeAdapter;
   network?: LiveNetworkAdapter;
@@ -661,6 +379,7 @@ export interface LiveRuntimeResourcesOptions {
       text: string;
     }): void;
     onDiagnostic?(diagnostic: LiveRuntimeDiagnostic): void;
+    onServiceError?(code: string): void;
   };
 }
 
@@ -956,11 +675,8 @@ function defaultClock(): LiveClock {
   };
 }
 
-const LIVE_SIGNALING_URL =
-  "https://chatgpt.com/backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas";
-const LIVE_SIDEBAND_ORIGIN = "https://api.openai.com";
-const LIVE_CLIENT_VERSION = "0.144.1";
-const LIVE_MODEL = "gpt-live-1-codex";
+const LIVE_SIGNALING_URL = "https://api.openai.com/v1/live/sessions";
+const LIVE_MODEL = "gpt-live-1";
 const LIVE_SIDE_BAND_ATTEMPTS = 3;
 const LIVE_PHASE_MS = 10_000;
 const LIVE_SEND_MS = 5_000;
@@ -1007,6 +723,8 @@ function runtimeDiagnosticText(code: LiveDiagnostic): string {
       return "Pi Live protocol failed.";
     case "audio-error":
       return "Pi Live audio failed.";
+    case "remote-ended":
+      return "The voice service ended the call.";
     case "cleanup-blocked":
       return "Pi Live cleanup could not be confirmed.";
   }
@@ -1029,69 +747,43 @@ function combinedHeaderBytes(headers: Record<string, string>): number {
 
 function buildLiveHeaders(
   credentials: LiveCredentials,
-  sessionId: string,
-  realtimeSessionId: string,
-  attestation: LiveAttestation,
 ): Record<string, string> {
-  const accessToken = credentials.accessToken;
-  const accountId = credentials.accountId;
-  const attestationHeader = attestation.header;
-  if (
-    !validCredentialField(accessToken, LIVE_LIMITS.accessTokenBytes) ||
-    !validCredentialField(accountId, LIVE_LIMITS.accountIdBytes) ||
-    !validCredentialField(sessionId, LIVE_LIMITS.idBytes) ||
-    !validCredentialField(realtimeSessionId, LIVE_LIMITS.idBytes) ||
-    !validHeaderValue(attestationHeader) ||
-    !byteLengthWithin(attestationHeader, LIVE_LIMITS.attestationHeaderBytes)
-  )
+  const apiKey = credentials.apiKey;
+  if (!validCredentialField(apiKey, LIVE_LIMITS.apiKeyBytes))
     throw fixedRuntimeError("protocol");
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${accessToken}`,
-    "OpenAI-Alpha": "quicksilver=v2",
-    "User-Agent": `Codex Desktop/${LIVE_CLIENT_VERSION}`,
-    "x-session-id": realtimeSessionId,
-    originator: "Codex Desktop",
-    version: LIVE_CLIENT_VERSION,
-    "session-id": sessionId,
-    "thread-id": sessionId,
-    "chatgpt-account-id": accountId,
-    "x-oai-attestation": attestationHeader,
-  };
-  if (combinedHeaderBytes(headers) > LIVE_LIMITS.combinedHeaderBytes)
-    throw fixedRuntimeError("protocol");
-  return headers;
+  return { Authorization: `Bearer ${apiKey}` };
 }
 
-function parseLiveCallLocation(location: string | undefined): string {
-  if (
-    typeof location !== "string" ||
-    location.length === 0 ||
-    !byteLengthWithin(location, 2_048)
-  )
-    throw fixedRuntimeError("protocol");
-  let parsed: URL;
+function parseLiveSessionAnswer(body: string): {
+  sessionId: string;
+  answer: string;
+} {
+  let parsed: unknown;
   try {
-    parsed = new URL(location, LIVE_SIDEBAND_ORIGIN);
+    parsed = JSON.parse(body) as unknown;
   } catch {
     throw fixedRuntimeError("protocol");
   }
+  if (!isUnknownRecord(parsed)) throw fixedRuntimeError("protocol");
+  const session = parsed.session;
+  const transport = parsed.transport;
   if (
-    parsed.origin !== LIVE_SIDEBAND_ORIGIN ||
-    parsed.protocol !== "https:" ||
-    parsed.username !== "" ||
-    parsed.password !== "" ||
-    parsed.search !== "" ||
-    parsed.hash !== ""
+    !isUnknownRecord(session) ||
+    !isUnknownRecord(transport) ||
+    transport.type !== "webrtc" ||
+    typeof transport.sdp !== "string" ||
+    transport.sdp.length === 0 ||
+    !isValidUtf8String(transport.sdp) ||
+    !byteLengthWithin(transport.sdp, LIVE_LIMITS.sdpBytes)
   )
     throw fixedRuntimeError("protocol");
-  const canonicalAbsolute = `${LIVE_SIDEBAND_ORIGIN}${parsed.pathname}`;
-  if (location !== parsed.pathname && location !== canonicalAbsolute)
+  const sessionId = session.id;
+  if (
+    !validCredentialField(sessionId, LIVE_LIMITS.idBytes) ||
+    !/^[A-Za-z0-9_-]+$/.test(sessionId)
+  )
     throw fixedRuntimeError("protocol");
-  const match = /^\/v1\/live\/(rtc_[A-Za-z0-9_-]+)$/.exec(parsed.pathname);
-  const callId = match?.[1];
-  if (!callId || !byteLengthWithin(callId, LIVE_LIMITS.idBytes))
-    throw fixedRuntimeError("protocol");
-  return callId;
+  return { sessionId, answer: transport.sdp };
 }
 
 async function readBoundedBody(
@@ -1267,11 +959,11 @@ function utf8Tail(value: string, maximum: number): string {
 }
 
 function truncateLiveFinal(value: string): string {
-  if (byteLengthWithin(value, LIVE_LIMITS.textBytes)) return value;
-  const marker = "\n[truncated]";
+  if (byteLengthWithin(value, LIVE_LIMITS.finalSpeechBytes)) return value;
+  const marker = " [The rest of Pi's reply is in the terminal.]";
   return `${utf8Prefix(
     value,
-    LIVE_LIMITS.textBytes - Buffer.byteLength(marker),
+    LIVE_LIMITS.finalSpeechBytes - Buffer.byteLength(marker),
   )}${marker}`;
 }
 
@@ -1315,13 +1007,13 @@ function buildLiveSessionRequest(
   )
     throw fixedRuntimeError("protocol");
   const body = JSON.stringify({
-    sdp: offer,
     session: {
       model: LIVE_MODEL,
       instructions,
       audio: { output: { voice } },
       delegation: { type: "client" },
     },
+    transport: { type: "webrtc", sdp: offer },
   });
   if (!byteLengthWithin(body, LIVE_LIMITS.signalingRequestBytes))
     throw fixedRuntimeError("protocol");
@@ -1400,23 +1092,10 @@ export function createLiveRuntimeResources(
       report("missing-auth", "credentials");
       throw new Error("Live authentication is unavailable.");
     },
-    async attestation({ signal }): Promise<LiveAttestation> {
-      refuseUnsafeDebug();
-      if (signal.aborted) throw new Error("Live attestation was cancelled.");
-      let prepared: LiveAttestation;
-      try {
-        prepared = await prepareLiveAttestation(native.deviceCheck);
-      } catch {
-        if (!signal.aborted) report("protocol-error", "attestation");
-        throw new Error("Live attestation failed.");
-      }
-      if (signal.aborted) throw new Error("Live attestation was cancelled.");
-      return prepared;
-    },
     connect(input): LiveResourceStart<LiveConnection> {
       const closeController = new AbortController();
       const signal = AbortSignal.any([input.signal, closeController.signal]);
-      const { credentials, attestation } = input;
+      const { credentials } = input;
       const pendingNative = new Set<Promise<unknown>>();
       const pendingNetworkReads = new Set<Promise<unknown>>();
       const pendingSocketSends = new Set<Promise<unknown>>();
@@ -1469,9 +1148,16 @@ export function createLiveRuntimeResources(
         }
       };
 
-      let eventTokens: number = LIVE_LIMITS.eventBucket;
-      let eventBucketAt = clock.now();
-      const latestTranscripts = new Map<"user" | "assistant", string>();
+      type EventSource = "native" | "sideband";
+      const eventBuckets: Record<EventSource, { tokens: number; at: number }> =
+        {
+          native: { tokens: LIVE_LIMITS.eventBucket, at: clock.now() },
+          sideband: { tokens: LIVE_LIMITS.eventBucket, at: clock.now() },
+        };
+      // Speech since the last handoff, in order, so Pi receives the exchange
+      // that led to a delegation (the delegation event itself carries no text).
+      const speech: Array<{ role: "user" | "assistant"; text: string }> = [];
+      let speechBytes = 0;
       let replyTo: string | undefined;
       type WriterFragment = {
         kind: "text" | "pong";
@@ -1508,36 +1194,84 @@ export function createLiveRuntimeResources(
       let startupPhase: LiveRuntimeDiagnostic["phase"] = "offer";
       let startupReported = false;
 
-      const takeEvent = (): boolean => {
+      const takeEvent = (source: EventSource): boolean => {
+        const bucket = eventBuckets[source];
         const now = clock.now();
-        const elapsed = Math.max(0, now - eventBucketAt);
-        eventTokens = Math.min(
+        const elapsed = Math.max(0, now - bucket.at);
+        bucket.tokens = Math.min(
           LIVE_LIMITS.eventBucket,
-          eventTokens + (elapsed / 1_000) * LIVE_LIMITS.eventRefillPerSecond,
+          bucket.tokens + (elapsed / 1_000) * LIVE_LIMITS.eventRefillPerSecond,
         );
-        eventBucketAt = now;
-        if (eventTokens < 1) return false;
-        eventTokens -= 1;
+        bucket.at = now;
+        if (bucket.tokens < 1) return false;
+        bucket.tokens -= 1;
         return true;
       };
 
       const protocolFailure = (): void =>
         failActive("protocol-error", "protocol");
 
-      const emitTranscript = (
+      const appendSpeech = (
         role: "user" | "assistant",
-        text: string,
+        delta: string,
       ): void => {
-        const retained = utf8Tail(text, LIVE_LIMITS.textBytes);
-        latestTranscripts.set(role, retained);
+        const last = speech.at(-1);
+        if (last?.role === role) last.text += delta;
+        else speech.push({ role, text: delta });
+        speechBytes += Buffer.byteLength(delta, "utf8");
+        while (speechBytes > LIVE_LIMITS.textBytes && speech.length > 0) {
+          const first = speech[0]!;
+          const firstBytes = Buffer.byteLength(first.text, "utf8");
+          const excess = speechBytes - LIVE_LIMITS.textBytes;
+          if (firstBytes <= excess) {
+            speech.shift();
+            speechBytes -= firstBytes;
+          } else {
+            first.text = utf8Tail(first.text, firstBytes - excess);
+            speechBytes -= firstBytes - Buffer.byteLength(first.text, "utf8");
+          }
+        }
+        const current = speech.at(-1);
+        if (current?.role !== role) return;
         try {
-          options.callbacks?.onTranscript?.({ role, text: retained });
+          options.callbacks?.onTranscript?.({ role, text: current.text });
         } catch {
           // Caller callbacks are isolated from transport ownership.
         }
       };
 
-      const processEvent = (payload: string): void => {
+      const takeHandoffRequest = (): string => {
+        const request = speech
+          .map(
+            (segment) =>
+              `${segment.role === "user" ? "User" : "Voice assistant"}: ${segment.text.trim()}`,
+          )
+          .filter((line) => !/^[^:]+: $/.test(line))
+          .join("\n");
+        speech.length = 0;
+        speechBytes = 0;
+        return request;
+      };
+
+      const reportServiceError = (error: unknown): void => {
+        const code =
+          isUnknownRecord(error) &&
+          typeof error.code === "string" &&
+          /^[a-z0-9_.-]{1,64}$/.test(error.code)
+            ? error.code
+            : "unknown";
+        try {
+          options.callbacks?.onServiceError?.(code);
+        } catch {
+          // Caller callbacks are isolated from transport ownership.
+        }
+      };
+
+      // The data channel and the attached sideband both carry session events.
+      // The data channel observes the session from its start, so it owns
+      // transcripts and delegations; the sideband reports only the outcome of
+      // commands sent on it and the session end.
+      const processEvent = (payload: string, source: EventSource): void => {
         if (!active || input.signal.aborted || closeController.signal.aborted)
           return;
         let parsed: unknown;
@@ -1562,99 +1296,67 @@ export function createLiveRuntimeResources(
               protocolFailure();
             return;
           }
-          case "input_transcript.added":
-          case "output_transcript.added": {
-            const item = parsed.item;
+          case "session.input_transcript.delta":
+          case "session.output_transcript.delta": {
+            if (source !== "native") return;
+            const delta = parsed.delta;
             if (
-              !isUnknownRecord(item) ||
-              typeof item.text !== "string" ||
-              !isValidUtf8String(item.text)
+              typeof delta !== "string" ||
+              !isValidUtf8String(delta) ||
+              !byteLengthWithin(delta, LIVE_LIMITS.textBytes)
             ) {
               protocolFailure();
               return;
             }
-            emitTranscript(
-              parsed.type === "input_transcript.added" ? "user" : "assistant",
-              item.text,
+            appendSpeech(
+              parsed.type === "session.input_transcript.delta"
+                ? "user"
+                : "assistant",
+              delta,
             );
             return;
           }
-          case "turn.done": {
-            const turn = parsed.turn;
+          case "session.delegation.created": {
+            if (source !== "native") return;
+            const delegation = parsed.delegation;
             if (
-              !isUnknownRecord(turn) ||
-              (turn.role !== "user" && turn.role !== "assistant") ||
-              typeof turn.transcript !== "string" ||
-              !isValidUtf8String(turn.transcript)
+              !isUnknownRecord(delegation) ||
+              delegation.target !== "client" ||
+              !validCredentialField(delegation.id, LIVE_LIMITS.idBytes)
             ) {
               protocolFailure();
               return;
             }
-            emitTranscript(turn.role, turn.transcript);
-            return;
-          }
-          case "delegation.created": {
-            const item = parsed.item;
-            if (
-              !isUnknownRecord(item) ||
-              item.type !== "delegation" ||
-              item.target !== "client" ||
-              !validCredentialField(item.id, LIVE_LIMITS.idBytes) ||
-              !Array.isArray(item.content) ||
-              item.content.length === 0 ||
-              item.content.length > LIVE_LIMITS.contentEntries
-            ) {
-              protocolFailure();
-              return;
-            }
-            const content: string[] = [];
-            let requestBytes = 0;
-            for (const entry of item.content) {
-              if (
-                !isUnknownRecord(entry) ||
-                entry.type !== "input_text" ||
-                typeof entry.text !== "string" ||
-                !isValidUtf8String(entry.text)
-              ) {
-                protocolFailure();
-                return;
-              }
-              requestBytes +=
-                (content.length === 0 ? 0 : 1) +
-                Buffer.byteLength(entry.text, "utf8");
-              if (requestBytes > LIVE_LIMITS.textBytes) {
-                protocolFailure();
-                return;
-              }
-              content.push(entry.text);
-            }
-            const joinedRequest = content.join("\n");
-            if (!byteLengthWithin(joinedRequest, LIVE_LIMITS.textBytes)) {
-              protocolFailure();
-              return;
-            }
-            const request = joinedRequest.trim();
-            if (request.length === 0) {
-              protocolFailure();
-              return;
-            }
-            replyTo = item.id;
+            const request = takeHandoffRequest();
+            replyTo = delegation.id;
             try {
-              options.callbacks?.onRequest?.({ id: item.id, text: request });
+              options.callbacks?.onRequest?.({
+                id: delegation.id,
+                text:
+                  request ||
+                  "(The voice assistant handed off without a transcript. Ask the user what they need.)",
+              });
             } catch {
               protocolFailure();
             }
             return;
           }
-          case "error":
-            protocolFailure();
-            return;
-          case "output_audio.delta":
+          case "error": {
+            const error = parsed.error;
             if (
-              typeof parsed.audio !== "string" ||
-              !isValidUtf8String(parsed.audio)
+              source === "sideband" &&
+              !(
+                isUnknownRecord(error) &&
+                typeof error.client_event_id === "string"
+              )
             )
-              protocolFailure();
+              return;
+            reportServiceError(error);
+            return;
+          }
+          case "session.closed":
+            if (sessionCloseSent) return;
+            failActive("remote-ended", "protocol");
             return;
           default:
             return;
@@ -1667,7 +1369,7 @@ export function createLiveRuntimeResources(
         if (
           !(bytes instanceof Uint8Array) ||
           bytes.byteLength > LIVE_LIMITS.inboundBytes ||
-          !takeEvent()
+          !takeEvent("sideband")
         ) {
           protocolFailure();
           return;
@@ -1679,7 +1381,7 @@ export function createLiveRuntimeResources(
           protocolFailure();
           return;
         }
-        processEvent(payload);
+        processEvent(payload, "sideband");
       };
 
       const receiveNative = (payload: string): void => {
@@ -1689,12 +1391,12 @@ export function createLiveRuntimeResources(
           typeof payload !== "string" ||
           !isValidUtf8String(payload) ||
           !byteLengthWithin(payload, LIVE_LIMITS.inboundBytes) ||
-          !takeEvent()
+          !takeEvent("native")
         ) {
           protocolFailure();
           return;
         }
-        processEvent(payload);
+        processEvent(payload, "native");
       };
 
       function releaseRetained(producer: WriterProducer): void {
@@ -1757,21 +1459,16 @@ export function createLiveRuntimeResources(
           const chunk = liveTextChunkAt(producer.text, producer.offset);
           nextOffset = chunk.next;
           completed = nextOffset >= producer.text.length;
-          const message = producer.delegationId
-            ? {
-                type: "delegation.context.append",
-                delegation_item_id: producer.delegationId,
-                ...(producer.dataKind === "application"
-                  ? { channel: "commentary" }
-                  : {}),
-                content: [{ type: "input_text", text: chunk.text }],
-              }
-            : {
-                type: "session.context.append",
-                channel: "commentary",
-                content: [{ type: "input_text", text: chunk.text }],
-              };
-          payload = JSON.stringify(message);
+          // Progress is quiet context; Pi's final reply is for speech.
+          payload = JSON.stringify({
+            type:
+              producer.dataKind === "final"
+                ? "session.commentary.append"
+                : "session.thinking.append",
+            event_id: randomId(),
+            delegation_id: producer.delegationId ?? null,
+            content: chunk.text,
+          });
         }
         const payloadBytes =
           typeof payload === "string"
@@ -2095,7 +1792,7 @@ export function createLiveRuntimeResources(
         if (
           !(payload instanceof Uint8Array) ||
           payload.byteLength > LIVE_CONTROL_FRAME_BYTES ||
-          !takeEvent()
+          !takeEvent("sideband")
         ) {
           protocolFailure();
           return;
@@ -2172,13 +1869,7 @@ export function createLiveRuntimeResources(
           }
           throw fixedRuntimeError("protocol");
         }
-        const realtimeSessionId = randomId();
-        const headers = buildLiveHeaders(
-          credentials,
-          options.sessionId,
-          realtimeSessionId,
-          attestation,
-        );
+        const headers = buildLiveHeaders(credentials);
 
         requireEffectAllowed();
         try {
@@ -2216,7 +1907,7 @@ export function createLiveRuntimeResources(
         );
         const signalingHeaders = {
           ...headers,
-          Accept: "*/*",
+          Accept: "application/json",
           "Content-Type": "application/json",
         };
         if (
@@ -2308,7 +1999,7 @@ export function createLiveRuntimeResources(
               pendingNetworkReads,
               readBoundedBody(
                 response,
-                LIVE_LIMITS.sdpBytes,
+                LIVE_LIMITS.signalingResponseBytes,
                 true,
                 signalingDeadline,
                 clock,
@@ -2320,9 +2011,9 @@ export function createLiveRuntimeResources(
             signal,
           );
           if (answerBytes.byteLength === 0) throw fixedRuntimeError("protocol");
-          const answer = decodeUtf8(answerBytes);
-          if (answer === undefined) throw fixedRuntimeError("protocol");
-          const callId = parseLiveCallLocation(response.location);
+          const answerBody = decodeUtf8(answerBytes);
+          if (answerBody === undefined) throw fixedRuntimeError("protocol");
+          const { sessionId, answer } = parseLiveSessionAnswer(answerBody);
           if (!peer) throw fixedRuntimeError("protocol");
           startupPhase = "answer";
           requireEffectAllowed();
@@ -2346,7 +2037,7 @@ export function createLiveRuntimeResources(
           peer.setMuted(false);
 
           startupPhase = "sideband";
-          const sidebandUrl = `wss://api.openai.com/v1/live/${callId}`;
+          const sidebandUrl = `wss://api.openai.com/v1/live/sessions/${sessionId}/attach`;
           requireEffectAllowed();
           const sidebandProxy = await waitForRuntimePhase(
             Promise.resolve(proxyForUrl(sidebandUrl)),
@@ -2411,7 +2102,7 @@ export function createLiveRuntimeResources(
                   if (!effectAllowed()) return;
                   if (
                     payload.byteLength > LIVE_LIMITS.inboundBytes ||
-                    !takeEvent()
+                    !takeEvent("sideband")
                   ) {
                     protocolFailure();
                     return;
@@ -2435,7 +2126,7 @@ export function createLiveRuntimeResources(
                   if (!effectAllowed()) return;
                   if (
                     payload.byteLength > LIVE_CONTROL_FRAME_BYTES ||
-                    !takeEvent()
+                    !takeEvent("sideband")
                   )
                     protocolFailure();
                 },
@@ -2554,12 +2245,8 @@ export function createLiveRuntimeResources(
             const delegationId = replyTo;
             if (dataKind === "final" && !delegationId) return Promise.resolve();
             if (dataKind === "final") replyTo = undefined;
-            const boundedText =
-              dataKind === "final" ? truncateLiveFinal(data.text) : data.text;
             const text =
-              dataKind === "final"
-                ? `"Agent Final Message":\n\n${boundedText}`
-                : boundedText;
+              dataKind === "final" ? truncateLiveFinal(data.text) : data.text;
             const deadline = clock.now() + LIVE_SEND_MS;
             const operation = queueProducer(
               {
@@ -2690,7 +2377,6 @@ interface DefaultNativeBindings {
     onLevel: (error: Error | null, level: number) => void,
     onFailure: (error: Error | null, message: string) => void,
   ) => DefaultNativePeer;
-  deviceCheckGenerateToken(): Promise<LiveDeviceCheckResult>;
   __ompInstallTokioRuntime(): void;
 }
 
@@ -2716,7 +2402,6 @@ function loadDefaultLiveNativeBindings(): DefaultNativeBindings {
     !isUnknownRecord(loaded) ||
     typeof loaded.AudioCapture !== "function" ||
     typeof loaded.LiveWebRtcPeer !== "function" ||
-    typeof loaded.deviceCheckGenerateToken !== "function" ||
     typeof loaded.__ompInstallTokioRuntime !== "function"
   )
     throw new Error("Live native bindings are invalid.");
@@ -2728,11 +2413,6 @@ function loadDefaultLiveNativeBindings(): DefaultNativeBindings {
 
 function createDefaultLiveNativeAdapter(): LiveNativeAdapter {
   return {
-    deviceCheck: {
-      async generateToken(): Promise<LiveDeviceCheckResult> {
-        return loadDefaultLiveNativeBindings().deviceCheckGenerateToken();
-      },
-    },
     createPeer(input) {
       let nativePeer: DefaultNativePeer;
       try {
@@ -2967,7 +2647,6 @@ export function createDefaultLiveNetworkAdapter(
         response = {
           status: fetched.status,
           statusText: fetched.statusText,
-          location: fetched.headers.get("location") ?? undefined,
           body: ownedBody,
           cancel(): Promise<void> {
             cancellation ??= (async () => {
@@ -3283,15 +2962,17 @@ export function createLiveLifecycle(
     ({
       accountHome: () => userInfo().homedir,
       environmentHome: () => process.env.HOME,
-      certify: () => ({ certified: false }),
+      // Development-only trust for a manually prepared ~/.local/state/pi-live
+      // (mode 0700). Standalone setup (#6) replaces this with certification.
+      certify: (observation) =>
+        process.env.PI_LIVE_DEV_TRUST_HOME === "1"
+          ? { certified: true, ...observation }
+          : { certified: false },
     } satisfies HomeAuthority);
   const resources: LiveResources =
     options.resources ??
     ({
       credentials: async () => {
-        throw new Error("unavailable");
-      },
-      attestation: async () => {
         throw new Error("unavailable");
       },
       connect: () => {
@@ -3303,7 +2984,9 @@ export function createLiveLifecycle(
   let lastFailure: LiveDiagnostic | undefined = coordination
     ? undefined
     : "cleanup-blocked";
-  let voice = isLiveVoice(options.initialVoice) ? options.initialVoice : "sol";
+  let voice = isLiveVoice(options.initialVoice)
+    ? options.initialVoice
+    : DEFAULT_LIVE_VOICE;
   let attempt: CallAttempt | undefined;
   let projectedPending: string | undefined;
 
@@ -4439,34 +4122,6 @@ export function createLiveLifecycle(
     }
     if (!currentAttempt(current) || state !== "acquiring")
       return { kind: "cancelled", state };
-    const attestationDeadline = Math.min(
-      current.connectDeadline,
-      current.callDeadline!,
-      clock.now() + DATA_PHASE_MS,
-    );
-    const attestationResult = await waitFor(
-      current,
-      () => {
-        if (
-          !currentAttempt(current) ||
-          state !== "acquiring" ||
-          !sharedContinuationAllowed(current)
-        )
-          throw new Error("call attempt fenced");
-        return resources.attestation({
-          signal: current.controller.signal,
-          credentials: credentialResult.value,
-        });
-      },
-      attestationDeadline,
-    );
-    if (attestationResult.kind !== "value") {
-      if (attestationResult.kind === "error")
-        void beginStop(current, "protocol-error");
-      return { kind: "cancelled", state };
-    }
-    if (!currentAttempt(current) || state !== "acquiring")
-      return { kind: "cancelled", state };
 
     if (!sharedContinuationAllowed(current))
       return { kind: "cancelled", state };
@@ -4488,7 +4143,6 @@ export function createLiveLifecycle(
             signal: current.controller.signal,
             deadline: connectionDeadline,
             credentials: credentialResult.value,
-            attestation: attestationResult.value,
             voice: current.voice,
             onFailure(diagnostic) {
               if (attempt === current && currentAttempt(current))
@@ -4765,10 +4419,9 @@ export function createLiveDependencies(
 }
 
 const LIVE_DISCLOSURE =
-  "Uses the execution host microphone and speakers with the experimental OpenAI service. Audio, speech transcripts, the Pi session identifier (linking calls from that session), and the final coding result are shared. Typed input and installed Pi extensions can influence that result. DeviceCheck attestation and locale/timezone metadata are sent. Existing HTTP/WebSocket proxy settings do not establish WebRTC/ICE media proxying. Pi reports only outermost extension dialogs, with a microtask delay; shortcut-opened dialogs and unreported nested dialogs may leave voice active. Stop voice first before opening such dialogs when capture and delivery must stop. Muting stops microphone capture; speakers may continue. Voice requests do not grant approvals. Native/proxy cleanup may remain unconfirmed and block restart; home certification and recovery require standalone setup.";
+  "Uses the execution host microphone and speakers with OpenAI GPT-Live, billed to the OpenAI API key Pi uses for the openai provider. Audio, speech transcripts, the conversation leading to each request, short progress summaries of Pi's tool use, and Pi's final replies are shared with OpenAI. Typed input and installed Pi extensions can influence those results. Existing HTTP/WebSocket proxy settings do not establish WebRTC/ICE media proxying. Pi reports only outermost extension dialogs, with a microtask delay; shortcut-opened dialogs and unreported nested dialogs may leave voice active. Stop voice first before opening such dialogs when capture and delivery must stop. Muting stops microphone capture; speakers may continue. Voice requests do not grant approvals. Native/proxy cleanup may remain unconfirmed and block restart; home certification and recovery require standalone setup.";
 
-const LIVE_INSTRUCTIONS = `You are Pi Live, the voice interface to the user's current Pi conversation. Reply briefly in speech-friendly language. Send coding, repository, tool and verification requests to the client. Pi handles those requests together with typed input, its configured extensions and its usual tools and approvals. Present results marked "Agent Final Message" naturally to the user. Voice does not grant approvals.`;
-
+const LIVE_INSTRUCTIONS = `You are Pi Live, the voice interface to the user's current Pi coding session. Reply briefly in speech-friendly language. Delegate coding, repository, tool and verification requests; Pi receives the conversation that led to the handoff and handles it with its usual tools and approvals. While Pi works, its progress arrives as background context: use it when the user asks what Pi is doing. When Pi finishes, its reply arrives for you to tell the user; summarize it naturally instead of reading code or long lists aloud. Voice does not grant approvals.`;
 export function registerPiLive(
   pi: ExtensionAPI,
   dependencies: LiveDependencies,
@@ -4895,12 +4548,16 @@ export function registerPiLive(
               level = value;
               paint();
             },
+            onServiceError(code) {
+              if (input.signal.aborted || activeSignal !== input.signal) return;
+              if (!retired && ctx?.mode === "tui")
+                ctx.ui.notify(`Pi Live: OpenAI reported ${code}.`, "warning");
+            },
           };
           const resource = (
             dependencies.runtime?.resources ?? createLiveRuntimeResources
           )({
             registry: ctx.modelRegistry,
-            sessionId: ctx.sessionManager.getSessionId(),
             instructions: LIVE_INSTRUCTIONS,
             clock: dependencies.runtime?.lifecycle?.clock,
             callbacks,
@@ -4908,7 +4565,6 @@ export function registerPiLive(
           resources.set(input.signal, resource);
           return resource.credentials(input);
         },
-        attestation: (input) => getResources(input.signal).attestation(input),
         connect(input) {
           paint();
           return getResources(input.signal).connect(input);
@@ -5086,6 +4742,20 @@ export function registerPiLive(
       message.stopReason === "stop"
         ? truncateLiveFinal(delegationText(message.content))
         : undefined;
+  });
+  pi.on("turn_end", ({ message, toolResults }) => {
+    if (message.role !== "assistant" || toolResults.length === 0) return;
+    const narration = delegationText(message.content).trim();
+    const tools = toolResults
+      .map((result) => `${result.toolName}${result.isError ? " (failed)" : ""}`)
+      .join(", ");
+    binding.lifecycle.createOutgoingSender()?.({
+      kind: "application",
+      text: utf8Prefix(
+        `Pi progress: ${narration ? `${narration} ` : ""}Ran ${tools}.`,
+        LIVE_LIMITS.contextChunkBytes,
+      ),
+    });
   });
   pi.on("agent_settled", () => {
     working = false;

@@ -5,7 +5,6 @@ import { test } from "node:test";
 import {
   createDefaultLiveNetworkAdapter,
   createLiveRuntimeResources,
-  type LiveAttestation,
   type LiveCredentials,
   type LiveDefaultNetworkDependencies,
   type LiveHttpResponse,
@@ -26,25 +25,25 @@ import {
 } from "./test-support/live-fixture.ts";
 import { waitForCondition } from "./test-support/live-wait.ts";
 
-const credentials: LiveCredentials = {
-  accessToken: "fixture-access-token",
-  accountId: "fixture-account",
-};
-const attestation: LiveAttestation = {
-  header: "fixture-attestation",
-  supported: true,
-};
+const credentials: LiveCredentials = { apiKey: "sk-fixture-key" };
 
+function sessionAnswer(sdp: string, sessionId = "live_fixture"): string {
+  return JSON.stringify({
+    session: { id: sessionId },
+    transport: { type: "webrtc", sdp },
+  });
+}
+
+/** A created session answering with `sdp`, or a raw body when given. */
 function response(
-  body: string,
-  options: { status?: number; statusText?: string; location?: string } = {},
+  sdp: string,
+  options: { status?: number; statusText?: string; raw?: string } = {},
 ): LiveHttpResponse {
   return {
-    status: options.status ?? 200,
-    statusText: options.statusText ?? "OK",
-    location: options.location,
+    status: options.status ?? 201,
+    statusText: options.statusText ?? "Created",
     body: (async function* () {
-      yield Buffer.from(body);
+      yield Buffer.from(options.raw ?? sessionAnswer(sdp));
     })(),
     cancel: () => undefined,
   };
@@ -76,9 +75,6 @@ function fakeNative(
     ...overrides,
   };
   return {
-    deviceCheck: {
-      generateToken: async () => ({ supported: false, latencyMs: 0 }),
-    },
     createPeer: () => settledStart(peer),
     startCapture: () => settledStart(createFakeCapture()),
   };
@@ -93,12 +89,10 @@ async function connectWith(
     proxyForUrl?: (
       url: string,
     ) => string | undefined | Promise<string | undefined>;
-    attestation?: LiveAttestation;
   } = {},
 ) {
   const resources = createLiveRuntimeResources({
     registry: { getApiKeyForProvider: async () => undefined },
-    sessionId: "pi-session",
     instructions: "fixture instructions",
     native,
     network,
@@ -114,13 +108,12 @@ async function connectWith(
         ? performance.now() + 30_000
         : options.clock.nowValue + 30_000,
     credentials,
-    attestation: options.attestation ?? attestation,
-    voice: "sol",
+    voice: "marin",
   });
   return { resources, controller, started };
 }
 
-test("signaling and sideband preserve pinned wire values and one per-call realtime session", async (t) => {
+test("signaling creates a GPT-Live session and the sideband attaches to it with the API key", async (t) => {
   const signaling: Array<Parameters<LiveNetworkAdapter["signal"]>[0]> = [];
   const sideband: LiveSidebandStartInput[] = [];
   const proxyUrls: string[] = [];
@@ -129,9 +122,7 @@ test("signaling and sideband preserve pinned wire values and one per-call realti
     signal(input) {
       signaling.push(input);
       return settledStart(
-        response("fixture-answer", {
-          location: "https://api.openai.com/v1/live/rtc_fixture",
-        }),
+        response("", { raw: sessionAnswer("fixture-answer", "live_abc-123") }),
       );
     },
     openSideband(input) {
@@ -139,15 +130,23 @@ test("signaling and sideband preserve pinned wire values and one per-call realti
       return settledStart(socket);
     },
   };
-  const { started } = await connectWith(fakeNative(), network, {
-    randomId: () => "fresh-x-session-id",
-    proxyForUrl(url) {
-      proxyUrls.push(url);
-      return url.startsWith("wss:")
-        ? "http://sideband-proxy.invalid"
-        : "http://signaling-proxy.invalid";
+  let acceptedAnswer: string | undefined;
+  const { started } = await connectWith(
+    fakeNative({
+      async acceptAnswer(answer) {
+        acceptedAnswer = answer;
+      },
+    }),
+    network,
+    {
+      proxyForUrl(url) {
+        proxyUrls.push(url);
+        return url.startsWith("wss:")
+          ? "http://sideband-proxy.invalid"
+          : "http://signaling-proxy.invalid";
+      },
     },
-  });
+  );
   const connection = await started.result;
   t.after(async () => {
     await connection.close();
@@ -155,50 +154,33 @@ test("signaling and sideband preserve pinned wire values and one per-call realti
 
   assert.equal(signaling.length, 1);
   const request = signaling[0]!;
-  assert.equal(
-    request.url,
-    "https://chatgpt.com/backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas",
-  );
+  assert.equal(request.url, "https://api.openai.com/v1/live/sessions");
   assert.equal(request.redirect, "manual");
   assert.equal(request.proxyUrl, "http://signaling-proxy.invalid");
-  assert.deepEqual(
-    {
-      authorization: request.headers.Authorization,
-      alpha: request.headers["OpenAI-Alpha"],
-      agent: request.headers["User-Agent"],
-      originator: request.headers.originator,
-      version: request.headers.version,
-      session: request.headers["session-id"],
-      thread: request.headers["thread-id"],
-      realtime: request.headers["x-session-id"],
-      account: request.headers["chatgpt-account-id"],
-      attestation: request.headers["x-oai-attestation"],
-    },
-    {
-      authorization: "Bearer fixture-access-token",
-      alpha: "quicksilver=v2",
-      agent: "Codex Desktop/0.144.1",
-      originator: "Codex Desktop",
-      version: "0.144.1",
-      session: "pi-session",
-      thread: "pi-session",
-      realtime: "fresh-x-session-id",
-      account: "fixture-account",
-      attestation: "fixture-attestation",
-    },
-  );
-  const payload = JSON.parse(request.body) as Record<string, unknown>;
-  assert.equal(payload.sdp, "fixture-offer");
-  assert.deepEqual(payload.session, {
-    model: "gpt-live-1-codex",
-    instructions: "fixture instructions",
-    audio: { output: { voice: "sol" } },
-    delegation: { type: "client" },
+  assert.deepEqual(request.headers, {
+    Authorization: "Bearer sk-fixture-key",
+    Accept: "application/json",
+    "Content-Type": "application/json",
   });
+  assert.deepEqual(JSON.parse(request.body), {
+    session: {
+      model: "gpt-live-1",
+      instructions: "fixture instructions",
+      audio: { output: { voice: "marin" } },
+      delegation: { type: "client" },
+    },
+    transport: { type: "webrtc", sdp: "fixture-offer" },
+  });
+  assert.equal(acceptedAnswer, "fixture-answer");
 
   assert.equal(sideband.length, 1);
-  assert.equal(sideband[0]?.url, "wss://api.openai.com/v1/live/rtc_fixture");
-  assert.equal(sideband[0]?.headers["x-session-id"], "fresh-x-session-id");
+  assert.equal(
+    sideband[0]?.url,
+    "wss://api.openai.com/v1/live/sessions/live_abc-123/attach",
+  );
+  assert.deepEqual(sideband[0]?.headers, {
+    Authorization: "Bearer sk-fixture-key",
+  });
   assert.equal(sideband[0]?.followRedirects, false);
   assert.equal(sideband[0]?.maxPayloadBytes, 256 * 1_024);
   assert.equal(sideband[0]?.autoPong, false);
@@ -227,9 +209,7 @@ test("the retained proxy environment selects both HTTP and WebSocket proxy paths
   const network: LiveNetworkAdapter = {
     signal(input) {
       selected.push(input.proxyUrl ?? "");
-      return settledStart(
-        response("answer", { location: "/v1/live/rtc_proxy" }),
-      );
+      return settledStart(response("answer"));
     },
     openSideband(input) {
       selected.push(input.proxyUrl ?? "");
@@ -299,7 +279,7 @@ test("the default network adapter owns direct/proxy dispatchers and promptly joi
       return {
         status: 200,
         statusText: "OK",
-        headers: { get: () => "/v1/live/rtc_low_level" },
+        headers: { get: () => null },
         body: {
           async *[Symbol.asyncIterator]() {
             yield Buffer.from("answer");
@@ -342,7 +322,7 @@ test("the default network adapter owns direct/proxy dispatchers and promptly joi
   assert.deepEqual(destroyedDispatchers, ["direct", "proxy"]);
 
   const sidebandInput = {
-    url: "wss://api.openai.com/v1/live/rtc_low_level",
+    url: "wss://api.openai.com/v1/live/sessions/live_low_level/attach",
     headers: {},
     followRedirects: false as const,
     maxPayloadBytes: 256 * 1_024,
@@ -425,10 +405,10 @@ test("default HTTP cancellation owns the real response stream iterator", async (
         return {
           status: 200,
           statusText: "OK",
-          headers: { get: () => "/v1/live/rtc_stream_overflow" },
+          headers: { get: () => null },
           body: new ReadableStream<Uint8Array>({
             start(controller) {
-              controller.enqueue(Buffer.alloc(1_024 * 1_024));
+              controller.enqueue(Buffer.alloc(2 * 1_024 * 1_024));
               controller.enqueue(Buffer.from("x"));
             },
             cancel() {
@@ -478,7 +458,7 @@ test("default HTTP cancellation owns the real response stream iterator", async (
           return {
             status: 200,
             statusText: "OK",
-            headers: { get: () => "/v1/live/rtc_stream_pending" },
+            headers: { get: () => null },
             body: (responseBody = new ReadableStream<Uint8Array>({
               start(controller) {
                 input.signal.addEventListener(
@@ -589,7 +569,7 @@ test(
   },
 );
 
-test("unsafe dependency debug settings are refused before credentials, DeviceCheck or network", async (t) => {
+test("unsafe dependency debug settings are refused before credentials or network", async (t) => {
   const previousDebug = process.env.DEBUG;
   const previousNodeDebug = process.env.NODE_DEBUG;
   process.env.DEBUG = "https*,-https:quiet,*proxy*";
@@ -601,7 +581,6 @@ test("unsafe dependency debug settings are refused before credentials, DeviceChe
     else process.env.NODE_DEBUG = previousNodeDebug;
   });
   let registryCalls = 0;
-  let deviceChecks = 0;
   let networkCalls = 0;
   const diagnostics: LiveRuntimeDiagnostic[] = [];
   const network: LiveNetworkAdapter = {
@@ -614,13 +593,6 @@ test("unsafe dependency debug settings are refused before credentials, DeviceChe
       throw new Error("network must stay lazy");
     },
   };
-  const native = fakeNative();
-  native.deviceCheck = {
-    async generateToken() {
-      deviceChecks += 1;
-      return { supported: false, latencyMs: 0 };
-    },
-  };
   const resources = createLiveRuntimeResources({
     registry: {
       async getApiKeyForProvider() {
@@ -628,9 +600,8 @@ test("unsafe dependency debug settings are refused before credentials, DeviceChe
         return undefined;
       },
     },
-    sessionId: "pi-session",
     instructions: "fixture instructions",
-    native,
+    native: fakeNative(),
     network,
     callbacks: { onDiagnostic: (value) => diagnostics.push(value) },
   });
@@ -638,26 +609,17 @@ test("unsafe dependency debug settings are refused before credentials, DeviceChe
     resources.credentials({ signal: new AbortController().signal }),
     { message: "Live transport protocol failed." },
   );
-  await assert.rejects(
-    resources.attestation({
-      signal: new AbortController().signal,
-      credentials,
-    }),
-    { message: "Live transport protocol failed." },
-  );
   const started = resources.connect({
     signal: new AbortController().signal,
     deadline: performance.now() + 30_000,
     credentials,
-    attestation,
-    voice: "sol",
+    voice: "marin",
   });
   await assert.rejects(started.result, {
     message: "Live transport protocol failed.",
   });
   await started.terminate(async (connection) => connection.close());
   assert.equal(registryCalls, 0);
-  assert.equal(deviceChecks, 0);
   assert.equal(networkCalls, 0);
   assert.deepEqual(diagnostics, [
     {
@@ -668,74 +630,48 @@ test("unsafe dependency debug settings are refused before credentials, DeviceChe
   ]);
 });
 
-test("serialized attestation header limit is inclusive before combined headers are sent", async (t) => {
-  for (const [name, bytes, accepted] of [
-    ["exact", 16 * 1_024, true],
-    ["plus one", 16 * 1_024 + 1, false],
-  ] as const) {
-    await t.test(name, async (t) => {
-      let signals = 0;
-      const network: LiveNetworkAdapter = {
-        signal() {
-          signals += 1;
-          return settledStart(
-            response("answer", { location: "/v1/live/rtc_header" }),
-          );
-        },
-        openSideband: () => settledStart(fakeSocket()),
-      };
-      const { started } = await connectWith(fakeNative(), network, {
-        attestation: { header: "a".repeat(bytes), supported: true },
-      });
-      if (accepted) {
-        const connection = await started.result;
-        t.after(async () => connection.close());
-      } else {
-        await assert.rejects(started.result, {
-          message: "Live transport protocol failed.",
-        });
-        await started.terminate(async (connection) => connection.close());
-      }
-      assert.equal(signals, accepted ? 1 : 0);
-    });
-  }
-});
-
-test("signaling is attempted once and rejects redirects, non-OK responses and ambiguous locations", async (t) => {
+test("signaling is attempted once and rejects redirects, non-OK responses and malformed session answers", async (t) => {
+  const answer = (value: unknown) =>
+    response("", { raw: JSON.stringify(value) });
   for (const [name, result] of [
     [
       "redirect",
-      response("redirect body secret", {
+      response("", {
         status: 302,
         statusText: "Found",
-        location: "https://api.openai.com/v1/live/rtc_redirect",
+        raw: "redirect body secret",
+      }),
+    ],
+    ["not JSON", response("", { raw: "fixture-answer" })],
+    ["missing session", answer({ transport: { type: "webrtc", sdp: "a" } })],
+    [
+      "path-unsafe session id",
+      answer({
+        session: { id: "live/../other" },
+        transport: { type: "webrtc", sdp: "a" },
       }),
     ],
     [
-      "userinfo",
-      response("answer", {
-        location: "https://user@api.openai.com/v1/live/rtc_bad",
+      "oversized session id",
+      answer({
+        session: { id: "i".repeat(257) },
+        transport: { type: "webrtc", sdp: "a" },
       }),
     ],
     [
-      "query",
-      response("answer", {
-        location: "/v1/live/rtc_bad?credential=secret",
+      "other transport",
+      answer({
+        session: { id: "live_x" },
+        transport: { type: "sip", sdp: "a" },
       }),
     ],
     [
-      "ambiguous path",
-      response("answer", {
-        location: "/other/v1/live/rtc_bad",
+      "empty answer",
+      answer({
+        session: { id: "live_x" },
+        transport: { type: "webrtc", sdp: "" },
       }),
     ],
-    [
-      "normalized dot path",
-      response("answer", {
-        location: "/other/../v1/live/rtc_bad",
-      }),
-    ],
-    ["invalid id", response("answer", { location: "/v1/live/not-rtc" })],
   ] as const) {
     await t.test(name, async () => {
       let attempts = 0;
@@ -769,7 +705,6 @@ test("non-OK signaling discards at most 8 KiB and never consumes or emits the bo
       settledStart({
         status: 503,
         statusText: secret,
-        location: undefined,
         body: (async function* () {
           chunksConsumed += 1;
           yield Buffer.alloc(8 * 1_024, 0x61);
@@ -788,7 +723,6 @@ test("non-OK signaling discards at most 8 KiB and never consumes or emits the bo
   };
   const resources = createLiveRuntimeResources({
     registry: { getApiKeyForProvider: async () => undefined },
-    sessionId: "pi-session",
     instructions: "fixture instructions",
     native,
     network,
@@ -804,8 +738,7 @@ test("non-OK signaling discards at most 8 KiB and never consumes or emits the bo
     signal: new AbortController().signal,
     deadline: performance.now() + 30_000,
     credentials,
-    attestation,
-    voice: "sol",
+    voice: "marin",
   });
   await assert.rejects(started.result, {
     message: "Live transport protocol failed.",
@@ -829,11 +762,10 @@ test("sideband retries only transient pre-open failures, three attempts under on
     let attempts = 0;
     const sidebandIds: string[] = [];
     const network: LiveNetworkAdapter = {
-      signal: () =>
-        settledStart(response("answer", { location: "/v1/live/rtc_retry" })),
+      signal: () => settledStart(response("answer")),
       openSideband(input) {
         attempts += 1;
-        sidebandIds.push(input.headers["x-session-id"]!);
+        sidebandIds.push(input.url);
         if (attempts < 3)
           return {
             result: Promise.reject(
@@ -861,11 +793,13 @@ test("sideband retries only transient pre-open failures, three attempts under on
     const connection = await connecting.started.result;
     t.after(async () => connection.close());
     assert.equal(attempts, 3);
-    assert.deepEqual(sidebandIds, [
-      "realtime-session",
-      "realtime-session",
-      "realtime-session",
-    ]);
+    assert.deepEqual(
+      sidebandIds,
+      Array.from(
+        { length: 3 },
+        () => "wss://api.openai.com/v1/live/sessions/live_fixture/attach",
+      ),
+    );
   });
 
   for (const [name, failure] of [
@@ -877,8 +811,7 @@ test("sideband retries only transient pre-open failures, three attempts under on
     await t.test(name, async () => {
       let attempts = 0;
       const network: LiveNetworkAdapter = {
-        signal: () =>
-          settledStart(response("answer", { location: "/v1/live/rtc_once" })),
+        signal: () => settledStart(response("answer")),
         openSideband() {
           attempts += 1;
           return {
@@ -898,21 +831,22 @@ test("sideband retries only transient pre-open failures, three attempts under on
 });
 
 test("SDP and serialized signaling limits are inclusive and reject the next byte before network I/O", async (t) => {
-  const instructionText = "fixture instructions";
   const session = {
-    model: "gpt-live-1-codex",
-    instructions: instructionText,
-    audio: { output: { voice: "sol" } },
+    model: "gpt-live-1",
+    instructions: "fixture instructions",
+    audio: { output: { voice: "marin" } },
     delegation: { type: "client" },
   };
-  const overhead = Buffer.byteLength(JSON.stringify({ sdp: "", session }));
+  const serialized = (sdp: string) =>
+    JSON.stringify({ session, transport: { type: "webrtc", sdp } });
+  const overhead = Buffer.byteLength(serialized(""));
   const targetEscapedOfferBytes = 2 * 1_024 * 1_024 - overhead;
   const controlCount = Math.ceil((targetEscapedOfferBytes - 1_024 * 1_024) / 5);
   const plainCount = targetEscapedOfferBytes - controlCount * 6;
   const exactSerializedOffer = `${"\u0001".repeat(controlCount)}${"a".repeat(plainCount)}`;
   assert.ok(Buffer.byteLength(exactSerializedOffer) <= 1_024 * 1_024);
   assert.equal(
-    Buffer.byteLength(JSON.stringify({ sdp: exactSerializedOffer, session })),
+    Buffer.byteLength(serialized(exactSerializedOffer)),
     2 * 1_024 * 1_024,
   );
 
@@ -928,9 +862,7 @@ test("SDP and serialized signaling limits are inclusive and reject the next byte
         signal(input) {
           signalCalls += 1;
           assert.ok(Buffer.byteLength(input.body) <= 2 * 1_024 * 1_024);
-          return settledStart(
-            response("answer", { location: "/v1/live/rtc_bounds" }),
-          );
+          return settledStart(response("answer"));
         },
         openSideband: () => settledStart(fakeSocket()),
       };
@@ -952,10 +884,18 @@ test("SDP and serialized signaling limits are inclusive and reject the next byte
   }
 });
 
-test("streamed SDP answers accept one MiB and cancel at the next byte", async (t) => {
-  for (const [name, answerBytes, accepted] of [
-    ["exact", 1_024 * 1_024, true],
-    ["plus one", 1_024 * 1_024 + 1, false],
+test("session answers accept a one MiB SDP within a two MiB body and cancel at the next byte", async (t) => {
+  const prefix =
+    '{"session":{"id":"live_answer"},"transport":{"type":"webrtc","sdp":"';
+  const suffix = '"}}';
+  for (const [name, chunks, acceptedBytes] of [
+    ["one MiB SDP", [prefix, "a".repeat(1_024 * 1_024), suffix], 1_024 * 1_024],
+    [
+      "one MiB SDP plus one",
+      [prefix, "a".repeat(1_024 * 1_024 + 1), suffix],
+      0,
+    ],
+    ["two MiB body plus one", [" ".repeat(2 * 1_024 * 1_024), "x"], 0],
   ] as const) {
     await t.test(name, async (t) => {
       let cancelled = 0;
@@ -968,12 +908,10 @@ test("streamed SDP answers accept one MiB and cancel at the next byte", async (t
       const network: LiveNetworkAdapter = {
         signal: () =>
           settledStart({
-            status: 200,
-            statusText: "OK",
-            location: "/v1/live/rtc_answer",
+            status: 201,
+            statusText: "Created",
             body: (async function* () {
-              yield Buffer.alloc(1_024 * 1_024, 0x61);
-              if (answerBytes > 1_024 * 1_024) yield Buffer.from("x");
+              for (const chunk of chunks) yield Buffer.from(chunk);
             })(),
             cancel() {
               cancelled += 1;
@@ -982,17 +920,16 @@ test("streamed SDP answers accept one MiB and cancel at the next byte", async (t
         openSideband: () => settledStart(fakeSocket()),
       };
       const { started } = await connectWith(native, network);
-      if (accepted) {
+      if (acceptedBytes > 0) {
         const connection = await started.result;
         t.after(async () => connection.close());
-        assert.equal(acceptedAnswerBytes, 1_024 * 1_024);
       } else {
         await assert.rejects(started.result, {
           message: "Live transport protocol failed.",
         });
         await started.terminate(async (connection) => connection.close());
-        assert.equal(acceptedAnswerBytes, 0);
       }
+      assert.equal(acceptedAnswerBytes, acceptedBytes);
       assert.ok(cancelled >= 1);
     });
   }
@@ -1008,15 +945,11 @@ test("unconfirmed native or socket disposal remains a sticky lifecycle cleanup o
         gap === "native" ? { close: async () => false } : {},
       );
       const network: LiveNetworkAdapter = {
-        signal: () =>
-          settledStart(
-            response("answer", { location: "/v1/live/rtc_cleanup" }),
-          ),
+        signal: () => settledStart(response("answer")),
         openSideband: () => settledStart(socket),
       };
       const runtime = createLiveRuntimeResources({
         registry: { getApiKeyForProvider: async () => undefined },
-        sessionId: "pi-session",
         instructions: "fixture instructions",
         native,
         network,
@@ -1029,7 +962,6 @@ test("unconfirmed native or socket disposal remains a sticky lifecycle cleanup o
         resources: {
           ...runtime,
           credentials: async () => credentials,
-          attestation: async () => attestation,
         },
       });
       assert.equal((await lifecycle.start()).kind, "started");
@@ -1050,7 +982,6 @@ test("the signaling phase deadline includes a stalled streamed body and joins it
       settledStart({
         status: 200,
         statusText: "OK",
-        location: "/v1/live/rtc_body_timeout",
         body: (async function* () {
           bodyEntered.resolve();
           await cancelBody.promise;
@@ -1096,9 +1027,7 @@ test("each native and network phase consumes its own ten seconds capped by the c
     const network: LiveNetworkAdapter = {
       signal() {
         signalCalls += 1;
-        return settledStart(
-          response("answer", { location: "/v1/live/rtc_timeout" }),
-        );
+        return settledStart(response("answer"));
       },
       openSideband: () => settledStart(fakeSocket()),
     };
@@ -1136,8 +1065,7 @@ test("each native and network phase consumes its own ten seconds capped by the c
             }),
       });
       const network: LiveNetworkAdapter = {
-        signal: () =>
-          settledStart(response("answer", { location: "/v1/live/rtc_phase" })),
+        signal: () => settledStart(response("answer")),
         openSideband: () => settledStart(fakeSocket()),
       };
       const { started } = await connectWith(native, network, { clock });
@@ -1168,10 +1096,7 @@ test("each native and network phase consumes its own ten seconds capped by the c
     const entered = deferred<void>();
     let terminations = 0;
     const network: LiveNetworkAdapter = {
-      signal: () =>
-        settledStart(
-          response("answer", { location: "/v1/live/rtc_sideband_timeout" }),
-        ),
+      signal: () => settledStart(response("answer")),
       openSideband() {
         entered.resolve();
         return {
@@ -1197,8 +1122,7 @@ test("sideband close before adoption is fatal without retry and retired callback
   await t.test("open then same-turn close", async () => {
     let attempts = 0;
     const network: LiveNetworkAdapter = {
-      signal: () =>
-        settledStart(response("answer", { location: "/v1/live/rtc_race" })),
+      signal: () => settledStart(response("answer")),
       openSideband(input) {
         attempts += 1;
         input.onClose();
@@ -1219,8 +1143,7 @@ test("sideband close before adoption is fatal without retry and retired callback
     let retiredInput: LiveSidebandStartInput | undefined;
     const sent: string[] = [];
     const network: LiveNetworkAdapter = {
-      signal: () =>
-        settledStart(response("answer", { location: "/v1/live/rtc_stale" })),
+      signal: () => settledStart(response("answer")),
       openSideband(input) {
         attempts += 1;
         if (attempts === 1) {
@@ -1272,9 +1195,6 @@ test("stop fences late and synchronously invalidated peers before createOffer an
         },
       } satisfies LiveNativePeer;
       const native: LiveNativeAdapter = {
-        deviceCheck: {
-          generateToken: async () => ({ supported: false, latencyMs: 0 }),
-        },
         createPeer(callbacks) {
           entered.resolve();
           if (mode === "synchronous failure") callbacks.onFailure();
@@ -1299,7 +1219,6 @@ test("stop fences late and synchronously invalidated peers before createOffer an
       };
       const runtime = createLiveRuntimeResources({
         registry: { getApiKeyForProvider: async () => undefined },
-        sessionId: "peer-fence",
         instructions: "fixture",
         native,
         network,
@@ -1311,7 +1230,6 @@ test("stop fences late and synchronously invalidated peers before createOffer an
         resources: {
           ...runtime,
           credentials: async () => credentials,
-          attestation: async () => attestation,
         },
       });
       const starting = lifecycle.start();
@@ -1344,7 +1262,6 @@ test("a peer close may reject a parked offer and still confirm lifecycle shutdow
   });
   const runtime = createLiveRuntimeResources({
     registry: { getApiKeyForProvider: async () => undefined },
-    sessionId: "rejected-offer",
     instructions: "fixture",
     native,
     network: {
@@ -1363,7 +1280,6 @@ test("a peer close may reject a parked offer and still confirm lifecycle shutdow
     resources: {
       ...runtime,
       credentials: async () => credentials,
-      attestation: async () => attestation,
     },
   });
   const starting = lifecycle.start();
@@ -1391,14 +1307,10 @@ test("lifecycle stop writes at most one immediately writable close frame and omi
         };
       const runtime = createLiveRuntimeResources({
         registry: { getApiKeyForProvider: async () => undefined },
-        sessionId: "semantic-close",
         instructions: "fixture",
         native: fakeNative(),
         network: {
-          signal: () =>
-            settledStart(
-              response("answer", { location: "/v1/live/rtc_close" }),
-            ),
+          signal: () => settledStart(response("answer")),
           openSideband: () => settledStart(socket),
         },
         clock: fixture.clock,
@@ -1409,7 +1321,6 @@ test("lifecycle stop writes at most one immediately writable close frame and omi
         resources: {
           ...runtime,
           credentials: async () => credentials,
-          attestation: async () => attestation,
         },
       });
       assert.equal((await lifecycle.start()).kind, "started");
@@ -1430,8 +1341,7 @@ test("runtime phase deadlines ignore early timer delivery and body reads enforce
     const { started } = await connectWith(
       fakeNative({ createOffer: () => offer.promise }),
       {
-        signal: () =>
-          settledStart(response("answer", { location: "/v1/live/rtc_early" })),
+        signal: () => settledStart(response("answer")),
         openSideband: () => settledStart(fakeSocket()),
       },
       { clock },
@@ -1465,7 +1375,6 @@ test("runtime phase deadlines ignore early timer delivery and body reads enforce
         settledStart({
           status: 200,
           statusText: "OK",
-          location: "/v1/live/rtc_zero_chunks",
           body: (async function* () {
             for (let count = 0; count < 10; count += 1) {
               clock.elapseWithoutTimers(1_000);
@@ -1496,7 +1405,6 @@ test("malformed UTF-8 SDP answers are rejected before native acceptance", async 
       settledStart({
         status: 200,
         statusText: "OK",
-        location: "/v1/live/rtc_bad_utf8",
         body: (async function* () {
           yield Uint8Array.from([0xff]);
         })(),

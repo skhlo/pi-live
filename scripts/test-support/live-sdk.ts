@@ -256,13 +256,13 @@ export async function createSdkFixture(
         },
       };
       if (options.controls) {
-        let voice: "sol" | "vale" = "sol";
+        let voice: "marin" | "cedar" = "marin";
         bindings.push(
           registerPiLive(bindingApi, {
             preferences: {
               load: async () => ({ voice, fields: {} }),
               setVoice: async (next) => {
-                assert.ok(next === "sol" || next === "vale");
+                assert.ok(next === "marin" || next === "cedar");
                 voice = next;
               },
             },

@@ -19,7 +19,6 @@ import {
   createFakeResources,
   createLiveFixture,
   deferred,
-  fixtureAttestation,
   fixtureCredentials,
   ManualClock as TestClock,
   settledStart,
@@ -67,10 +66,6 @@ test("the dormant lifecycle is lazy and refuses unsupported admission before con
         effects.push("credentials");
         return Promise.resolve(fixtureCredentials);
       },
-      attestation() {
-        effects.push("attestation");
-        return Promise.resolve(fixtureAttestation);
-      },
       connect() {
         throw new Error("resource construction must stay lazy");
       },
@@ -80,7 +75,7 @@ test("the dormant lifecycle is lazy and refuses unsupported admission before con
   assert.deepEqual(lifecycle.snapshot(), {
     state: "off",
     muted: false,
-    voice: "sol",
+    voice: "marin",
   });
   assert.deepEqual(effects, []);
   assert.deepEqual(await lifecycle.stop(), { status: "off" });
@@ -151,10 +146,10 @@ test("consent is single-flight, immediately cancellable, and late approval canno
     },
   });
 
-  assert.deepEqual(await lifecycle.selectVoice("vale"), {
+  assert.deepEqual(await lifecycle.selectVoice("cedar"), {
     kind: "updated",
     state: "off",
-    voice: "vale",
+    voice: "cedar",
   });
   const firstStart = lifecycle.start();
   await consentEntered[0]!.promise;
@@ -163,7 +158,7 @@ test("consent is single-flight, immediately cancellable, and late approval canno
     kind: "existing",
     state: "consent",
   });
-  assert.deepEqual(await lifecycle.selectVoice("sol"), {
+  assert.deepEqual(await lifecycle.selectVoice("marin"), {
     kind: "refused",
     state: "consent",
     diagnostic: "busy",
@@ -219,7 +214,7 @@ test("acquiring and connecting expose the complete pending-state command rows", 
       state: "acquiring",
       diagnostic: "busy",
     });
-    assert.deepEqual(await lifecycle.selectVoice("vale"), {
+    assert.deepEqual(await lifecycle.selectVoice("cedar"), {
       kind: "refused",
       state: "acquiring",
       diagnostic: "busy",
@@ -262,7 +257,7 @@ test("acquiring and connecting expose the complete pending-state command rows", 
       state: "connecting",
       diagnostic: "busy",
     });
-    assert.deepEqual(await lifecycle.selectVoice("vale"), {
+    assert.deepEqual(await lifecycle.selectVoice("cedar"), {
       kind: "refused",
       state: "connecting",
       diagnostic: "busy",
@@ -407,7 +402,7 @@ test("pooling interruption stops the current attempt and permanently refuses lat
     state: "active",
     muted: false,
   });
-  assert.deepEqual(await lifecycle.selectVoice("vale"), {
+  assert.deepEqual(await lifecycle.selectVoice("cedar"), {
     kind: "refused",
     state: "active",
     diagnostic: "busy",
@@ -443,7 +438,7 @@ test("pooling timing before active uses exact terminal diagnostics and leaves no
     assert.deepEqual(lifecycle.snapshot(), {
       state: "off",
       muted: false,
-      voice: "sol",
+      voice: "marin",
       lastFailure: "denied",
     });
     assert.deepEqual(await lifecycle.start(), {
@@ -610,7 +605,7 @@ test("data-only cancellation releases ownership, while an unquiet resource start
   assert.deepEqual(resourceBearing.snapshot(), {
     state: "blocked",
     muted: false,
-    voice: "sol",
+    voice: "marin",
     lastFailure: "cleanup-blocked",
   });
   assert.equal((await stat(fixture.lock)).isDirectory(), true);
@@ -647,10 +642,6 @@ test("preparation invocation and settlement are fenced before the next startup e
       fixture.resources.credentials = async () => {
         effects.push("credentials");
         return fixtureCredentials;
-      };
-      fixture.resources.attestation = async () => {
-        effects.push("attestation");
-        return fixtureAttestation;
       };
       fixture.resources.connect = () => {
         effects.push("connect");
@@ -822,7 +813,7 @@ test("a resource constructor throw remains uncertain while known resources still
   assert.deepEqual(lifecycle.snapshot(), {
     state: "blocked",
     muted: false,
-    voice: "sol",
+    voice: "marin",
     lastFailure: "cleanup-blocked",
   });
   assert.deepEqual(effects, [
@@ -841,7 +832,7 @@ test("a resource constructor throw remains uncertain while known resources still
     state: "blocked",
     diagnostic: "busy",
   });
-  assert.deepEqual(await lifecycle.selectVoice("vale"), {
+  assert.deepEqual(await lifecycle.selectVoice("cedar"), {
     kind: "refused",
     state: "blocked",
     diagnostic: "busy",
@@ -1052,7 +1043,7 @@ test("quiescence at the exact stop deadline blocks and prohibits every release o
     state: "stopping",
     diagnostic: "busy",
   });
-  assert.deepEqual(await lifecycle.selectVoice("vale"), {
+  assert.deepEqual(await lifecycle.selectVoice("cedar"), {
     kind: "refused",
     state: "stopping",
     diagnostic: "busy",
@@ -1331,14 +1322,14 @@ test("CORE: absolute lifecycle deadlines hold when timer delivery is delayed or 
       const clock = fixture.clock;
       const credentials = deferred<typeof fixtureCredentials>();
       const entered = deferred<void>();
-      let attestationCalls = 0;
+      let connectCalls = 0;
       fixture.resources.credentials = () => {
         entered.resolve();
         return credentials.promise;
       };
-      fixture.resources.attestation = async () => {
-        attestationCalls += 1;
-        return fixtureAttestation;
+      fixture.resources.connect = () => {
+        connectCalls += 1;
+        return settledStart(fixture.connection);
       };
       const lifecycle = fixture.createLifecycle(approvingConsent, {
         clock: fixture.clock,
@@ -1350,7 +1341,7 @@ test("CORE: absolute lifecycle deadlines hold when timer delivery is delayed or 
       credentials.resolve(fixtureCredentials);
       assert.equal((await starting).kind, "cancelled");
       await eventually(() => lifecycle.snapshot().state === "off");
-      assert.equal(attestationCalls, 0);
+      assert.equal(connectCalls, 0);
       assert.equal(lifecycle.snapshot().lastFailure, "connect-timeout");
     },
   );

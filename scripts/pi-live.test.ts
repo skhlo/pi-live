@@ -156,6 +156,7 @@ test("the default factory registers only live controls and required listeners wi
     "session_before_tree",
     "session_shutdown",
     "session_start",
+    "turn_end",
     "ui_prompt_end",
     "ui_prompt_start",
   ]);
@@ -192,6 +193,7 @@ test("the in-process Pi 0.87.1 loader API accepts one default factory and side-e
     "session_before_tree",
     "session_shutdown",
     "session_start",
+    "turn_end",
     "ui_prompt_end",
     "ui_prompt_start",
   ]);
@@ -207,7 +209,7 @@ test("status stays off and lazily reports the selected voice and compatibility",
     preferences: {
       async load() {
         preferenceReads += 1;
-        return { voice: "maple", fields: { voice: "maple" } };
+        return { voice: "verse", fields: { voice: "verse" } };
       },
       async setVoice() {
         throw new Error("unexpected preference write");
@@ -231,7 +233,7 @@ test("status stays off and lazily reports the selected voice and compatibility",
   );
 
   assert.deepEqual(notifications, [
-    ["Pi Live: off; unmuted; voice maple; compatibility supported.", "info"],
+    ["Pi Live: off; unmuted; voice verse; compatibility supported.", "info"],
   ]);
   assert.equal(preferenceReads, 1);
   assert.equal(compatibilityChecks, 1);
@@ -246,7 +248,7 @@ test("start and shortcut share cancelled consent without claiming active state",
     preferences: {
       async load() {
         preferenceCalls += 1;
-        return { voice: "sol", fields: {} };
+        return { voice: "marin", fields: {} };
       },
       async setVoice() {
         preferenceCalls += 1;
@@ -295,7 +297,7 @@ test("start and shortcut share cancelled consent without claiming active state",
 
 test("help discloses calling limits and voice changes only the off-state preference", async () => {
   const harness = registrationHarness();
-  let voice: "sol" | "vale" = "sol";
+  let voice: "marin" | "cedar" = "marin";
   let writes = 0;
   let compatibilityCalls = 0;
   registerPiLive(harness.pi, {
@@ -322,14 +324,15 @@ test("help discloses calling limits and voice changes only the off-state prefere
 
   await commandFrom(harness).handler("help", ctx);
   await commandFrom(harness).handler("voice", ctx);
-  await commandFrom(harness).handler("voice vale", ctx);
-  await commandFrom(harness).handler("voice alloy", ctx);
+  await commandFrom(harness).handler("voice cedar", ctx);
+  await commandFrom(harness).handler("voice sol", ctx);
 
   const help = notifications[0]?.[0] ?? "";
   for (const phrase of [
     "host microphone and speakers",
-    "experimental OpenAI",
-    "Pi session identifier",
+    "OpenAI GPT-Live",
+    "API key",
+    "progress summaries",
     "shortcut-opened dialogs",
     "stop voice first",
   ]) {
@@ -340,12 +343,12 @@ test("help discloses calling limits and voice changes only the off-state prefere
     "error",
   ]);
   assert.deepEqual(notifications[2], [
-    "Pi Live voice set to vale for the next call.",
+    "Pi Live voice set to cedar for the next call.",
     "info",
   ]);
-  assert.match(notifications[3]?.[0] ?? "", /arbor.*vale/);
+  assert.match(notifications[3]?.[0] ?? "", /alloy.*cedar/);
   assert.equal(notifications[3]?.[1], "error");
-  assert.equal(voice, "vale");
+  assert.equal(voice, "cedar");
   assert.equal(writes, 1);
   assert.equal(compatibilityCalls, 0);
 });
@@ -429,7 +432,7 @@ test("voice write failure reports uncertainty after the writer runs", async () =
   registerPiLive(harness.pi, {
     preferences: {
       async load() {
-        return { voice: "sol", fields: {} };
+        return { voice: "marin", fields: {} };
       },
       async setVoice(voice) {
         written.push(voice);
@@ -446,10 +449,10 @@ test("voice write failure reports uncertainty after the writer runs", async () =
   });
   const notifications: Array<[string, string | undefined]> = [];
   await commandFrom(harness).handler(
-    "voice arbor",
+    "voice alloy",
     context("tui", notifications, []),
   );
-  assert.deepEqual(written, ["arbor"]);
+  assert.deepEqual(written, ["alloy"]);
   assert.deepEqual(notifications, [
     ["Pi Live preference could not be accessed or written.", "error"],
   ]);
@@ -463,7 +466,7 @@ test("unsupported compatibility refuses before consent or widget", async () => {
     preferences: {
       async load() {
         preferenceReads += 1;
-        return { voice: "maple", fields: { voice: "maple" } };
+        return { voice: "verse", fields: { voice: "verse" } };
       },
       async setVoice() {
         throw new Error("unexpected preference write");
@@ -502,7 +505,7 @@ test("the renderer labels visible delegation text and shutdown clears only pi-li
   registerPiLive(harness.pi, {
     preferences: {
       async load() {
-        return { voice: "sol", fields: {} };
+        return { voice: "marin", fields: {} };
       },
       async setVoice() {},
     },
@@ -550,7 +553,7 @@ test("every non-TUI command and the shortcut refuse before touching terminal pre
     preferences: {
       async load() {
         dependencyCalls += 1;
-        return { voice: "sol", fields: {} };
+        return { voice: "marin", fields: {} };
       },
       async setVoice() {
         dependencyCalls += 1;
@@ -578,7 +581,7 @@ test("every non-TUI command and the shortcut refuse before touching terminal pre
     "status",
     "help",
     "voice",
-    "voice vale",
+    "voice cedar",
     "unknown",
   ]) {
     await commandFrom(harness).handler(args, ctx);

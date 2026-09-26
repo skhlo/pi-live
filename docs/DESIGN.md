@@ -80,13 +80,20 @@ UI readiness or suitability of this host's actual home. Issue #5 verifies their 
 ## Extracted transport
 
 `createLiveRuntimeResources` in `src/live.ts` supplies the existing lifecycle's
-preparation and connection operations. Credentials and attestation are passed
-between phases within one attempt; the SDK remains the only credential/refresh
-owner. Native and network dependencies stay lazy and replaceable by test fakes.
+preparation and connection operations. The credential is the OpenAI API key Pi
+resolves for its `openai` provider (its credential store or `OPENAI_API_KEY`);
+the SDK remains its only owner, and a ChatGPT/Codex login is not used. Native and network dependencies stay lazy and replaceable by test fakes.
 The factory constructs call-scoped resources only after consent and certified ownership.
 
-The extraction retains the pinned experimental endpoints, headers, identifiers,
-voice payloads, proxy selection and final-context convention. Application code
+The transport uses the public GPT-Live API (`gpt-live-1`) with client
+delegation. The native peer's SDP offer is posted to `POST /v1/live/sessions`;
+the JSON answer supplies the session ID and SDP answer. A sideband WebSocket
+attaches at `/v1/live/sessions/{id}/attach` with the same key. The WebRTC data
+channel observes the session from its start, so it alone owns transcripts and
+delegations; the sideband carries outgoing context and reports command errors and
+session end. Service `error` events are reported by code and do not end the call;
+an unrequested `session.closed` ends it. This replaced the upstream's private
+Codex endpoint, Codex Desktop identity and DeviceCheck attestation. Application code
 adds bounded bodies/events/samples, classified pre-open retries,
 latest transcript tails, a capacity-aware incremental writer and closed
 non-secret diagnostics. Queued producers are discarded at stop while actual
@@ -98,12 +105,12 @@ the proxy agent likewise leaves CONNECT cleanup uncertain. Their real adapters
 invoke cleanup but report it unconfirmed, so lifecycle ownership stays blocked.
 Fake adapters can positively confirm shutdown and exercise the successful release
 path. This is an explicit acceptance gap, not an upstream repair project or proof
-that a real call can safely restart. Native internal buffering and DeviceCheck's
-timeout allocation remain disclosed dependency limitations.
+that a real call can safely restart. Native internal buffering remains a
+disclosed dependency limitation.
 
 See the [extraction plan](ISSUE-4-PLAN.md) and
-[verification record](ISSUE-4-VERIFICATION.md). No real credentials, DeviceCheck,
-media, provider request or native addon execution was used for this work.
+[verification record](ISSUE-4-VERIFICATION.md). No real credentials, media,
+provider request or native addon execution was used for that work.
 
 ## Accepted decisions
 
@@ -132,10 +139,15 @@ part of ordinary Pi execution and can influence the answer returned to voice.
 The bridge has one path in and one path out. A voice request calls
 `pi.sendUserMessage` with a visible voice-origin label and Pi's normal steering
 delivery. Input and agent-start extensions run as they do for other Pi input.
-`message_end` remembers the
-assistant's reply; `agent_settled` sends it back to voice using the retained
-`Agent Final Message` convention. If Pi has no successful reply, a fixed notice
-directs the user to the terminal. Raw errors, thinking and tool output stay there.
+GPT-Live's delegation event carries no task text, so the request is the
+conversation since the previous handoff: both speakers' transcript, in order.
+While Pi works, each tool-using turn sends a short progress note (the assistant's
+narration and the tools it ran) as quiet `session.thinking.append` context, so
+the voice model can answer "what is Pi doing?" without interrupting.
+`message_end` remembers the assistant's reply; `agent_settled` sends it, capped
+at 1,500 bytes, as spoken `session.commentary.append` for the latest delegation.
+If Pi has no successful reply, a fixed notice directs the user to the terminal.
+Raw errors, thinking and tool output stay there.
 
 There is no separate voice task scheduler, pending-request limit, replay history,
 request quota, local receipt, branch snapshot, transcript hash or context audit.

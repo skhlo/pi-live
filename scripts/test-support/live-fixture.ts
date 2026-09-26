@@ -10,7 +10,6 @@ import {
   type HomeAuthority,
   type HomeCertificationObservation,
   type LiveAdmissionFacts,
-  type LiveAttestation,
   type LiveCapture,
   type LiveClock,
   type LiveConnection,
@@ -234,13 +233,7 @@ export function createFakeConnection(
 }
 
 export const fixtureCredentials: LiveCredentials = {
-  accessToken: "fixture-token",
-  accountId: "fixture-account",
-};
-
-export const fixtureAttestation: LiveAttestation = {
-  header: "fixture-attestation",
-  supported: false,
+  apiKey: "sk-fixture-key",
 };
 
 export function createFakeResources(
@@ -249,7 +242,6 @@ export function createFakeResources(
 ): LiveResources {
   return {
     credentials: async () => fixtureCredentials,
-    attestation: async () => fixtureAttestation,
     connect: () => settledStart(connection),
     ...overrides,
   };

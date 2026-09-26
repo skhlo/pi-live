@@ -158,7 +158,7 @@ def run(case):
             assert settled["state"] == "active"
             for text in ["Voice follow-up while Pi is working", "Typed clarification while Pi is working"]:
                 assert any(text in context for context in settled["inputs"]), text
-            assert any('"delegation_item_id":"terminal-two"' in frame for frame in settled["framesContent"])
+            assert any('"delegation_id":"terminal-two"' in frame and 'session.commentary.append' in frame for frame in settled["framesContent"])
             command("/live stop")
             pause()
         elif case == "task-stop":
@@ -172,7 +172,7 @@ def run(case):
             wait("tool-end")
             settled = wait("agent-settled")
             assert settled["frames"] == current["frames"]
-            assert not any("Agent Final Message" in frame for frame in settled["framesContent"])
+            assert not any("session.commentary.append" in frame for frame in settled["framesContent"])
         else:
             kind, answer = case.split("-")
             start()
@@ -202,7 +202,7 @@ def run(case):
         assert current["state"] == "off" and current["timers"] == 0, current
         drain()
         assert b"Start Pi Live voice?" in raw
-        assert b"experimental OpenAI" in raw
+        assert b"OpenAI GPT-Live" in raw
         (root / "receipt.json").write_text(json.dumps({"case": case, "passed": True, "final": current}, indent=2))
         print(f"PASS {case}: {root}", flush=True)
     finally:

@@ -11,7 +11,8 @@ work. The obsolete blocker document is removed; history retains that decision.
 Voice requests call `pi.sendUserMessage` directly, including while Pi is busy. Typed
 input, installed extensions, tool execution, retries and context processing remain
 Pi's responsibility. When Pi settles, its reply returns through the upstream
-`Agent Final Message` protocol. An error/abort without a reply produces a short
+GPT-Live commentary (see [the design](DESIGN.md#voice-as-ordinary-pi-input) for
+the later GPT-Live port and progress notes). An error/abort without a reply produces a short
 fixed notice to check Pi, without ending the voice call or exposing raw errors.
 
 The bridge has no request receipt, history fingerprint, branch snapshot, pending
@@ -65,7 +66,7 @@ is not run.
 
 ## Remaining scope
 
-No real credentials, DeviceCheck, native-addon execution, microphone/speaker or
+No real credentials, native-addon execution, microphone/speaker or
 provider access was used. Dependencies, package/lock, upstream snapshot and
 notices are unchanged. Actual-home certification still belongs to #6 and the
 real-access trial to #7. Native/proxied cleanup uncertainty remains as documented

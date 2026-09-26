@@ -880,6 +880,7 @@ test("the shipped factory registers live bindings without starting a call", asyn
     "session_before_tree",
     "session_shutdown",
     "session_start",
+    "turn_end",
     "ui_prompt_end",
     "ui_prompt_start",
   ]);

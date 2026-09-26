@@ -10,16 +10,15 @@ import { settledStart, createFakeCapture } from "./live-fixture.ts";
 export function fakeMedia() {
   const frames: string[] = [];
   let sideband: LiveSidebandStartInput | undefined;
+  let dataChannel: ((payload: string) => void) | undefined;
   let sample: ((samples: Float32Array) => void) | undefined;
   let resourcesCreated = 0;
   let captured = 0;
   let stopped = 0;
   const native: LiveNativeAdapter = {
-    deviceCheck: {
-      generateToken: async () => ({ supported: false, latencyMs: 0 }),
-    },
-    createPeer: () =>
-      settledStart({
+    createPeer(input) {
+      dataChannel = input.onEvent;
+      return settledStart({
         createOffer: async () => "fake-offer",
         acceptAnswer: async () => undefined,
         waitForOpen: async () => undefined,
@@ -28,7 +27,8 @@ export function fakeMedia() {
         },
         setMuted: () => undefined,
         close: async () => true,
-      }),
+      });
+    },
     startCapture(input) {
       sample = input.onSample;
       return settledStart(
@@ -40,25 +40,38 @@ export function fakeMedia() {
       );
     },
   };
+  const appended = (type: string) =>
+    frames
+      .map((frame) => JSON.parse(frame) as Record<string, unknown>)
+      .filter((frame) => frame.type === type);
   return {
     frames,
+    /** Pi's replies sent for speech. */
+    finals: () => appended("session.commentary.append"),
+    /** Quiet progress context. */
+    progress: () => appended("session.thinking.append"),
     counts: () => ({ resourcesCreated, captured, stopped }),
     emit(value: unknown) {
+      dataChannel?.(JSON.stringify(value));
+    },
+    emitSideband(value: unknown) {
       sideband?.onText(Buffer.from(JSON.stringify(value)));
     },
     request(id: string, text: string) {
-      sideband?.onText(
-        Buffer.from(
-          JSON.stringify({
-            type: "delegation.created",
-            item: {
-              type: "delegation",
-              target: "client",
-              id,
-              content: [{ type: "input_text", text }],
-            },
-          }),
-        ),
+      dataChannel?.(
+        JSON.stringify({
+          type: "session.input_transcript.delta",
+          delta: text,
+          start_ms: 0,
+          end_ms: 1,
+        }),
+      );
+      dataChannel?.(
+        JSON.stringify({
+          type: "session.delegation.created",
+          offset_ms: 1,
+          delegation: { id, type: "delegation", target: "client" },
+        }),
       );
     },
     sample() {
@@ -69,23 +82,22 @@ export function fakeMedia() {
       return createLiveRuntimeResources({
         ...options,
         registry: {
-          getApiKeyForProvider: async () =>
-            JSON.stringify({
-              access: "synthetic-access",
-              accountId: "fixture",
-              expires: Date.now() + 60_000,
-            }),
+          getApiKeyForProvider: async () => "sk-synthetic-fixture",
         },
         native,
         proxyForUrl: () => undefined,
         network: {
           signal: () =>
             settledStart({
-              status: 200,
-              statusText: "OK",
-              location: "/v1/live/rtc_fixture",
+              status: 201,
+              statusText: "Created",
               body: (async function* () {
-                yield Buffer.from("fake-answer");
+                yield Buffer.from(
+                  JSON.stringify({
+                    session: { id: "live_fixture" },
+                    transport: { type: "webrtc", sdp: "fake-answer" },
+                  }),
+                );
               })(),
               cancel() {},
             }),

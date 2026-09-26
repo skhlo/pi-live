@@ -79,7 +79,7 @@ const media = fakeMedia();
 const provider = fakeProvider({ tool: true });
 let binding: LiveLifecycleBinding;
 let currentContext: ExtensionContext | undefined;
-let voice: "sol" | "vale" = "sol";
+let voice: "marin" | "cedar" = "marin";
 let stopAtConsentResult = false;
 const snapshot = () => ({
   ...binding.lifecycle.snapshot(),
@@ -125,7 +125,7 @@ const resourceLoader = new DefaultResourceLoader({
           preferences: {
             load: async () => ({ voice, fields: {} }),
             setVoice: async (value) => {
-              assert.ok(value === "sol" || value === "vale");
+              assert.ok(value === "marin" || value === "cedar");
               voice = value;
             },
           },
@@ -184,12 +184,16 @@ const resourceLoader = new DefaultResourceLoader({
             if (kind === "speech") {
               media.sample();
               media.emit({
-                type: "turn.done",
-                turn: { role: "user", transcript: "Unicode é 你好 🙂" },
+                type: "session.input_transcript.delta",
+                delta: "Unicode é 你好 🙂",
+                start_ms: 0,
+                end_ms: 1,
               });
               media.emit({
-                type: "turn.done",
-                turn: { role: "assistant", transcript: "Ready to help" },
+                type: "session.output_transcript.delta",
+                delta: "Ready to help",
+                start_ms: 1,
+                end_ms: 2,
               });
               record("speech", snapshot());
               return;

@@ -31,9 +31,12 @@ resolve credentials, create call timers, touch ownership or contact a provider.
   reply returns to voice; if it has no reply, voice gets a short notice to check
   the terminal. Stopping voice stops audio and delivery, while Pi work continues.
 
-Consent identifies the execution host, experimental OpenAI service, microphone
-and speakers, final-result and Pi session-identifier sharing, attestation
-metadata, and proxy limitations. Reported non-live extension dialogs fence
+Voice runs on OpenAI's GPT-Live API (`gpt-live-1`), billed to the OpenAI API
+key Pi uses for its `openai` provider. While Pi works, voice receives short quiet
+progress notes; when Pi finishes, voice summarizes its reply aloud.
+
+Consent identifies the execution host, OpenAI GPT-Live, microphone and speakers,
+the conversation, progress and reply sharing, and proxy limitations. Reported non-live extension dialogs fence
 voice when their delayed notification arrives. Shortcut-opened and unreported
 nested dialogs can leave voice active; stop voice before opening them when
 capture and delivery must stop. Voice never answers or grants an approval.
@@ -44,10 +47,27 @@ confirm cleanup: their adapters report uncertainty and retain blocked ownership.
 Fake adapters positively confirm cleanup for tests. Issue #5 does not repair
 those dependencies or establish safe real-call restart.
 
+### Trying a real call before standalone setup
+
+Until #6 provides home certification, a real call needs a development-only
+override on a macOS arm64 host:
+
+1. Give Pi an OpenAI API key for the `openai` provider (Pi's credential store or
+   `OPENAI_API_KEY`).
+2. Create the ownership directory: `mkdir -p -m 700 ~/.local/state/pi-live`.
+3. Start Pi with `PI_LIVE_DEV_TRUST_HOME=1` and this extension loaded
+   (`pi -e /path/to/pi-live/index.ts`), then run `/live`.
+
+The lifecycle still inspects that directory's ownership and mode; the variable
+only skips certification. macOS asks the terminal app for microphone access on
+first use. Real native cleanup is reported unconfirmed, so after a real call the
+ownership lock is kept on purpose and later calls report busy: quit Pi, then
+remove `~/.local/state/pi-live/active.lock` before the next attempt.
+
 See [delegation/control verification](docs/ISSUE-5-VERIFICATION.md),
 [transport limits](docs/ISSUE-4-VERIFICATION.md), and
 [lifecycle verification](docs/ISSUE-3-VERIFICATION.md). Real credentials,
-DeviceCheck, media/provider access, provisioning and adoption remain separate.
+media/provider access, provisioning and adoption remain separate.
 
 The preference writer uses an optimistic read/compare/retry sequence and atomic
 same-directory rename. That does **not** guarantee that every concurrent change

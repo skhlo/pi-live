@@ -73,10 +73,7 @@ test("voice joins a busy Pi conversation alongside typed input", async (t) => {
   held.resolve();
   await typed;
   await fixture.runtime.session.waitForIdle();
-  await waitUntil(
-    () => media.frames.some((frame) => frame.includes("Agent Final Message")),
-    "spoken reply",
-  );
+  await waitUntil(() => media.finals().length > 0, "spoken reply");
   for (const text of [
     "First voice request",
     "Voice follow-up",
@@ -86,9 +83,7 @@ test("voice joins a busy Pi conversation alongside typed input", async (t) => {
       provider.contexts.some((context) => context.includes(text)),
       text,
     );
-  assert.ok(
-    media.frames.some((frame) => frame.includes('"delegation_item_id":"two"')),
-  );
+  assert.ok(media.finals().some((frame) => frame.delegation_id === "two"));
   assert.equal(fixture.current().lifecycle.snapshot().state, "active");
   assert.equal(fixture.abortCalls, 0);
 });
@@ -188,6 +183,90 @@ for (const outcome of ["error", "abort"] as const) {
     assert.ok(!media.frames.join("").includes("synthetic private failure"));
   });
 }
+
+test("voice hears quiet progress while Pi runs tools, then the spoken reply", async (t) => {
+  const provider = fakeProvider({ tool: true });
+  const media = fakeMedia();
+  const fixture = await createSdkFixture(t, {
+    controls: true,
+    resources: media.resources,
+    provider: provider.provider,
+    tools: [
+      {
+        name: "fixture_tool",
+        label: "Fixture",
+        description: "Offline",
+        parameters: { type: "object", properties: {} },
+        async execute() {
+          return {
+            content: [{ type: "text", text: "private raw tool output" }],
+            details: {},
+          };
+        },
+      },
+    ],
+  });
+  await fixture.runtime.session.prompt("/live start");
+  media.request("one", "Run the fixture tool");
+  await fixture.runtime.session.waitForIdle();
+  await waitUntil(() => media.finals().length > 0, "spoken reply");
+  const progress = media.progress();
+  assert.equal(progress.length, 1);
+  assert.equal(progress[0]!.delegation_id, "one");
+  assert.equal(
+    progress[0]!.content,
+    "Pi progress: private intermediate commentary Ran fixture_tool.",
+  );
+  assert.ok(!media.frames.join("").includes("private thinking"));
+  assert.ok(!media.frames.join("").includes("private raw tool output"));
+  const progressIndex = media.frames.findIndex((frame) =>
+    frame.includes("session.thinking.append"),
+  );
+  const finalIndex = media.frames.findIndex((frame) =>
+    frame.includes("session.commentary.append"),
+  );
+  assert.ok(progressIndex < finalIndex);
+  assert.deepEqual(
+    media.finals().map((frame) => [frame.delegation_id, frame.content]),
+    [["one", "Pi final reply"]],
+  );
+});
+
+test("the handoff carries the conversation since the previous handoff", async (t) => {
+  const provider = fakeProvider();
+  const media = fakeMedia();
+  const fixture = await createSdkFixture(t, {
+    controls: true,
+    resources: media.resources,
+    provider: provider.provider,
+  });
+  await fixture.runtime.session.prompt("/live start");
+  media.emit({
+    type: "session.output_transcript.delta",
+    delta: "Should I run the tests?",
+    start_ms: 0,
+    end_ms: 1,
+  });
+  media.request("one", "Yes please");
+  await fixture.runtime.session.waitForIdle();
+  await waitUntil(() => media.finals().length > 0, "spoken reply");
+  assert.ok(
+    provider.contexts.some((context) =>
+      context.includes(
+        "[Voice]\\nVoice assistant: Should I run the tests?\\nUser: Yes please",
+      ),
+    ),
+  );
+  media.request("two", "Thanks");
+  await waitUntil(() => media.finals().length > 1, "second reply");
+  assert.ok(
+    provider.contexts.some(
+      (context) =>
+        context.includes("[Voice]\\nUser: Thanks") &&
+        !context.includes("[Voice]\\nUser: Yes please\\nUser: Thanks"),
+    ),
+  );
+});
 
 test("Pi work without a voice request does not create a transport error", async (t) => {
   const media = fakeMedia();
