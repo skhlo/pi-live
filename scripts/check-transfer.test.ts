@@ -265,7 +265,11 @@ test("the default transfer check rejects the developed working tree", () => {
   const result = check();
   assert.ifError(result.error);
   assert.equal(result.status, 1, result.stdout);
-  assert.match(result.stderr, /Transfer bytes differ: src\/live\.ts/);
+  // It reports the first developed file it meets: package.json since v0.1.0.
+  assert.match(
+    result.stderr,
+    /Transfer bytes differ: (package\.json|src\/live\.ts)/,
+  );
 });
 
 test("the transfer checker rejects invalid CLI arguments", () => {

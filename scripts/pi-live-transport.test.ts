@@ -14,6 +14,8 @@ import {
   type LiveRuntimeDiagnostic,
   type LiveSidebandSocket,
   type LiveSidebandStartInput,
+  createDefaultLiveNativeAdapter,
+  type DefaultNativeBindings,
 } from "../src/live.ts";
 import {
   approvingConsent,
@@ -1427,4 +1429,38 @@ test("malformed UTF-8 SDP answers are rejected before native acceptance", async 
   });
   await started.terminate(async (connection) => connection.close());
   assert.equal(accepts, 0);
+});
+
+test("the real native adapter confirms cleanup only when the native close resolves", async () => {
+  const bindings = (close: () => Promise<void>): DefaultNativeBindings => ({
+    AudioCapture: class {
+      stop(): void {}
+    } as unknown as DefaultNativeBindings["AudioCapture"],
+    LiveWebRtcPeer: class {
+      createOffer = async () => "offer";
+      acceptAnswer = async () => undefined;
+      waitForOpen = async () => undefined;
+      pushAudio(): void {}
+      setMuted(): void {}
+      close = close;
+    } as unknown as DefaultNativeBindings["LiveWebRtcPeer"],
+    __ompInstallTokioRuntime(): void {},
+  });
+  const closed = async (close: () => Promise<void>) => {
+    const peer = await createDefaultLiveNativeAdapter(() =>
+      bindings(close),
+    ).createPeer({
+      onEvent() {},
+      onOutputLevel() {},
+      onFailure() {},
+    }).result;
+    return peer.close();
+  };
+  assert.equal(await closed(async () => undefined), true);
+  assert.equal(
+    await closed(async () => {
+      throw new Error("native close failed");
+    }),
+    false,
+  );
 });

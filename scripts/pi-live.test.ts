@@ -11,7 +11,11 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
 
-import { registerPiLive, createIsolatedLiveCoordination } from "../src/live.ts";
+import {
+  registerPiLive,
+  createIsolatedLiveCoordination,
+  type LiveSetupResult,
+} from "../src/live.ts";
 import { PreferenceError } from "../src/preferences.ts";
 
 type CommandRegistration = {
@@ -339,7 +343,7 @@ test("help discloses calling limits and voice changes only the off-state prefere
     assert.match(help, new RegExp(phrase, "i"));
   }
   assert.deepEqual(notifications[1], [
-    "Usage: /live [start|stop|mute|unmute|voice <name>|status|help]",
+    "Usage: /live [start|stop|end|off|mute|unmute|voice <name>|status|setup|help]",
     "error",
   ]);
   assert.deepEqual(notifications[2], [
@@ -576,9 +580,12 @@ test("every non-TUI command and the shortcut refuse before touching terminal pre
     "",
     "start",
     "stop",
+    "end",
+    "off",
     "mute",
     "unmute",
     "status",
+    "setup",
     "help",
     "voice",
     "voice cedar",
@@ -588,7 +595,7 @@ test("every non-TUI command and the shortcut refuse before touching terminal pre
   }
   await harness.shortcuts.get("ctrl+shift+l")?.handler(ctx);
 
-  assert.equal(notifications.length, 11);
+  assert.equal(notifications.length, 14);
   for (const notification of notifications) {
     assert.deepEqual(notification, [
       "Pi Live requires interactive TUI mode.",
@@ -597,4 +604,64 @@ test("every non-TUI command and the shortcut refuse before touching terminal pre
   }
   assert.deepEqual(widgetCalls, []);
   assert.equal(dependencyCalls, 0);
+});
+
+test("/live setup asks first, reports the result, and is unavailable without a setup dependency", async () => {
+  const run = async (options: {
+    setup?: () => Promise<LiveSetupResult>;
+    confirm: boolean;
+  }) => {
+    const harness = registrationHarness();
+    registerPiLive(harness.pi, {
+      preferences: {
+        load: async () => ({ voice: "marin", fields: {} }),
+        async setVoice() {},
+      },
+      compatibility: {
+        check: async () => ({ supported: true, issues: [] }),
+      },
+      truncateToWidth: noClip,
+      ...(options.setup ? { setup: options.setup } : {}),
+      runtime: {
+        lifecycle: { coordination: createIsolatedLiveCoordination() },
+      },
+    });
+    const notifications: Array<[string, string | undefined]> = [];
+    const prompts: string[] = [];
+    const ctx = context("tui", notifications, []);
+    (ctx.ui as { confirm: unknown }).confirm = async (title: string) => {
+      prompts.push(title);
+      return options.confirm;
+    };
+    await commandFrom(harness).handler("setup", ctx);
+    return { notifications, prompts };
+  };
+
+  let setupCalls = 0;
+  const ready = async () => {
+    setupCalls += 1;
+    return { kind: "ready" as const, stateParent: "/fixture/state" };
+  };
+  assert.deepEqual(await run({ setup: ready, confirm: false }), {
+    notifications: [["Pi Live setup cancelled.", "info"]],
+    prompts: ["Set up Pi Live?"],
+  });
+  assert.equal(setupCalls, 0);
+  assert.deepEqual((await run({ setup: ready, confirm: true })).notifications, [
+    ["Pi Live is set up in /fixture/state. Run /live to start a call.", "info"],
+  ]);
+  assert.equal(setupCalls, 1);
+  assert.deepEqual(
+    (
+      await run({
+        setup: async () => ({ kind: "refused", reason: "Not local." }),
+        confirm: true,
+      })
+    ).notifications,
+    [["Pi Live setup refused: Not local.", "error"]],
+  );
+  assert.deepEqual(await run({ confirm: true }), {
+    notifications: [["Pi Live setup is unavailable.", "error"]],
+    prompts: [],
+  });
 });

@@ -32,9 +32,10 @@ or SDK extension is needed.
 At the #5 simplification (`bb3b3bf`) checks passed: **395 tests** (390 under OS
 network denial, four loader tests with their own sandbox, and the existing
 permission-bit case separately), typecheck, formatting, source/package checks and
-isolated real-Pi loading. After the GPT-Live port the suite has 374 tests, since
-the ChatGPT-token and DeviceCheck tests were removed with that code; see the
-GPT-Live port section below.
+isolated real-Pi loading. At the GPT-Live port merge the suite had 375 tests,
+since the ChatGPT-token and DeviceCheck tests were removed with that code; see
+the GPT-Live port section below. Issue #6 expands this to 387 tests; see its
+[verification record](ISSUE-6-VERIFICATION.md).
 All 18 PTY scenarios and the actual Paseo controls/conversation checks pass.
 
 The real Pi 0.87.1 SDK tests use an in-process provider and fake media under OS
@@ -75,14 +76,14 @@ notices are unchanged. Actual-home certification still belongs to #6 and the
 real-access trial to #7. Native/proxied cleanup uncertainty remains as documented
 in #4; it is independent of treating voice as Pi input.
 
-The task branch/worktree, dependency symlink, verification receipts and Paseo
-terminal are retained. Nothing is pushed or published by this work.
+This work was delivered in PR #12. Its verification receipts are kept in the
+repository's ignored `preview/` folder.
 
 ## GPT-Live port
 
 The runtime now uses the public GPT-Live API with Pi's `openai` API key; see
 [the design](DESIGN.md#extracted-transport). With fake media and fake provider
-responses, 374 tests, typecheck, formatting, the source/package/loader checks and
+responses, 375 tests, typecheck, formatting, the source/package/loader checks and
 all 18 PTY scenarios pass.
 
 Two real trials ran on macOS arm64 through the development-only

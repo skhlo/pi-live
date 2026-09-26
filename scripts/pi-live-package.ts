@@ -84,10 +84,10 @@ export const PI_LIVE_PAYLOAD_SOURCE_FILES = [
 
 export const PI_LIVE_MANIFEST = {
   name: "pi-live",
-  version: "0.0.0",
+  version: "0.1.0",
   private: true,
   description:
-    "Experimental standalone Pi Live extension; currently setup-only",
+    "Experimental Pi extension for voice conversations with Pi through OpenAI GPT-Live",
   type: "module",
   packageManager: `pnpm@${PI_LIVE_PNPM_VERSION}`,
   license: "MIT",

@@ -52,5 +52,5 @@ other input. Stopping voice does not stop Pi work.
 **Home certification**:
 Setup's evidence that a particular canonical account home is suitable local
 storage for Pi Live ownership. A resolved pathname alone is not certification.
-Until setup exists, the development-only `PI_LIVE_DEV_TRUST_HOME=1` trusts a
-manually prepared home instead.
+`/live setup` writes it as `setup.json` in the state directory, naming the home
+and state directory identities it checked on a local disk.

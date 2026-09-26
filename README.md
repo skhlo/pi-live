@@ -4,10 +4,8 @@ Private, experimental Pi extension. Voice feeds requests into the current Pi
 conversation and receives Pi's reply. Pi handles typed and spoken input together,
 including its normal extensions, tools and retries.
 
-Home certification is not implemented yet, so the shipped package refuses real
-calls unless the development-only `PI_LIVE_DEV_TRUST_HOME=1` switch is set (see
-below). One real microphone trial has been run on macOS arm64; no rollout has
-been performed.
+It is checked on macOS arm64 only. See [Using Pi Live](#using-pi-live) for
+setup, calls and recovery.
 
 ## Current behavior
 
@@ -16,11 +14,12 @@ The package exports one Pi extension factory. Discovery registers `/live`,
 dialog and delegation listeners. Discovery does not load the native addon,
 resolve credentials, create call timers, touch ownership or contact a provider.
 
-- `/live` toggles voice; `start` and `stop` are explicit forms. Each new attempt
-  requires ordinary TUI consent. The shifted shortcut follows the same path;
+- `/live` toggles voice; `start` and `stop` are explicit forms, and `end` or
+  `off` also stop. Each new attempt requires ordinary TUI consent. The shifted shortcut follows the same path;
   commands remain the fallback for unsupported shifted-key encoding.
 - `mute` stops microphone capture while speaker playback may continue. `unmute`
   reopens capture only within the same active call.
+- `setup` prepares this account's home for calls; see below.
 - `voice <name>` changes the host-local preference while off. `status` reports
   state, mute, voice, compatibility and a fixed last-failure code. `help` explains
   controls, data sharing and limitations.
@@ -33,8 +32,11 @@ resolve credentials, create call timers, touch ownership or contact a provider.
   the terminal. Stopping voice stops audio and delivery, while Pi work continues.
 
 Voice runs on OpenAI's GPT-Live API (`gpt-live-1`), billed to the OpenAI API
-key Pi uses for its `openai` provider. While Pi works, voice receives short quiet
-progress notes; when Pi finishes, voice summarizes its reply aloud.
+key Pi uses for its `openai` provider. Audio, speech transcripts, the conversation
+leading to each request, progress notes (Pi's narration and tools used, including
+typed work), and Pi's final replies are shared with OpenAI. While Pi works, voice
+receives short quiet progress notes; when Pi finishes, voice summarizes its reply
+aloud. HTTP/WebSocket proxy settings do not establish WebRTC/ICE media proxying.
 
 Consent identifies the execution host, OpenAI GPT-Live, microphone and speakers,
 the conversation, progress and reply sharing, and proxy limitations. Reported non-live extension dialogs fence
@@ -42,33 +44,74 @@ voice when their delayed notification arrives. Shortcut-opened and unreported
 nested dialogs can leave voice active; stop voice before opening them when
 capture and delivery must stop. Voice never answers or grants an approval.
 
-The default home certifier refuses unless the development switch is set. Issue #6 owns production home certification
-and recovery. Real native and proxied-sideband close interfaces still cannot
-confirm cleanup: their adapters report uncertainty and retain blocked ownership.
-Fake adapters positively confirm cleanup for tests. Issue #5 does not repair
-those dependencies or establish safe real-call restart.
+Do not load another live extension alongside Pi Live. It refuses observed
+conflicts with `@monotykamary/pi-better-openai` 0.2.6 and its pinned Git source,
+and refuses account pooling announced by `pi-multiprovider`. These source and
+command checks cannot inventory every extension or conflicting shortcut.
 
-### Trying a real call before standalone setup
+## Using Pi Live
 
-Until #6 provides home certification, a real call needs a development-only
-override on a macOS arm64 host:
+Pi Live is checked on macOS arm64 with Node 22.19.0 or later, Pi 0.87.1 and
+`@oh-my-pi/pi-natives-darwin-arm64` 17.2.9. Other platforms are unverified.
 
-1. Give Pi an OpenAI API key for the `openai` provider (Pi's credential store or
-   `OPENAI_API_KEY`).
-2. Create the ownership directory: `mkdir -p -m 700 ~/.local/state/pi-live`.
-3. Start Pi with `PI_LIVE_DEV_TRUST_HOME=1` and this extension loaded
-   (`pi -e /path/to/pi-live/index.ts`), then run `/live`.
+1. In a checkout of this repository, restore dependencies with scripts and
+   automatic peers disabled:
 
-The lifecycle still inspects that directory's ownership and mode; the variable
-only skips certification. macOS asks the terminal app for microphone access on
-first use. Real native cleanup is reported unconfirmed, so after a real call the
-ownership lock is kept on purpose and later calls report busy: quit Pi, then
-remove `~/.local/state/pi-live/active.lock` before the next attempt.
+   ```sh
+   pnpm install --frozen-lockfile --ignore-scripts --config.auto-install-peers=false --config.enable-global-virtual-store=false
+   ```
 
-See [delegation/control verification](docs/ISSUE-5-VERIFICATION.md),
+2. Give Pi an OpenAI API key for its `openai` provider, in Pi's credential store
+   or as `OPENAI_API_KEY`. Calls are billed to that key.
+3. Start Pi with the extension: `pi -e /path/to/pi-live/index.ts`. Loading it
+   does nothing until you use `/live`; Pi without `-e` is unchanged.
+4. Run `/live setup` once. After you confirm, it creates
+   `~/.local/state/pi-live`, private to your account, checks that it is on a
+   local disk, and records it in `setup.json` there. Calls refuse with
+   `setup-required` until setup has run, and again if the home folder is moved
+   or restored; run setup again then.
+5. Run `/live` and accept the consent prompt. macOS asks the terminal app for
+   microphone access on first use.
+
+Finishing a call releases its lock, so the same Pi session can start another.
+The native audio library's close stops the speaker and the WebRTC connection;
+its remote-audio task is not awaited, which is an accepted limit. Behind an
+HTTPS proxy, the sideband's cleanup cannot be confirmed, so each call there ends
+with `cleanup-blocked`.
+
+### Recovery
+
+- **Setup refused:** the message says why, for example a folder that is not
+  yours, is reached through a link, or is not on a local disk. Fix that and run
+  `/live setup` again.
+- **Start failed:** use `/live status` to see compatibility and the last failure
+  code. For `missing-auth`, check Pi's `openai` API key; for unsupported
+  compatibility, restore the checked Node, Pi and dependency versions above.
+  For `denied` or `audio-error`, check consent and the terminal's microphone
+  permission. For `connect-timeout` or `protocol-error`, check network/proxy
+  access and service availability. Quit this Pi invocation after a failed start,
+  correct the cause, then explicitly load the checked version again. If the
+  failure persists, leave Pi Live unloaded or choose a previously verified
+  version. A retained lock requires the manual recovery below.
+- **`cleanup-blocked`:** this Pi process cannot start another call. Quit Pi.
+  If a new Pi then reports `busy` while no other Pi has a call running, the lock
+  was left behind: remove `~/.local/state/pi-live/active.lock/owner.json`, then
+  the `active.lock` folder. Behind an HTTPS proxy this happens after every
+  call. Pi Live never automatically recovers a retained lock; normal confirmed
+  shutdown removes the call's own lock.
+- **Going back:** start Pi without `-e` to stop using Pi Live. To use an earlier
+  version, check out its tag and restore dependencies as in step 1. Before
+  v0.1.0 there is no earlier supported version.
+
+Pi Live never deletes its state folder, preferences (`pi-live/config.json` in
+Pi's agent directory), prior checkouts or pnpm caches. Remove them by hand if
+you no longer need them.
+
+See [setup and readiness verification](docs/ISSUE-6-VERIFICATION.md),
+[delegation/control verification](docs/ISSUE-5-VERIFICATION.md),
 [transport limits](docs/ISSUE-4-VERIFICATION.md), and
-[lifecycle verification](docs/ISSUE-3-VERIFICATION.md). Real credentials,
-media/provider access, provisioning and adoption remain separate.
+[lifecycle verification](docs/ISSUE-3-VERIFICATION.md). The #7 canary and the
+adoption decision are still ahead.
 
 The preference writer uses an optimistic read/compare/retry sequence and atomic
 same-directory rename. That does **not** guarantee that every concurrent change

@@ -1162,7 +1162,7 @@ test("the default authority asks the OS account home first and never follows a d
     assert.deepEqual(await lifecycle.start(), {
       kind: "refused",
       state: "off",
-      diagnostic: "denied",
+      diagnostic: "setup-required",
     });
   } finally {
     if (originalHome === undefined) delete process.env.HOME;
@@ -1231,7 +1231,7 @@ test("HOME absence and aliases use the injected account home, while divergence a
     assert.deepEqual(await lifecycle.start(), {
       kind: "refused",
       state: "off",
-      diagnostic: "denied",
+      diagnostic: "setup-required",
     });
   }
   assert.equal(resourceCalls, 0);
@@ -1263,7 +1263,7 @@ test("an unowned intermediate state directory refuses before lock creation", asy
   assert.deepEqual(await lifecycle.start(), {
     kind: "refused",
     state: "off",
-    diagnostic: "denied",
+    diagnostic: "setup-required",
   });
   assert.equal(mkdirCalls, 0);
   await assert.rejects(stat(fixture.lock), { code: "ENOENT" });
@@ -1345,7 +1345,7 @@ test("home or state-parent identity drift after certification refuses before mkd
       assert.deepEqual(await lifecycle.start(), {
         kind: "refused",
         state: "off",
-        diagnostic: "denied",
+        diagnostic: "setup-required",
       });
       assert.equal(mkdirCalls, 0);
     });
