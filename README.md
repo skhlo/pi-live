@@ -110,8 +110,10 @@ you no longer need them.
 See [setup and readiness verification](docs/ISSUE-6-VERIFICATION.md),
 [delegation/control verification](docs/ISSUE-5-VERIFICATION.md),
 [transport limits](docs/ISSUE-4-VERIFICATION.md), and
-[lifecycle verification](docs/ISSUE-3-VERIFICATION.md). The #7 canary and the
-adoption decision are still ahead.
+[lifecycle verification](docs/ISSUE-3-VERIFICATION.md). The operator adopted
+`v0.1.0` for personal MBA use after the [canary](docs/ISSUE-7-VERIFICATION.md),
+with the real denied-microphone-permission check explicitly waived. This is
+explicit loading only, not global registration or dotfiles integration.
 
 The preference writer uses an optimistic read/compare/retry sequence and atomic
 same-directory rename. That does **not** guarantee that every concurrent change

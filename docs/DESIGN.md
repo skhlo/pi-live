@@ -7,8 +7,10 @@ dotfiles is only the retained extraction source. Issues #3/#4 supply lifecycle
 and bounded auth/media/transport. Issue #5 connects public Pi controls and
 ordinary Pi input to those owners. Issue #6 adds `/live setup`, which
 certifies the account home, and trusts the native close so a finished call
-releases its lock. Proxied-sideband cleanup remains unconfirmed. The #7 canary
-and the adoption decision are still ahead.
+releases its lock. Proxied-sideband cleanup remains unconfirmed. The operator
+accepted `v0.1.0` for personal MBA use after the [#7 canary](ISSUE-7-VERIFICATION.md),
+explicitly waiving the real denied-microphone-permission check. Loading remains
+explicit; no global registration or dotfiles integration was added.
 
 ## Implemented behavior
 
@@ -183,8 +185,9 @@ inventory, and no settings or lock file is written by source inspection.
 
 The user's #5 implementation instruction authorizes local work and fake-resource
 verification. See [issue #5 verification](ISSUE-5-VERIFICATION.md) and
-[issue #6 verification](ISSUE-6-VERIFICATION.md) for current evidence; the
-real-access canary remains #7.
+[issue #6 verification](ISSUE-6-VERIFICATION.md) for implementation evidence.
+[Issue #7 verification](ISSUE-7-VERIFICATION.md) records the real-access canary,
+its explicit waiver and the operator's MBA adoption decision.
 
 ## Historical statements that are superseded
 
@@ -215,8 +218,9 @@ evidence and remaining gaps. [Lifecycle verification](ISSUE-3-VERIFICATION.md)
 and [transfer verification](VERIFICATION.md) retain their historical scope.
 [The extraction receipt](history/extraction/transfer-receipt.json) owns copied
 source identity, adaptations, and historical evidence custody. Those are distinct
-from live-runtime or adoption evidence. No general native/audio/auth/provider
-verification is claimed.
+from live-runtime or adoption evidence. The [MBA canary](ISSUE-7-VERIFICATION.md)
+owns its bounded real-native/audio/provider observations and adoption decision;
+it does not establish general verification beyond that surface.
 
 ## Historical evidence
 
