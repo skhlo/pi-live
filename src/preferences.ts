@@ -13,19 +13,32 @@ import path from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 export const LIVE_VOICE_VALUES = [
-  "arbor",
-  "breeze",
-  "cove",
-  "ember",
-  "juniper",
-  "maple",
-  "sol",
-  "spruce",
-  "vale",
+  "alloy",
+  "ash",
+  "ballad",
+  "beacon",
+  "bossa",
+  "cedar",
+  "cinder",
+  "coral",
+  "delta",
+  "echo",
+  "gleam",
+  "marin",
+  "meridian",
+  "quartz",
+  "ripple",
+  "sage",
+  "shimmer",
+  "stone",
+  "tempo",
+  "verse",
+  "vesper",
+  "willow",
 ] as const;
 
 export type LiveVoice = (typeof LIVE_VOICE_VALUES)[number];
-export const DEFAULT_LIVE_VOICE: LiveVoice = "sol";
+export const DEFAULT_LIVE_VOICE: LiveVoice = "marin";
 
 export type LivePreferences = {
   voice: LiveVoice;

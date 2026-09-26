@@ -19,7 +19,6 @@ import {
   createFakeResources,
   createLiveFixture,
   deferred,
-  fixtureAttestation,
   fixtureCredentials,
   ManualClock as TestClock,
   settledStart,
@@ -30,7 +29,7 @@ function eventually(check: () => boolean): Promise<void> {
   return waitForCondition(check, "condition did not settle within 10 seconds");
 }
 
-test("the dormant lifecycle is lazy and refuses unsupported admission before consent or resources", async () => {
+test("the lifecycle is lazy and refuses unsupported admission before consent or resources", async () => {
   const effects: string[] = [];
   const lifecycle = createLiveLifecycle({
     admission: {
@@ -41,8 +40,6 @@ test("the dormant lifecycle is lazy and refuses unsupported admission before con
           compatible: true,
           conflict: false,
           dialog: false,
-          idle: true,
-          pendingWork: false,
         };
       },
     },
@@ -69,10 +66,6 @@ test("the dormant lifecycle is lazy and refuses unsupported admission before con
         effects.push("credentials");
         return Promise.resolve(fixtureCredentials);
       },
-      attestation() {
-        effects.push("attestation");
-        return Promise.resolve(fixtureAttestation);
-      },
       connect() {
         throw new Error("resource construction must stay lazy");
       },
@@ -82,7 +75,7 @@ test("the dormant lifecycle is lazy and refuses unsupported admission before con
   assert.deepEqual(lifecycle.snapshot(), {
     state: "off",
     muted: false,
-    voice: "sol",
+    voice: "marin",
   });
   assert.deepEqual(effects, []);
   assert.deepEqual(await lifecycle.stop(), { status: "off" });
@@ -127,8 +120,6 @@ test("consent is single-flight, immediately cancellable, and late approval canno
           compatible: true,
           conflict: false,
           dialog: false,
-          idle: true,
-          pendingWork: false,
         };
       },
     },
@@ -155,10 +146,10 @@ test("consent is single-flight, immediately cancellable, and late approval canno
     },
   });
 
-  assert.deepEqual(await lifecycle.selectVoice("vale"), {
+  assert.deepEqual(await lifecycle.selectVoice("cedar"), {
     kind: "updated",
     state: "off",
-    voice: "vale",
+    voice: "cedar",
   });
   const firstStart = lifecycle.start();
   await consentEntered[0]!.promise;
@@ -167,7 +158,7 @@ test("consent is single-flight, immediately cancellable, and late approval canno
     kind: "existing",
     state: "consent",
   });
-  assert.deepEqual(await lifecycle.selectVoice("sol"), {
+  assert.deepEqual(await lifecycle.selectVoice("marin"), {
     kind: "refused",
     state: "consent",
     diagnostic: "busy",
@@ -223,7 +214,7 @@ test("acquiring and connecting expose the complete pending-state command rows", 
       state: "acquiring",
       diagnostic: "busy",
     });
-    assert.deepEqual(await lifecycle.selectVoice("vale"), {
+    assert.deepEqual(await lifecycle.selectVoice("cedar"), {
       kind: "refused",
       state: "acquiring",
       diagnostic: "busy",
@@ -266,7 +257,7 @@ test("acquiring and connecting expose the complete pending-state command rows", 
       state: "connecting",
       diagnostic: "busy",
     });
-    assert.deepEqual(await lifecycle.selectVoice("vale"), {
+    assert.deepEqual(await lifecycle.selectVoice("cedar"), {
       kind: "refused",
       state: "connecting",
       diagnostic: "busy",
@@ -411,7 +402,7 @@ test("pooling interruption stops the current attempt and permanently refuses lat
     state: "active",
     muted: false,
   });
-  assert.deepEqual(await lifecycle.selectVoice("vale"), {
+  assert.deepEqual(await lifecycle.selectVoice("cedar"), {
     kind: "refused",
     state: "active",
     diagnostic: "busy",
@@ -447,7 +438,7 @@ test("pooling timing before active uses exact terminal diagnostics and leaves no
     assert.deepEqual(lifecycle.snapshot(), {
       state: "off",
       muted: false,
-      voice: "sol",
+      voice: "marin",
       lastFailure: "denied",
     });
     assert.deepEqual(await lifecycle.start(), {
@@ -614,7 +605,7 @@ test("data-only cancellation releases ownership, while an unquiet resource start
   assert.deepEqual(resourceBearing.snapshot(), {
     state: "blocked",
     muted: false,
-    voice: "sol",
+    voice: "marin",
     lastFailure: "cleanup-blocked",
   });
   assert.equal((await stat(fixture.lock)).isDirectory(), true);
@@ -651,10 +642,6 @@ test("preparation invocation and settlement are fenced before the next startup e
       fixture.resources.credentials = async () => {
         effects.push("credentials");
         return fixtureCredentials;
-      };
-      fixture.resources.attestation = async () => {
-        effects.push("attestation");
-        return fixtureAttestation;
       };
       fixture.resources.connect = () => {
         effects.push("connect");
@@ -826,7 +813,7 @@ test("a resource constructor throw remains uncertain while known resources still
   assert.deepEqual(lifecycle.snapshot(), {
     state: "blocked",
     muted: false,
-    voice: "sol",
+    voice: "marin",
     lastFailure: "cleanup-blocked",
   });
   assert.deepEqual(effects, [
@@ -845,7 +832,7 @@ test("a resource constructor throw remains uncertain while known resources still
     state: "blocked",
     diagnostic: "busy",
   });
-  assert.deepEqual(await lifecycle.selectVoice("vale"), {
+  assert.deepEqual(await lifecycle.selectVoice("cedar"), {
     kind: "refused",
     state: "blocked",
     diagnostic: "busy",
@@ -1056,7 +1043,7 @@ test("quiescence at the exact stop deadline blocks and prohibits every release o
     state: "stopping",
     diagnostic: "busy",
   });
-  assert.deepEqual(await lifecycle.selectVoice("vale"), {
+  assert.deepEqual(await lifecycle.selectVoice("cedar"), {
     kind: "refused",
     state: "stopping",
     diagnostic: "busy",
@@ -1335,14 +1322,14 @@ test("CORE: absolute lifecycle deadlines hold when timer delivery is delayed or 
       const clock = fixture.clock;
       const credentials = deferred<typeof fixtureCredentials>();
       const entered = deferred<void>();
-      let attestationCalls = 0;
+      let connectCalls = 0;
       fixture.resources.credentials = () => {
         entered.resolve();
         return credentials.promise;
       };
-      fixture.resources.attestation = async () => {
-        attestationCalls += 1;
-        return fixtureAttestation;
+      fixture.resources.connect = () => {
+        connectCalls += 1;
+        return settledStart(fixture.connection);
       };
       const lifecycle = fixture.createLifecycle(approvingConsent, {
         clock: fixture.clock,
@@ -1354,7 +1341,7 @@ test("CORE: absolute lifecycle deadlines hold when timer delivery is delayed or 
       credentials.resolve(fixtureCredentials);
       assert.equal((await starting).kind, "cancelled");
       await eventually(() => lifecycle.snapshot().state === "off");
-      assert.equal(attestationCalls, 0);
+      assert.equal(connectCalls, 0);
       assert.equal(lifecycle.snapshot().lastFailure, "connect-timeout");
     },
   );
@@ -1547,7 +1534,7 @@ test("CORE: absolute lifecycle deadlines hold when timer delivery is delayed or 
   );
 });
 
-test("connect and call budgets anchor at acquiring after consent, and delegated work anchors at admission", async (t) => {
+test("connect and call budgets anchor at acquiring after consent", async (t) => {
   const fixture = await createLiveFixture(t);
   const clock = fixture.clock;
   const consent = deferred<boolean>();
@@ -1592,45 +1579,6 @@ test("connect and call budgets anchor at acquiring after consent, and delegated 
   assert.equal(active.snapshot().state, "active");
   activeClock.advance(1);
   await eventually(() => active.snapshot().state === "off");
-
-  assert.equal((await active.start()).kind, "started");
-  const admittedWork = active.delegationAdmitted();
-  assert.equal(admittedWork.kind, "updated");
-  if (admittedWork.kind !== "updated") assert.fail("delegation was refused");
-  assert.equal(admittedWork.state, "active");
-  assert.equal(typeof admittedWork.settle, "function");
-  activeClock.advance(30 * 60_000 - 1);
-  assert.equal(active.snapshot().state, "active");
-  activeClock.advance(1);
-  await eventually(() => active.snapshot().state === "off");
-});
-
-test("CORE: delegation settlement capability is owned by its admitted call generation", async (t) => {
-  const fixture = await createLiveFixture(t);
-  const clock = fixture.clock;
-  const lifecycle = fixture.createLifecycle(approvingConsent, {
-    clock: fixture.clock,
-  });
-
-  assert.equal((await lifecycle.start()).kind, "started");
-  const oldAdmission = lifecycle.delegationAdmitted();
-  assert.equal(oldAdmission.kind, "updated");
-  if (oldAdmission.kind !== "updated") assert.fail("delegation was refused");
-  assert.equal(typeof oldAdmission.settle, "function");
-  assert.equal(lifecycle.delegationAdmitted().kind, "refused");
-  assert.deepEqual(await lifecycle.stop(), { status: "off" });
-
-  assert.equal((await lifecycle.start()).kind, "started");
-  const currentAdmission = lifecycle.delegationAdmitted();
-  assert.equal(currentAdmission.kind, "updated");
-  if (currentAdmission.kind !== "updated")
-    assert.fail("delegation was refused");
-  oldAdmission.settle();
-  clock.advance(30 * 60_000 - 1);
-  assert.equal(lifecycle.snapshot().state, "active");
-  clock.advance(1);
-  await eventually(() => lifecycle.snapshot().state === "off");
-  currentAdmission.settle();
 });
 
 test("a synchronous startup termination failure is shared without retrying shutdown", async (t) => {
@@ -1650,26 +1598,4 @@ test("a synchronous startup termination failure is shared without retrying shutd
   assert.deepEqual(await lifecycle.stop(), { status: "blocked" });
   assert.equal(terminationCalls, 1);
   assert.equal((await stat(fixture.lock)).isDirectory(), true);
-});
-
-test("delegation settlement cannot erase an expired deadline while timer delivery is delayed", async (t) => {
-  for (const elapsed of [30 * 60_000 - 1, 30 * 60_000, 30 * 60_000 + 1]) {
-    await t.test(`${elapsed} milliseconds`, async (t) => {
-      const fixture = await createLiveFixture(t);
-      const clock = fixture.clock;
-      const lifecycle = fixture.createLifecycle(approvingConsent, {
-        clock: fixture.clock,
-      });
-      assert.equal((await lifecycle.start()).kind, "started");
-      const admission = lifecycle.delegationAdmitted();
-      if (admission.kind !== "updated") assert.fail("delegation was refused");
-      clock.elapseWithoutTimers(elapsed);
-      admission.settle();
-      assert.equal(
-        lifecycle.snapshot().state,
-        elapsed < 30 * 60_000 ? "active" : "stopping",
-      );
-      assert.deepEqual(await lifecycle.stop(), { status: "off" });
-    });
-  }
 });

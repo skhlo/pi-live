@@ -50,23 +50,36 @@ async function preferenceFixture(t: TestContext) {
   };
 }
 
-test("a missing preference defaults to the exact upstream sol voice without writing", async (t) => {
+test("a missing preference defaults to the GPT-Live marin voice without writing", async (t) => {
   const fixture = await preferenceFixture(t);
 
   assert.deepEqual(LIVE_VOICE_VALUES, [
-    "arbor",
-    "breeze",
-    "cove",
-    "ember",
-    "juniper",
-    "maple",
-    "sol",
-    "spruce",
-    "vale",
+    "alloy",
+    "ash",
+    "ballad",
+    "beacon",
+    "bossa",
+    "cedar",
+    "cinder",
+    "coral",
+    "delta",
+    "echo",
+    "gleam",
+    "marin",
+    "meridian",
+    "quartz",
+    "ripple",
+    "sage",
+    "shimmer",
+    "stone",
+    "tempo",
+    "verse",
+    "vesper",
+    "willow",
   ]);
-  assert.equal(DEFAULT_LIVE_VOICE, "sol");
+  assert.equal(DEFAULT_LIVE_VOICE, "marin");
   assert.deepEqual(await fixture.store.load(), {
-    voice: "sol",
+    voice: "marin",
     fields: {},
   });
   assert.equal(await isMissing(fixture.configDir), true);
@@ -84,13 +97,13 @@ test("the real store resolves config.json beneath getAgentDir", async (t) => {
     else process.env.PI_CODING_AGENT_DIR = previous;
   });
 
-  await createFilePreferenceStore().setVoice("arbor");
+  await createFilePreferenceStore().setVoice("alloy");
 
   const config = parseJsonObject(
     await readFile(path.join(agentDir, "pi-live/config.json"), "utf8"),
     "stored preferences",
   );
-  assert.equal(config.voice, "arbor");
+  assert.equal(config.voice, "alloy");
 });
 
 test("valid preferences use the upstream voice enum and retain unknown fields", async (t) => {
@@ -98,15 +111,15 @@ test("valid preferences use the upstream voice enum and retain unknown fields", 
   await mkdir(fixture.configDir, { mode: 0o700 });
   await writeFile(
     fixture.configPath,
-    '{"voice":"vale","future":{"enabled":true},"count":2}\n',
+    '{"voice":"cedar","future":{"enabled":true},"count":2}\n',
     { mode: 0o600 },
   );
   const before = await readFile(fixture.configPath);
 
   assert.deepEqual(await fixture.store.load(), {
-    voice: "vale",
+    voice: "cedar",
     fields: {
-      voice: "vale",
+      voice: "cedar",
       future: { enabled: true },
       count: 2,
     },
@@ -130,15 +143,15 @@ test("voice writes are same-directory atomic, private, and preserve unknown fiel
   await mkdir(fixture.configDir, { mode: 0o700 });
   await writeFile(
     fixture.configPath,
-    '{"future":{"enabled":true},"voice":"breeze","count":2}\n',
+    '{"future":{"enabled":true},"voice":"ash","count":2}\n',
     { mode: 0o600 },
   );
 
-  await fixture.store.setVoice("spruce");
+  await fixture.store.setVoice("shimmer");
 
   assert.deepEqual(JSON.parse(await readFile(fixture.configPath, "utf8")), {
     future: { enabled: true },
-    voice: "spruce",
+    voice: "shimmer",
     count: 2,
   });
   assert.equal((await stat(fixture.configDir)).mode & 0o777, 0o700);
@@ -154,7 +167,7 @@ test("broad existing preference modes are refused without repair", async (t) => 
     await t.test(name, async (t) => {
       const fixture = await preferenceFixture(t);
       await mkdir(fixture.configDir, { mode: directoryMode });
-      await writeFile(fixture.configPath, '{"voice":"sol"}\n', {
+      await writeFile(fixture.configPath, '{"voice":"marin"}\n', {
         mode: fileMode,
       });
       const beforeDirectoryMode = (await stat(fixture.configDir)).mode & 0o777;
@@ -162,7 +175,7 @@ test("broad existing preference modes are refused without repair", async (t) => 
 
       await expectPreferenceError(() => fixture.store.load(), "unsafe-path");
       await expectPreferenceError(
-        () => fixture.store.setVoice("vale"),
+        () => fixture.store.setVoice("cedar"),
         "unsafe-path",
       );
 
@@ -176,7 +189,7 @@ test("broad existing preference modes are refused without repair", async (t) => 
       );
       assert.equal(
         await readFile(fixture.configPath, "utf8"),
-        '{"voice":"sol"}\n',
+        '{"voice":"marin"}\n',
       );
     });
   }
@@ -187,13 +200,17 @@ test("an observed competing update is retried before the preference is published
   await mkdir(fixture.configDir, { mode: 0o700 });
   await writeFile(
     fixture.configPath,
-    '{"voice":"sol","initial":{"kept":false}}\n',
+    '{"voice":"marin","initial":{"kept":false}}\n',
     { mode: 0o600 },
   );
   const replacement = path.join(fixture.configDir, ".competing.json");
-  await writeFile(replacement, '{"voice":"vale","competing":{"kept":true}}\n', {
-    mode: 0o600,
-  });
+  await writeFile(
+    replacement,
+    '{"voice":"cedar","competing":{"kept":true}}\n',
+    {
+      mode: 0o600,
+    },
+  );
   const home = path.join(fixture.root, "home");
   await mkdir(home, { mode: 0o700 });
   const eventLog = path.join(fixture.root, "interleaving.json");
@@ -247,7 +264,7 @@ syncBuiltinESMExports();
     `import { createFilePreferenceStore } from ${JSON.stringify(pathToFileURL(preferenceImplementation).href)};
 const agentDir = process.env.PI_LIVE_TEST_AGENT_DIRECTORY;
 if (!agentDir) throw new Error("missing isolated agent directory");
-await createFilePreferenceStore(() => agentDir).setVoice("maple");
+await createFilePreferenceStore(() => agentDir).setVoice("verse");
 `,
   );
 
@@ -270,7 +287,7 @@ await createFilePreferenceStore(() => agentDir).setVoice("maple");
   assert.ifError(result.error);
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(await readFile(fixture.configPath, "utf8")), {
-    voice: "maple",
+    voice: "verse",
     competing: { kept: true },
   });
   assert.deepEqual(JSON.parse(await readFile(eventLog, "utf8")), [
@@ -289,7 +306,7 @@ await createFilePreferenceStore(() => agentDir).setVoice("maple");
 test("a cooperating writer leaves a valid private preference", async (t) => {
   const fixture = await preferenceFixture(t);
   await mkdir(fixture.configDir, { mode: 0o700 });
-  await writeFile(fixture.configPath, '{"voice":"sol","before":true}\n', {
+  await writeFile(fixture.configPath, '{"voice":"marin","before":true}\n', {
     mode: 0o600,
   });
   const worker = new Worker(
@@ -318,7 +335,7 @@ for(;;){
   t.after(() => void worker.terminate());
   await writeFile(
     path.join(fixture.root, "cooperating.json"),
-    '{"voice":"vale","cooperating":{"kept":true}}\n',
+    '{"voice":"cedar","cooperating":{"kept":true}}\n',
     { mode: 0o600 },
   );
   await new Promise<void>((resolve, reject) => {
@@ -336,7 +353,7 @@ for(;;){
     worker.once("error", reject);
   });
 
-  await fixture.store.setVoice("maple");
+  await fixture.store.setVoice("verse");
   await changed;
 
   const result = parseJsonObject(
@@ -348,9 +365,9 @@ for(;;){
       ? undefined
       : jsonObject(result.cooperating, "cooperating preference fields");
   assert.ok(
-    (result.voice === "maple" && result.before === true) ||
-      (result.voice === "maple" && cooperating?.kept === true) ||
-      (result.voice === "vale" && cooperating?.kept === true),
+    (result.voice === "verse" && result.before === true) ||
+      (result.voice === "verse" && cooperating?.kept === true) ||
+      (result.voice === "cedar" && cooperating?.kept === true),
   );
   assert.equal((await stat(fixture.configPath)).mode & 0o777, 0o600);
   assert.deepEqual(await readdir(fixture.configDir), ["config.json"]);
@@ -359,21 +376,21 @@ for(;;){
 test("concurrent stores leave one valid private update and no task artifacts", async (t) => {
   const fixture = await preferenceFixture(t);
   await mkdir(fixture.configDir, { mode: 0o700 });
-  await writeFile(fixture.configPath, '{"voice":"sol","retained":3}\n', {
+  await writeFile(fixture.configPath, '{"voice":"marin","retained":3}\n', {
     mode: 0o600,
   });
   const second = createFilePreferenceStore(() => fixture.agentDir);
 
   await Promise.all([
-    fixture.store.setVoice("arbor"),
-    second.setVoice("spruce"),
+    fixture.store.setVoice("alloy"),
+    second.setVoice("shimmer"),
   ]);
 
   const result = parseJsonObject(
     await readFile(fixture.configPath, "utf8"),
     "stored preferences",
   );
-  assert.ok(result.voice === "arbor" || result.voice === "spruce");
+  assert.ok(result.voice === "alloy" || result.voice === "shimmer");
   assert.equal(result.retained, 3);
   assert.equal((await stat(fixture.configPath)).mode & 0o777, 0o600);
   assert.deepEqual(await readdir(fixture.configDir), ["config.json"]);
@@ -382,7 +399,7 @@ test("concurrent stores leave one valid private update and no task artifacts", a
 test("orphaned unique temps and a legacy lock never block a later write", async (t) => {
   const fixture = await preferenceFixture(t);
   await mkdir(fixture.configDir, { mode: 0o700 });
-  await writeFile(fixture.configPath, '{"voice":"sol","retained":4}\n', {
+  await writeFile(fixture.configPath, '{"voice":"marin","retained":4}\n', {
     mode: 0o600,
   });
   const orphan = path.join(
@@ -393,10 +410,10 @@ test("orphaned unique temps and a legacy lock never block a later write", async 
   await writeFile(orphan, "partial writer bytes\n", { mode: 0o600 });
   await writeFile(legacyLock, "legacy lock\n", { mode: 0o600 });
 
-  await fixture.store.setVoice("juniper");
+  await fixture.store.setVoice("sage");
 
   assert.deepEqual(JSON.parse(await readFile(fixture.configPath, "utf8")), {
-    voice: "juniper",
+    voice: "sage",
     retained: 4,
   });
   assert.equal(await readFile(orphan, "utf8"), "partial writer bytes\n");
@@ -414,13 +431,13 @@ test("directory and symlink drift are refused before rename", async (t) => {
       const fixture = await preferenceFixture(t);
       await mkdir(fixture.configDir, { mode: 0o700 });
       const original = `${JSON.stringify({
-        voice: "sol",
+        voice: "marin",
         original: true,
         payload: "x".repeat(8_000_000),
       })}\n`;
       await writeFile(fixture.configPath, original, { mode: 0o600 });
       const replacement = path.join(fixture.root, "replacement.json");
-      await writeFile(replacement, '{"voice":"vale","swapped":true}\n', {
+      await writeFile(replacement, '{"voice":"cedar","swapped":true}\n', {
         mode: 0o600,
       });
       const worker = new Worker(
@@ -468,7 +485,7 @@ for(;;){
       });
 
       await expectPreferenceError(
-        () => fixture.store.setVoice("maple"),
+        () => fixture.store.setVoice("verse"),
         "unsafe-path",
       );
       await changed;
@@ -477,7 +494,7 @@ for(;;){
         await readFile(fixture.configPath, "utf8"),
         kind === "directory-mode"
           ? original
-          : '{"voice":"vale","swapped":true}\n',
+          : '{"voice":"cedar","swapped":true}\n',
       );
       assert.deepEqual(await readdir(fixture.configDir), ["config.json"]);
     });
@@ -492,7 +509,7 @@ test("malformed, invalid, symlink, and nonregular preferences are refused withou
     await writeFile(fixture.configPath, bytes, { mode: 0o600 });
     await expectPreferenceError(() => fixture.store.load(), "malformed");
     await expectPreferenceError(
-      () => fixture.store.setVoice("vale"),
+      () => fixture.store.setVoice("cedar"),
       "malformed",
     );
     assert.deepEqual(await readFile(fixture.configPath), bytes);
@@ -501,7 +518,7 @@ test("malformed, invalid, symlink, and nonregular preferences are refused withou
   await t.test(
     "any present non-enum voice, including null, is invalid",
     async (t) => {
-      for (const value of ["alloy", null, false, 3, {}]) {
+      for (const value of ["sol", null, false, 3, {}]) {
         const fixture = await preferenceFixture(t);
         await mkdir(fixture.configDir, { mode: 0o700 });
         const bytes = Buffer.from(
@@ -513,7 +530,7 @@ test("malformed, invalid, symlink, and nonregular preferences are refused withou
           "invalid-voice",
         );
         await expectPreferenceError(
-          () => fixture.store.setVoice("vale"),
+          () => fixture.store.setVoice("cedar"),
           "invalid-voice",
         );
         assert.deepEqual(await readFile(fixture.configPath), bytes);
@@ -525,18 +542,18 @@ test("malformed, invalid, symlink, and nonregular preferences are refused withou
     const fixture = await preferenceFixture(t);
     await mkdir(fixture.configDir, { mode: 0o700 });
     const target = path.join(fixture.root, "outside.json");
-    await writeFile(target, '{"voice":"sol"}\n');
+    await writeFile(target, '{"voice":"marin"}\n');
     await symlink(target, fixture.configPath);
     await expectPreferenceError(() => fixture.store.load(), "unsafe-path");
     assert.equal((await lstat(fixture.configPath)).isSymbolicLink(), true);
-    assert.equal(await readFile(target, "utf8"), '{"voice":"sol"}\n');
+    assert.equal(await readFile(target, "utf8"), '{"voice":"marin"}\n');
   });
 
   await t.test("symlinked preference directory", async (t) => {
     const fixture = await preferenceFixture(t);
     const outside = path.join(fixture.root, "outside-directory");
     await mkdir(outside, { mode: 0o700 });
-    await writeFile(path.join(outside, "config.json"), '{"voice":"sol"}\n', {
+    await writeFile(path.join(outside, "config.json"), '{"voice":"marin"}\n', {
       mode: 0o600,
     });
     await symlink(outside, fixture.configDir);

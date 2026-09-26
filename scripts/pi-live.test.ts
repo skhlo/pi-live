@@ -11,7 +11,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
 
-import { registerPiLive } from "../src/live.ts";
+import { registerPiLive, createIsolatedLiveCoordination } from "../src/live.ts";
 import { PreferenceError } from "../src/preferences.ts";
 
 type CommandRegistration = {
@@ -38,6 +38,8 @@ function registrationHarness() {
   >();
   const otherRegistrations: string[] = [];
   const pi = {
+    events: { on: () => () => undefined },
+    getCommands: () => [],
     registerCommand(name: string, registration: CommandRegistration) {
       commands.set(name, registration);
     },
@@ -101,7 +103,11 @@ function context(
 ): ExtensionCommandContext {
   return {
     mode,
+    isIdle: () => true,
+    hasPendingMessages: () => false,
+    sessionManager: { getSessionId: () => "fixture", getLeafId: () => null },
     ui: {
+      confirm: async () => false,
       notify(message: string, level?: "info" | "warning" | "error") {
         notifications.push([message, level]);
       },
@@ -112,7 +118,7 @@ function context(
   } as unknown as ExtensionCommandContext;
 }
 
-test("the default factory registers only the inert pi-live surface without creating agent state", async (t) => {
+test("the default factory registers only live controls and required listeners without creating agent state", async (t) => {
   const agentDir = path.join(
     await mkdtemp(path.join(tmpdir(), "pi-live-discovery-test-")),
     "missing-agent",
@@ -141,13 +147,25 @@ test("the default factory registers only the inert pi-live surface without creat
     [...extension.messageRenderers.keys()],
     ["better-openai-live-delegation"],
   );
-  assert.deepEqual([...extension.handlers.keys()], ["session_shutdown"]);
+  assert.deepEqual([...extension.handlers.keys()].sort(), [
+    "agent_settled",
+    "agent_start",
+    "message_end",
+    "session_before_fork",
+    "session_before_switch",
+    "session_before_tree",
+    "session_shutdown",
+    "session_start",
+    "turn_end",
+    "ui_prompt_end",
+    "ui_prompt_start",
+  ]);
   assert.deepEqual([...extension.tools.keys()], []);
   assert.deepEqual([...extension.flags.keys()], []);
   assert.equal(await isMissing(agentDir), true);
 });
 
-test("the in-process Pi 0.87.1 loader API accepts one default factory and the inert registrations", async (t) => {
+test("the in-process Pi 0.87.1 loader API accepts one default factory and side-effect-free registrations", async (t) => {
   const entry = path.join(import.meta.dirname, "../index.ts");
   const agentDir = await mkdtemp(path.join(tmpdir(), "pi-live-loader-test-"));
   t.after(async () => rm(agentDir, { recursive: true }));
@@ -166,7 +184,19 @@ test("the in-process Pi 0.87.1 loader API accepts one default factory and the in
     [...extension.messageRenderers.keys()],
     ["better-openai-live-delegation"],
   );
-  assert.deepEqual([...extension.handlers.keys()], ["session_shutdown"]);
+  assert.deepEqual([...extension.handlers.keys()].sort(), [
+    "agent_settled",
+    "agent_start",
+    "message_end",
+    "session_before_fork",
+    "session_before_switch",
+    "session_before_tree",
+    "session_shutdown",
+    "session_start",
+    "turn_end",
+    "ui_prompt_end",
+    "ui_prompt_start",
+  ]);
   assert.deepEqual([...extension.tools.keys()], []);
   assert.deepEqual([...extension.flags.keys()], []);
 });
@@ -179,7 +209,7 @@ test("status stays off and lazily reports the selected voice and compatibility",
     preferences: {
       async load() {
         preferenceReads += 1;
-        return { voice: "maple", fields: { voice: "maple" } };
+        return { voice: "verse", fields: { voice: "verse" } };
       },
       async setVoice() {
         throw new Error("unexpected preference write");
@@ -192,6 +222,7 @@ test("status stays off and lazily reports the selected voice and compatibility",
       },
     },
     truncateToWidth: noClip,
+    runtime: { lifecycle: { coordination: createIsolatedLiveCoordination() } },
   });
   const notifications: Array<[string, string | undefined]> = [];
   const widgetCalls: WidgetCall[] = [];
@@ -202,17 +233,14 @@ test("status stays off and lazily reports the selected voice and compatibility",
   );
 
   assert.deepEqual(notifications, [
-    [
-      "Pi Live: off; voice maple; compatibility ready; calling unavailable (setup-only).",
-      "info",
-    ],
+    ["Pi Live: off; unmuted; voice verse; compatibility supported.", "info"],
   ]);
   assert.equal(preferenceReads, 1);
   assert.equal(compatibilityChecks, 1);
   assert.deepEqual(widgetCalls, []);
 });
 
-test("setup-only start and shortcut share the static off widget and never claim active state", async () => {
+test("start and shortcut share cancelled consent without claiming active state", async () => {
   const harness = registrationHarness();
   let preferenceCalls = 0;
   let compatibilityCalls = 0;
@@ -220,7 +248,7 @@ test("setup-only start and shortcut share the static off widget and never claim 
     preferences: {
       async load() {
         preferenceCalls += 1;
-        return { voice: "sol", fields: {} };
+        return { voice: "marin", fields: {} };
       },
       async setVoice() {
         preferenceCalls += 1;
@@ -233,6 +261,7 @@ test("setup-only start and shortcut share the static off widget and never claim 
       },
     },
     truncateToWidth: noClip,
+    runtime: { lifecycle: { coordination: createIsolatedLiveCoordination() } },
   });
   const notifications: Array<[string, string | undefined]> = [];
   const widgetCalls: WidgetCall[] = [];
@@ -246,41 +275,29 @@ test("setup-only start and shortcut share the static off widget and never claim 
   await commandFrom(harness).handler("mute", ctx);
   await commandFrom(harness).handler("unmute", ctx);
 
-  const expectedWidget = [
-    "Pi Live: off (setup-only)",
-    "Voice: sol",
-    "Compatibility: supported",
-  ];
-  assert.deepEqual(widgetCalls, [
-    ["pi-live", expectedWidget],
-    ["pi-live", expectedWidget],
-    ["pi-live", expectedWidget],
-    ["pi-live", undefined],
-    ["pi-live", undefined],
-  ]);
   assert.equal(preferenceCalls, 3);
-  assert.equal(compatibilityCalls, 3);
+  assert.equal(compatibilityCalls, 6);
   assert.equal(
-    notifications.filter(([message]) => message.includes("setup-only")).length,
+    widgetCalls.filter(([, content]) => typeof content === "function").length,
     3,
   );
   assert.equal(
-    [...notifications.map(([message]) => message), ...expectedWidget].some(
-      (text) => /listening|active/i.test(text),
-    ),
+    widgetCalls.filter(([, content]) => content === undefined).length,
+    3,
+  );
+  assert.equal(
+    notifications.some(([text]) => /listening|active/i.test(text)),
     false,
   );
-  assert.deepEqual(notifications.slice(3), [
-    ["Pi Live is off.", "info"],
-    ["Pi Live is off.", "info"],
-    ["Pi Live is off; mute is unavailable.", "warning"],
-    ["Pi Live is off; unmute is unavailable.", "warning"],
+  assert.deepEqual(notifications.slice(-2), [
+    ["Pi Live: off; mute unavailable.", "warning"],
+    ["Pi Live: off; unmute unavailable.", "warning"],
   ]);
 });
 
-test("help discloses the setup limits and voice changes only the off-state preference", async () => {
+test("help discloses calling limits and voice changes only the off-state preference", async () => {
   const harness = registrationHarness();
-  let voice: "sol" | "vale" = "sol";
+  let voice: "marin" | "cedar" = "marin";
   let writes = 0;
   let compatibilityCalls = 0;
   registerPiLive(harness.pi, {
@@ -300,21 +317,22 @@ test("help discloses the setup limits and voice changes only the off-state prefe
       },
     },
     truncateToWidth: noClip,
+    runtime: { lifecycle: { coordination: createIsolatedLiveCoordination() } },
   });
   const notifications: Array<[string, string | undefined]> = [];
   const ctx = context("tui", notifications, []);
 
   await commandFrom(harness).handler("help", ctx);
   await commandFrom(harness).handler("voice", ctx);
-  await commandFrom(harness).handler("voice vale", ctx);
-  await commandFrom(harness).handler("voice alloy", ctx);
+  await commandFrom(harness).handler("voice cedar", ctx);
+  await commandFrom(harness).handler("voice sol", ctx);
 
   const help = notifications[0]?.[0] ?? "";
   for (const phrase of [
-    "setup-only",
-    "host microphone and speaker",
-    "OpenAI experimental",
-    "Pi session identifier",
+    "host microphone and speakers",
+    "OpenAI GPT-Live",
+    "API key",
+    "progress note",
     "shortcut-opened dialogs",
     "stop voice first",
   ]) {
@@ -325,12 +343,12 @@ test("help discloses the setup limits and voice changes only the off-state prefe
     "error",
   ]);
   assert.deepEqual(notifications[2], [
-    "Pi Live voice set to vale for the next call.",
+    "Pi Live voice set to cedar for the next call.",
     "info",
   ]);
-  assert.match(notifications[3]?.[0] ?? "", /arbor.*vale/);
+  assert.match(notifications[3]?.[0] ?? "", /alloy.*cedar/);
   assert.equal(notifications[3]?.[1], "error");
-  assert.equal(voice, "vale");
+  assert.equal(voice, "cedar");
   assert.equal(writes, 1);
   assert.equal(compatibilityCalls, 0);
 });
@@ -391,6 +409,7 @@ test("start reports invalid preferences without a widget or compatibility read",
       },
     },
     truncateToWidth: noClip,
+    runtime: { lifecycle: { coordination: createIsolatedLiveCoordination() } },
   });
   const notifications: Array<[string, string | undefined]> = [];
   const widgetCalls: WidgetCall[] = [];
@@ -413,7 +432,7 @@ test("voice write failure reports uncertainty after the writer runs", async () =
   registerPiLive(harness.pi, {
     preferences: {
       async load() {
-        return { voice: "sol", fields: {} };
+        return { voice: "marin", fields: {} };
       },
       async setVoice(voice) {
         written.push(voice);
@@ -426,19 +445,20 @@ test("voice write failure reports uncertainty after the writer runs", async () =
       },
     },
     truncateToWidth: noClip,
+    runtime: { lifecycle: { coordination: createIsolatedLiveCoordination() } },
   });
   const notifications: Array<[string, string | undefined]> = [];
   await commandFrom(harness).handler(
-    "voice arbor",
+    "voice alloy",
     context("tui", notifications, []),
   );
-  assert.deepEqual(written, ["arbor"]);
+  assert.deepEqual(written, ["alloy"]);
   assert.deepEqual(notifications, [
     ["Pi Live preference could not be accessed or written.", "error"],
   ]);
 });
 
-test("start fixes an unsupported compatibility result into the static widget", async () => {
+test("unsupported compatibility refuses before consent or widget", async () => {
   const harness = registrationHarness();
   let preferenceReads = 0;
   let compatibilityChecks = 0;
@@ -446,7 +466,7 @@ test("start fixes an unsupported compatibility result into the static widget", a
     preferences: {
       async load() {
         preferenceReads += 1;
-        return { voice: "maple", fields: { voice: "maple" } };
+        return { voice: "verse", fields: { voice: "verse" } };
       },
       async setVoice() {
         throw new Error("unexpected preference write");
@@ -462,6 +482,7 @@ test("start fixes an unsupported compatibility result into the static widget", a
       },
     },
     truncateToWidth: noClip,
+    runtime: { lifecycle: { coordination: createIsolatedLiveCoordination() } },
   });
   const notifications: Array<[string, string | undefined]> = [];
   const widgetCalls: WidgetCall[] = [];
@@ -471,18 +492,9 @@ test("start fixes an unsupported compatibility result into the static widget", a
     context("tui", notifications, widgetCalls),
   );
 
-  assert.deepEqual(widgetCalls, [
-    [
-      "pi-live",
-      [
-        "Pi Live: off (setup-only)",
-        "Voice: maple",
-        "Compatibility: unsupported (platform, native-metadata)",
-      ],
-    ],
-  ]);
+  assert.deepEqual(widgetCalls, []);
   assert.deepEqual(notifications, [
-    ["Pi Live calling is unavailable in this setup-only package.", "warning"],
+    ["Pi Live: unsupported (platform, native-metadata).", "warning"],
   ]);
   assert.equal(preferenceReads, 1);
   assert.equal(compatibilityChecks, 1);
@@ -493,7 +505,7 @@ test("the renderer labels visible delegation text and shutdown clears only pi-li
   registerPiLive(harness.pi, {
     preferences: {
       async load() {
-        return { voice: "sol", fields: {} };
+        return { voice: "marin", fields: {} };
       },
       async setVoice() {},
     },
@@ -503,6 +515,7 @@ test("the renderer labels visible delegation text and shutdown clears only pi-li
       },
     },
     truncateToWidth: noClip,
+    runtime: { lifecycle: { coordination: createIsolatedLiveCoordination() } },
   });
   const renderer = harness.renderers.get("better-openai-live-delegation");
   assert.ok(renderer);
@@ -523,7 +536,7 @@ test("the renderer labels visible delegation text and shutdown clears only pi-li
 
   const widgetCalls: WidgetCall[] = [];
   const notifications: Array<[string, string | undefined]> = [];
-  const shutdown = harness.events.get("session_shutdown")?.[0];
+  const shutdown = harness.events.get("session_shutdown")?.at(-1);
   assert.ok(shutdown);
   await shutdown(
     { type: "session_shutdown", reason: "quit" },
@@ -540,7 +553,7 @@ test("every non-TUI command and the shortcut refuse before touching terminal pre
     preferences: {
       async load() {
         dependencyCalls += 1;
-        return { voice: "sol", fields: {} };
+        return { voice: "marin", fields: {} };
       },
       async setVoice() {
         dependencyCalls += 1;
@@ -553,6 +566,7 @@ test("every non-TUI command and the shortcut refuse before touching terminal pre
       },
     },
     truncateToWidth: noClip,
+    runtime: { lifecycle: { coordination: createIsolatedLiveCoordination() } },
   });
   const notifications: Array<[string, string | undefined]> = [];
   const widgetCalls: WidgetCall[] = [];
@@ -567,7 +581,7 @@ test("every non-TUI command and the shortcut refuse before touching terminal pre
     "status",
     "help",
     "voice",
-    "voice vale",
+    "voice cedar",
     "unknown",
   ]) {
     await commandFrom(harness).handler(args, ctx);

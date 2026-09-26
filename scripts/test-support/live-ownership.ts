@@ -433,14 +433,14 @@ export async function startAndStopChild(
   assert.deepEqual(await contender.next(), {
     event: "started",
     result: { kind: "started", state: "active" },
-    snapshot: { state: "active", muted: false, voice: "sol" },
+    snapshot: { state: "active", muted: false, voice: "marin" },
   });
   const stopped = contender.next();
   contender.process.stdin.end("stop\n");
   assert.deepEqual(await stopped, {
     event: "stopped",
     result: { status: "off" },
-    snapshot: { state: "off", muted: false, voice: "sol" },
+    snapshot: { state: "off", muted: false, voice: "marin" },
   });
   assert.deepEqual(
     await contender.waitExited(),

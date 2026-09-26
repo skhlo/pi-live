@@ -46,9 +46,11 @@ cannot start another call, even if late resource cleanup later succeeds.
 _Avoid_: Off, retryable failure, releasing call
 
 **Coding delegation**:
-One coding request admitted from voice into the existing Pi session. Stopping
-voice prevents subsequent voice delivery, not completion of the coding work.
+A voice request sent into the existing Pi conversation. Pi handles it alongside
+other input. Stopping voice does not stop Pi work.
 
 **Home certification**:
 Setup's evidence that a particular canonical account home is suitable local
 storage for Pi Live ownership. A resolved pathname alone is not certification.
+Until setup exists, the development-only `PI_LIVE_DEV_TRUST_HOME=1` trusts a
+manually prepared home instead.

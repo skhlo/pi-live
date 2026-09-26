@@ -20,9 +20,13 @@ import {
 
 import {
   bindPiLiveLifecycle,
+  registerPiLive,
+  createLiveDependencies,
   createIsolatedLiveCoordination,
   createNodeOwnershipFileSystem,
   type LiveLifecycleBinding,
+  type LiveLifecycleBindingOptions,
+  type LiveDependencies,
 } from "../../src/live.ts";
 import {
   ManualClock,
@@ -100,6 +104,12 @@ interface SdkFixtureOptions {
   getCommandsOverride?: () => unknown;
   sourceInfoByInlineName?: ReadonlyMap<string, SourceInfo>;
   cleanupTimeoutMs?: number;
+  provider?: Parameters<ModelRuntime["registerProvider"]>[1];
+  tools?: NonNullable<Parameters<typeof createAgentSession>[0]>["customTools"];
+  controls?: boolean;
+  resources?: NonNullable<LiveDependencies["runtime"]>["resources"];
+  retry?: boolean;
+  configuredSourcesFromSettings?: boolean;
 }
 
 export async function createSdkFixture(
@@ -114,7 +124,9 @@ export async function createSdkFixture(
     await mkdir(directory, { recursive: true, mode: 0o700 });
 
   const previousHome = process.env.HOME;
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   process.env.HOME = home;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
 
   const clock = new ManualClock();
   const coordination = createIsolatedLiveCoordination();
@@ -152,6 +164,9 @@ export async function createSdkFixture(
     } finally {
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
+      if (previousAgentDir === undefined)
+        delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
     }
     if (errors.length > 0)
       throw new AggregateError(errors, "SDK fixture cleanup failed");
@@ -201,53 +216,87 @@ export async function createSdkFixture(
       const bindingApi = options.getCommandsOverride
         ? (new Proxy(pi, {
             get(target, property, receiver) {
-              if (property === "getCommands")
+              if (property === "getCommands" && options.getCommandsOverride)
                 return options.getCommandsOverride;
               return Reflect.get(target, property, receiver);
             },
           }) as typeof pi)
         : pi;
-      bindings.push(
-        bindPiLiveLifecycle(bindingApi, {
-          facts: {
-            check: () => ({
-              compatible: true,
-              configuredPackageSources: options.configuredPackageSources,
-            }),
+      const bindingOptions: LiveLifecycleBindingOptions = {
+        facts: {
+          check: () => ({
+            compatible: true,
+            configuredPackageSources: options.configuredPackageSources,
+          }),
+        },
+        consent:
+          options.consent ??
+          ({
+            request: ({ openConfirm }) =>
+              openConfirm("Pi Live consent", "Start the fixture call?"),
+          } satisfies NonNullable<SdkFixtureOptions["consent"]>),
+        lifecycle: {
+          clock,
+          coordination,
+          randomId: () => `fixture-${++randomSequence}`,
+          home: certifiedHome(home),
+          ownershipFileSystem: {
+            ...nodeOwnership,
+            async mkdirExclusive(target, mode): Promise<void> {
+              counts.acquisitionCalls += 1;
+              await nodeOwnership.mkdirExclusive(target, mode);
+            },
+            async rmdir(target): Promise<void> {
+              await nodeOwnership.rmdir(target);
+              options.onRmdirRemoved?.();
+              await options.delayRmdirCallback?.promise;
+            },
           },
-          consent:
-            options.consent ??
-            ({
-              request: ({ openConfirm }) =>
-                openConfirm("Pi Live consent", "Start the fixture call?"),
-            } satisfies NonNullable<SdkFixtureOptions["consent"]>),
-          lifecycle: {
-            clock,
-            coordination,
-            randomId: () => `fixture-${++randomSequence}`,
-            home: certifiedHome(home),
-            ownershipFileSystem: {
-              ...nodeOwnership,
-              async mkdirExclusive(target, mode): Promise<void> {
-                counts.acquisitionCalls += 1;
-                await nodeOwnership.mkdirExclusive(target, mode);
-              },
-              async rmdir(target): Promise<void> {
-                await nodeOwnership.rmdir(target);
-                options.onRmdirRemoved?.();
-                await options.delayRmdirCallback?.promise;
+          resources: createFakeResources(connection),
+        },
+      };
+      if (options.controls) {
+        let voice: "marin" | "cedar" = "marin";
+        bindings.push(
+          registerPiLive(bindingApi, {
+            preferences: {
+              load: async () => ({ voice, fields: {} }),
+              setVoice: async (next) => {
+                assert.ok(next === "marin" || next === "cedar");
+                voice = next;
               },
             },
-            resources: createFakeResources(connection),
-          },
-        }),
-      );
+            compatibility: {
+              check: async () => ({ supported: true, issues: [] }),
+            },
+            truncateToWidth: (text, width) => text.slice(0, width),
+            ...(options.configuredSourcesFromSettings
+              ? {
+                  packageSources: createLiveDependencies((text) => text)
+                    .packageSources,
+                }
+              : {}),
+            runtime: {
+              lifecycle: bindingOptions.lifecycle,
+              executionHost: () => "fixture-host",
+              resources:
+                options.resources ?? (() => createFakeResources(connection)),
+            },
+          }),
+        );
+      } else bindings.push(bindPiLiveLifecycle(bindingApi, bindingOptions));
     },
   };
 
   const settingsManager = SettingsManager.inMemory({
     cacheWarming: "off",
     compaction: { enabled: false },
+    retry: {
+      enabled: options.retry ?? false,
+      maxRetries: 1,
+      baseDelayMs: 1,
+      maxAgentDelayMs: 1,
+    },
   });
   const modelRuntime = await ModelRuntime.create({
     credentials: {
@@ -260,6 +309,8 @@ export async function createSdkFixture(
     refreshOnCreate: false,
     allowModelNetwork: false,
   });
+  if (options.provider)
+    modelRuntime.registerProvider("live-fixture", options.provider);
   const resourceLoader = new DefaultResourceLoader({
     cwd,
     agentDir,
@@ -308,7 +359,11 @@ export async function createSdkFixture(
       resourceLoader,
       sessionManager,
       sessionStartEvent,
-      noTools: "all",
+      noTools: options.tools ? "builtin" : "all",
+      ...(options.provider
+        ? { model: modelRuntime.getModel("live-fixture", "fixture") }
+        : {}),
+      customTools: options.tools,
     });
     return {
       ...result,
@@ -362,6 +417,7 @@ export async function createSdkFixture(
   return Object.assign(counts, {
     root,
     cwd,
+    agentDir,
     lockPath,
     clock,
     runtime,

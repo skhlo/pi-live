@@ -11,12 +11,17 @@ import {
   type FileHandle,
 } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { userInfo } from "node:os";
+import { hostname, userInfo } from "node:os";
 import path from "node:path";
 
 import type {
   ExtensionAPI,
   ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
+import {
+  CONFIG_DIR_NAME,
+  getAgentDir,
+  SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { Dispatcher } from "undici";
 
@@ -27,6 +32,7 @@ import {
 } from "./compatibility.ts";
 import {
   createFilePreferenceStore,
+  DEFAULT_LIVE_VOICE,
   isLiveVoice,
   LIVE_VOICE_VALUES,
   PreferenceError,
@@ -50,6 +56,7 @@ export type LiveDiagnostic =
   | "connect-timeout"
   | "protocol-error"
   | "audio-error"
+  | "remote-ended"
   | "cleanup-blocked";
 
 export interface LiveSnapshot {
@@ -60,21 +67,17 @@ export interface LiveSnapshot {
 }
 
 const LIVE_LIMITS = {
-  accessTokenBytes: 16 * 1_024,
-  accountIdBytes: 256,
-  credentialEnvelopeBytes: 20 * 1_024,
-  deviceCheckTokenBytes: 8 * 1_024,
-  attestationHeaderBytes: 16 * 1_024,
+  apiKeyBytes: 1_024,
   combinedHeaderBytes: 64 * 1_024,
   sdpBytes: 1_024 * 1_024,
   signalingRequestBytes: 2 * 1_024 * 1_024,
+  signalingResponseBytes: 2 * 1_024 * 1_024,
   nonOkBodyBytes: 8 * 1_024,
   inboundBytes: 256 * 1_024,
   idBytes: 256,
   contextChunkBytes: 500,
   textBytes: 64 * 1_024,
-  contentEntries: 64,
-  seenIds: 256,
+  finalSpeechBytes: 1_500,
   pendingProducers: 256,
   retainedProducerBytes: 256 * 1_024,
   pendingFragments: 256,
@@ -88,8 +91,7 @@ const LIVE_LIMITS = {
 } as const;
 
 export interface LiveCredentials {
-  accessToken: string;
-  accountId: string;
+  apiKey: string;
 }
 
 export interface LiveCredentialRegistry {
@@ -98,7 +100,6 @@ export interface LiveCredentialRegistry {
 
 export interface LiveCredentialResolutionOptions {
   signal?: AbortSignal;
-  now?: () => number;
 }
 
 function isUnknownRecord(value: unknown): value is Record<string, unknown> {
@@ -141,116 +142,6 @@ function validCredentialField(
   );
 }
 
-interface ParsedLiveJwt {
-  accountId: string;
-}
-
-function parseLiveJwt(token: string, now: number): ParsedLiveJwt | undefined {
-  try {
-    if (!isValidUtf8String(token)) return undefined;
-    const parts = token.split(".");
-    const payloadPart = parts[1];
-    if (
-      parts.length !== 3 ||
-      !parts[0] ||
-      !payloadPart ||
-      !parts[2] ||
-      !/^[A-Za-z0-9_-]+$/.test(payloadPart)
-    )
-      return undefined;
-    const decoded = Buffer.from(payloadPart, "base64url");
-    if (
-      decoded.byteLength > LIVE_LIMITS.accessTokenBytes ||
-      decoded.toString("base64url") !== payloadPart
-    )
-      return undefined;
-    const text = decodeUtf8(decoded);
-    if (text === undefined) return undefined;
-    const parsed = JSON.parse(text) as unknown;
-    if (!isUnknownRecord(parsed)) return undefined;
-    const expiry = parsed.exp;
-    if (
-      typeof expiry !== "number" ||
-      !Number.isFinite(expiry) ||
-      expiry <= now / 1_000
-    )
-      return undefined;
-    const auth = parsed["https://api.openai.com/auth"];
-    if (!isUnknownRecord(auth)) return undefined;
-    const accountId = auth.chatgpt_account_id;
-    if (!validCredentialField(accountId, LIVE_LIMITS.accountIdBytes))
-      return undefined;
-    return { accountId };
-  } catch {
-    return undefined;
-  }
-}
-
-function parseLiveRegistryCredentials(
-  raw: string | undefined,
-  now: number,
-): LiveCredentials | undefined {
-  if (
-    typeof raw !== "string" ||
-    raw.length === 0 ||
-    Buffer.byteLength(raw, "utf8") > LIVE_LIMITS.credentialEnvelopeBytes
-  )
-    return undefined;
-  const value = raw.trim();
-  if (!value) return undefined;
-
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (isUnknownRecord(parsed)) {
-      const accessToken =
-        typeof parsed.access === "string"
-          ? parsed.access
-          : typeof parsed.token === "string"
-            ? parsed.token
-            : undefined;
-      const accountId =
-        typeof parsed.accountId === "string"
-          ? parsed.accountId
-          : typeof parsed.account_id === "string"
-            ? parsed.account_id
-            : undefined;
-      const expiry = parsed.expires;
-      if (
-        !validCredentialField(accessToken, LIVE_LIMITS.accessTokenBytes) ||
-        !validCredentialField(accountId, LIVE_LIMITS.accountIdBytes)
-      )
-        return undefined;
-      const tokenLooksLikeJwt = accessToken.split(".").length === 3;
-      if (tokenLooksLikeJwt) {
-        const jwt = parseLiveJwt(accessToken, now);
-        if (!jwt || jwt.accountId !== accountId) return undefined;
-        if (
-          expiry !== undefined &&
-          (typeof expiry !== "number" ||
-            !Number.isFinite(expiry) ||
-            expiry <= now)
-        )
-          return undefined;
-        return { accessToken, accountId };
-      }
-      if (
-        typeof expiry !== "number" ||
-        !Number.isFinite(expiry) ||
-        expiry <= now
-      )
-        return undefined;
-      return { accessToken, accountId };
-    }
-  } catch {
-    // Pi normally returns the plain OAuth access token.
-  }
-
-  if (!validCredentialField(value, LIVE_LIMITS.accessTokenBytes))
-    return undefined;
-  const jwt = parseLiveJwt(value, now);
-  return jwt ? { accessToken: value, accountId: jwt.accountId } : undefined;
-}
-
 export async function resolveLiveRegistryCredentials(
   registry: LiveCredentialRegistry,
   options: LiveCredentialResolutionOptions = {},
@@ -258,7 +149,7 @@ export async function resolveLiveRegistryCredentials(
   if (options.signal?.aborted) return undefined;
   let request: Promise<string | undefined>;
   try {
-    request = registry.getApiKeyForProvider("openai-codex");
+    request = registry.getApiKeyForProvider("openai");
   } catch {
     return undefined;
   }
@@ -282,170 +173,10 @@ export async function resolveLiveRegistryCredentials(
     : await observed;
   removeAbort?.();
   if (result.kind !== "value" || options.signal?.aborted) return undefined;
-  return parseLiveRegistryCredentials(
-    result.value,
-    (options.now ?? Date.now)(),
-  );
-}
-
-export interface LiveDeviceCheckResult {
-  supported: boolean;
-  tokenBase64?: string;
-  error?: string;
-  latencyMs: number;
-}
-
-export interface LiveDeviceCheck {
-  generateToken(): Promise<LiveDeviceCheckResult>;
-}
-
-export interface LiveAttestation {
-  header: string;
-  supported: boolean;
-}
-
-export interface LiveAttestationOptions {
-  locale?: string;
-  timeZone?: string;
-  appSessionId?: string;
-}
-
-function cborHeader(major: number, value: number): Buffer {
-  if (!Number.isSafeInteger(value) || value < 0)
-    throw new Error("Live attestation data is invalid.");
-  if (value < 24) return Buffer.from([major + value]);
-  if (value <= 0xff) return Buffer.from([major + 24, value]);
-  if (value <= 0xffff) {
-    const output = Buffer.allocUnsafe(3);
-    output[0] = major + 25;
-    output.writeUInt16BE(value, 1);
-    return output;
-  }
-  if (value <= 0xffff_ffff) {
-    const output = Buffer.allocUnsafe(5);
-    output[0] = major + 26;
-    output.writeUInt32BE(value, 1);
-    return output;
-  }
-  throw new Error("Live attestation data is invalid.");
-}
-
-function cborUnsigned(value: number): Buffer {
-  return cborHeader(0, value);
-}
-
-function cborText(value: string): Buffer {
-  if (!isValidUtf8String(value))
-    throw new Error("Live attestation data is invalid.");
-  const text = Buffer.from(value, "utf8");
-  return Buffer.concat([cborHeader(96, text.byteLength), text]);
-}
-
-function cborMap(entries: ReadonlyArray<readonly [Buffer, Buffer]>): Buffer {
-  const parts: Buffer[] = [cborHeader(160, entries.length)];
-  for (const [key, value] of entries) parts.push(key, value);
-  return Buffer.concat(parts);
-}
-
-function liveAttestationSignals(options: LiveAttestationOptions): Buffer {
-  const resolved = Intl.DateTimeFormat().resolvedOptions();
-  const locale = (options.locale ?? resolved.locale ?? "unknown").slice(0, 64);
-  const timeZone = (options.timeZone ?? resolved.timeZone ?? "unknown").slice(
-    0,
-    64,
-  );
-  const appSessionId = (options.appSessionId ?? randomUUID()).slice(0, 128);
-  const preferredLanguages = Buffer.concat([
-    cborHeader(128, 1),
-    cborText(locale),
-  ]);
-  return cborMap([
-    [cborUnsigned(0), cborUnsigned(1)],
-    [cborUnsigned(1), preferredLanguages],
-    [cborUnsigned(2), cborText(locale)],
-    [cborUnsigned(3), cborText(timeZone)],
-    [cborUnsigned(4), cborUnsigned(0)],
-    [cborUnsigned(5), cborUnsigned(1)],
-    [cborUnsigned(6), cborText(appSessionId)],
-  ]);
-}
-
-function decodeDeviceCheckToken(value: string): Buffer | undefined {
-  const maximumEncodedLength =
-    Math.ceil(LIVE_LIMITS.deviceCheckTokenBytes / 3) * 4;
-  if (
-    value.length === 0 ||
-    value.length > maximumEncodedLength ||
-    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
-      value,
-    )
-  )
-    return undefined;
-  const decoded = Buffer.from(value, "base64");
-  return decoded.byteLength <= LIVE_LIMITS.deviceCheckTokenBytes &&
-    decoded.toString("base64") === value
-    ? decoded
+  const apiKey = result.value;
+  return validCredentialField(apiKey, LIVE_LIMITS.apiKeyBytes)
+    ? { apiKey }
     : undefined;
-}
-
-function buildLiveClientAttestation(
-  result: LiveDeviceCheckResult,
-  options: LiveAttestationOptions,
-): string {
-  const entries: Array<readonly [Buffer, Buffer]> = [];
-  if (result.supported) {
-    if (
-      result.error !== undefined ||
-      typeof result.tokenBase64 !== "string" ||
-      !decodeDeviceCheckToken(result.tokenBase64)
-    )
-      throw new Error("Live attestation data is invalid.");
-    entries.push([cborText("token"), cborText(result.tokenBase64)]);
-  } else {
-    if (result.error !== undefined || result.tokenBase64 !== undefined)
-      throw new Error("Live attestation data is invalid.");
-    entries.push([cborText("error_code"), cborUnsigned(3)]);
-  }
-  entries.push([cborText("bundle_id"), cborText("com.openai.codex")]);
-  const signals = liveAttestationSignals(options);
-  entries.push([
-    cborText("f"),
-    Buffer.concat([cborHeader(64, signals.byteLength), signals]),
-  ]);
-  if (Number.isFinite(result.latencyMs)) {
-    const latency = Buffer.allocUnsafe(9);
-    latency[0] = 0xfb;
-    latency.writeDoubleBE(result.latencyMs, 1);
-    entries.push([cborText("t"), latency]);
-  }
-  return `v1.${cborMap(entries).toString("base64url")}`;
-}
-
-export async function prepareLiveAttestation(
-  deviceCheck: LiveDeviceCheck,
-  options: LiveAttestationOptions = {},
-): Promise<LiveAttestation> {
-  let result: LiveDeviceCheckResult;
-  try {
-    result = await deviceCheck.generateToken();
-  } catch {
-    throw new Error("Live attestation failed.");
-  }
-  if (
-    typeof result?.supported !== "boolean" ||
-    typeof result.latencyMs !== "number" ||
-    !Number.isFinite(result.latencyMs) ||
-    result.latencyMs < 0 ||
-    (result.tokenBase64 !== undefined &&
-      typeof result.tokenBase64 !== "string") ||
-    (result.error !== undefined && typeof result.error !== "string")
-  )
-    throw new Error("Live attestation data is invalid.");
-  const clientAttestation = buildLiveClientAttestation(result, options);
-  const header = JSON.stringify({ v: 1, s: 0, t: clientAttestation });
-  if (Buffer.byteLength(header, "utf8") > LIVE_LIMITS.attestationHeaderBytes)
-    throw new Error("Live attestation data is invalid.");
-  return { header, supported: result.supported };
 }
 
 export interface LiveAdmissionFacts {
@@ -453,8 +184,6 @@ export interface LiveAdmissionFacts {
   compatible: boolean;
   conflict: boolean;
   dialog: boolean;
-  idle: boolean;
-  pendingWork: boolean;
 }
 
 export interface OwnershipIdentity {
@@ -532,15 +261,10 @@ export interface LiveConnection {
 
 export interface LiveResources {
   credentials(input: { signal: AbortSignal }): Promise<LiveCredentials>;
-  attestation(input: {
-    signal: AbortSignal;
-    credentials: LiveCredentials;
-  }): Promise<LiveAttestation>;
   connect(input: {
     signal: AbortSignal;
     deadline: number;
     credentials: LiveCredentials;
-    attestation: LiveAttestation;
     voice: string;
     onFailure?(diagnostic: LiveDiagnostic): void;
   }): LiveResourceStart<LiveConnection>;
@@ -549,7 +273,6 @@ export interface LiveResources {
 export interface LiveHttpResponse {
   status: number;
   statusText: string;
-  location?: string;
   body: AsyncIterable<Uint8Array>;
   cancel(): void | Promise<void>;
 }
@@ -610,7 +333,6 @@ export interface LiveNativePeer {
 }
 
 export interface LiveNativeAdapter {
-  deviceCheck: LiveDeviceCheck;
   createPeer(input: {
     onEvent(payload: string): void;
     onOutputLevel(level: number): void;
@@ -626,7 +348,6 @@ export interface LiveRuntimeDiagnostic {
   code: LiveDiagnostic;
   phase:
     | "credentials"
-    | "attestation"
     | "offer"
     | "signaling"
     | "answer"
@@ -642,7 +363,6 @@ export interface LiveRuntimeDiagnostic {
 
 export interface LiveRuntimeResourcesOptions {
   registry: LiveCredentialRegistry;
-  sessionId: string;
   instructions: string;
   native?: LiveNativeAdapter;
   network?: LiveNetworkAdapter;
@@ -652,12 +372,14 @@ export interface LiveRuntimeResourcesOptions {
     url: string,
   ) => string | undefined | Promise<string | undefined>;
   callbacks?: {
-    onRequest?(request: { id: string; text: string }): boolean;
+    onLevel?(level: number): void;
+    onRequest?(request: { id: string; text: string }): void;
     onTranscript?(transcript: {
       role: "user" | "assistant";
       text: string;
     }): void;
     onDiagnostic?(diagnostic: LiveRuntimeDiagnostic): void;
+    onServiceError?(code: string): void;
   };
 }
 
@@ -734,10 +456,6 @@ export type LiveStopResult = {
 
 export type LiveOutgoingSender = (data: LiveOutgoingData) => boolean;
 
-export type LiveDelegationAdmissionResult =
-  | { kind: "updated"; state: "active"; settle(): void }
-  | { kind: "refused"; state: LiveState; diagnostic: LiveDiagnostic };
-
 export interface LiveLifecycle {
   snapshot(): LiveSnapshot;
   createOutgoingSender(): LiveOutgoingSender | undefined;
@@ -747,7 +465,6 @@ export interface LiveLifecycle {
   setMuted(muted: boolean): Promise<LiveMutationResult>;
   selectVoice(voice: string): Promise<LiveMutationResult>;
   interrupt(reason: LiveInterruptionReason): Promise<LiveStopResult>;
-  delegationAdmitted(): LiveDelegationAdmissionResult;
 }
 
 interface Deferred<T> {
@@ -800,7 +517,6 @@ interface CallAttempt {
   closeController?: AbortController;
   microphoneTokens: number;
   microphoneBucketAt: number;
-  delegation?: { token: object; timer?: LiveTimer; deadline: number };
 }
 
 const DEFAULT_ADMISSION: LiveAdmissionFacts = {
@@ -808,15 +524,12 @@ const DEFAULT_ADMISSION: LiveAdmissionFacts = {
   compatible: false,
   conflict: false,
   dialog: false,
-  idle: true,
-  pendingWork: false,
 };
 const CONNECT_MS = 30_000;
 const DATA_PHASE_MS = 5_000;
 const RESOURCE_PHASE_MS = 10_000;
 const STOP_MS = 5_000;
 const CALL_MS = 60 * 60_000;
-const DELEGATION_MS = 30 * 60_000;
 const OWNER_RECORD_LIMIT = 4_096;
 const GLOBAL_COORDINATION_KEY = "__pi_live_lifecycle_coordination_v1__";
 
@@ -962,11 +675,8 @@ function defaultClock(): LiveClock {
   };
 }
 
-const LIVE_SIGNALING_URL =
-  "https://chatgpt.com/backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas";
-const LIVE_SIDEBAND_ORIGIN = "https://api.openai.com";
-const LIVE_CLIENT_VERSION = "0.144.1";
-const LIVE_MODEL = "gpt-live-1-codex";
+const LIVE_SIGNALING_URL = "https://api.openai.com/v1/live/sessions";
+const LIVE_MODEL = "gpt-live-1";
 const LIVE_SIDE_BAND_ATTEMPTS = 3;
 const LIVE_PHASE_MS = 10_000;
 const LIVE_SEND_MS = 5_000;
@@ -1013,6 +723,8 @@ function runtimeDiagnosticText(code: LiveDiagnostic): string {
       return "Pi Live protocol failed.";
     case "audio-error":
       return "Pi Live audio failed.";
+    case "remote-ended":
+      return "The voice service ended the call.";
     case "cleanup-blocked":
       return "Pi Live cleanup could not be confirmed.";
   }
@@ -1020,10 +732,6 @@ function runtimeDiagnosticText(code: LiveDiagnostic): string {
 
 function byteLengthWithin(value: string, maximum: number): boolean {
   return Buffer.byteLength(value, "utf8") <= maximum;
-}
-
-function validHeaderValue(value: string): boolean {
-  return isValidUtf8String(value) && !/[\u0000-\u001f\u007f]/.test(value);
 }
 
 function combinedHeaderBytes(headers: Record<string, string>): number {
@@ -1035,69 +743,43 @@ function combinedHeaderBytes(headers: Record<string, string>): number {
 
 function buildLiveHeaders(
   credentials: LiveCredentials,
-  sessionId: string,
-  realtimeSessionId: string,
-  attestation: LiveAttestation,
 ): Record<string, string> {
-  const accessToken = credentials.accessToken;
-  const accountId = credentials.accountId;
-  const attestationHeader = attestation.header;
-  if (
-    !validCredentialField(accessToken, LIVE_LIMITS.accessTokenBytes) ||
-    !validCredentialField(accountId, LIVE_LIMITS.accountIdBytes) ||
-    !validCredentialField(sessionId, LIVE_LIMITS.idBytes) ||
-    !validCredentialField(realtimeSessionId, LIVE_LIMITS.idBytes) ||
-    !validHeaderValue(attestationHeader) ||
-    !byteLengthWithin(attestationHeader, LIVE_LIMITS.attestationHeaderBytes)
-  )
+  const apiKey = credentials.apiKey;
+  if (!validCredentialField(apiKey, LIVE_LIMITS.apiKeyBytes))
     throw fixedRuntimeError("protocol");
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${accessToken}`,
-    "OpenAI-Alpha": "quicksilver=v2",
-    "User-Agent": `Codex Desktop/${LIVE_CLIENT_VERSION}`,
-    "x-session-id": realtimeSessionId,
-    originator: "Codex Desktop",
-    version: LIVE_CLIENT_VERSION,
-    "session-id": sessionId,
-    "thread-id": sessionId,
-    "chatgpt-account-id": accountId,
-    "x-oai-attestation": attestationHeader,
-  };
-  if (combinedHeaderBytes(headers) > LIVE_LIMITS.combinedHeaderBytes)
-    throw fixedRuntimeError("protocol");
-  return headers;
+  return { Authorization: `Bearer ${apiKey}` };
 }
 
-function parseLiveCallLocation(location: string | undefined): string {
-  if (
-    typeof location !== "string" ||
-    location.length === 0 ||
-    !byteLengthWithin(location, 2_048)
-  )
-    throw fixedRuntimeError("protocol");
-  let parsed: URL;
+function parseLiveSessionAnswer(body: string): {
+  sessionId: string;
+  answer: string;
+} {
+  let parsed: unknown;
   try {
-    parsed = new URL(location, LIVE_SIDEBAND_ORIGIN);
+    parsed = JSON.parse(body) as unknown;
   } catch {
     throw fixedRuntimeError("protocol");
   }
+  if (!isUnknownRecord(parsed)) throw fixedRuntimeError("protocol");
+  const session = parsed.session;
+  const transport = parsed.transport;
   if (
-    parsed.origin !== LIVE_SIDEBAND_ORIGIN ||
-    parsed.protocol !== "https:" ||
-    parsed.username !== "" ||
-    parsed.password !== "" ||
-    parsed.search !== "" ||
-    parsed.hash !== ""
+    !isUnknownRecord(session) ||
+    !isUnknownRecord(transport) ||
+    transport.type !== "webrtc" ||
+    typeof transport.sdp !== "string" ||
+    transport.sdp.length === 0 ||
+    !isValidUtf8String(transport.sdp) ||
+    !byteLengthWithin(transport.sdp, LIVE_LIMITS.sdpBytes)
   )
     throw fixedRuntimeError("protocol");
-  const canonicalAbsolute = `${LIVE_SIDEBAND_ORIGIN}${parsed.pathname}`;
-  if (location !== parsed.pathname && location !== canonicalAbsolute)
+  const sessionId = session.id;
+  if (
+    !validCredentialField(sessionId, LIVE_LIMITS.idBytes) ||
+    !/^[A-Za-z0-9_-]+$/.test(sessionId)
+  )
     throw fixedRuntimeError("protocol");
-  const match = /^\/v1\/live\/(rtc_[A-Za-z0-9_-]+)$/.exec(parsed.pathname);
-  const callId = match?.[1];
-  if (!callId || !byteLengthWithin(callId, LIVE_LIMITS.idBytes))
-    throw fixedRuntimeError("protocol");
-  return callId;
+  return { sessionId, answer: transport.sdp };
 }
 
 async function readBoundedBody(
@@ -1273,11 +955,11 @@ function utf8Tail(value: string, maximum: number): string {
 }
 
 function truncateLiveFinal(value: string): string {
-  if (byteLengthWithin(value, LIVE_LIMITS.textBytes)) return value;
-  const marker = "\n[truncated]";
+  if (byteLengthWithin(value, LIVE_LIMITS.finalSpeechBytes)) return value;
+  const marker = " [The rest of Pi's reply is in the terminal.]";
   return `${utf8Prefix(
     value,
-    LIVE_LIMITS.textBytes - Buffer.byteLength(marker),
+    LIVE_LIMITS.finalSpeechBytes - Buffer.byteLength(marker),
   )}${marker}`;
 }
 
@@ -1304,6 +986,13 @@ function liveTextChunkAt(
     bytes += characterBytes;
     index += characterLength;
   }
+  // Spoken context is paraphrased per append, so end a full chunk after its
+  // last whitespace rather than inside a word when one is available.
+  if (index < value.length && !/\s/.test(value[index]!)) {
+    const chunk = value.slice(start, index);
+    const lastSpace = Math.max(chunk.lastIndexOf(" "), chunk.lastIndexOf("\n"));
+    if (lastSpace > 0) index = start + lastSpace + 1;
+  }
   return { text: value.slice(start, index), next: index };
 }
 
@@ -1321,13 +1010,13 @@ function buildLiveSessionRequest(
   )
     throw fixedRuntimeError("protocol");
   const body = JSON.stringify({
-    sdp: offer,
     session: {
       model: LIVE_MODEL,
       instructions,
       audio: { output: { voice } },
       delegation: { type: "client" },
     },
+    transport: { type: "webrtc", sdp: offer },
   });
   if (!byteLengthWithin(body, LIVE_LIMITS.signalingRequestBytes))
     throw fixedRuntimeError("protocol");
@@ -1406,23 +1095,10 @@ export function createLiveRuntimeResources(
       report("missing-auth", "credentials");
       throw new Error("Live authentication is unavailable.");
     },
-    async attestation({ signal }): Promise<LiveAttestation> {
-      refuseUnsafeDebug();
-      if (signal.aborted) throw new Error("Live attestation was cancelled.");
-      let prepared: LiveAttestation;
-      try {
-        prepared = await prepareLiveAttestation(native.deviceCheck);
-      } catch {
-        if (!signal.aborted) report("protocol-error", "attestation");
-        throw new Error("Live attestation failed.");
-      }
-      if (signal.aborted) throw new Error("Live attestation was cancelled.");
-      return prepared;
-    },
     connect(input): LiveResourceStart<LiveConnection> {
       const closeController = new AbortController();
       const signal = AbortSignal.any([input.signal, closeController.signal]);
-      const { credentials, attestation } = input;
+      const { credentials } = input;
       const pendingNative = new Set<Promise<unknown>>();
       const pendingNetworkReads = new Set<Promise<unknown>>();
       const pendingSocketSends = new Set<Promise<unknown>>();
@@ -1475,12 +1151,17 @@ export function createLiveRuntimeResources(
         }
       };
 
-      let eventTokens: number = LIVE_LIMITS.eventBucket;
-      let eventBucketAt = clock.now();
-      const seenRequests = new Map<string, string>();
-      const latestTranscripts = new Map<"user" | "assistant", string>();
-      let activeDelegationId: string | undefined;
-      let requestAdmissionPending = false;
+      type EventSource = "native" | "sideband";
+      const eventBuckets: Record<EventSource, { tokens: number; at: number }> =
+        {
+          native: { tokens: LIVE_LIMITS.eventBucket, at: clock.now() },
+          sideband: { tokens: LIVE_LIMITS.eventBucket, at: clock.now() },
+        };
+      // Speech since the last handoff, in order, so Pi receives the exchange
+      // that led to a delegation (the delegation event itself carries no text).
+      const speech: Array<{ role: "user" | "assistant"; text: string }> = [];
+      let speechBytes = 0;
+      let replyTo: string | undefined;
       type WriterFragment = {
         kind: "text" | "pong";
         payload: string | Uint8Array;
@@ -1499,7 +1180,6 @@ export function createLiveRuntimeResources(
         retainedBytes: number;
         retained: boolean;
         deadline: number;
-        final: boolean;
         settled: boolean;
         resolve(): void;
         reject(error: LiveRuntimeError): void;
@@ -1508,7 +1188,6 @@ export function createLiveRuntimeResources(
       let activeProducer: WriterProducer | undefined;
       let writerRunning = false;
       let writerStopped = false;
-      let finalProducerPending = false;
       let pendingProducers = 0;
       let queuedRetainedBytes = 0;
       let pendingEnvelopeCount = 0;
@@ -1518,36 +1197,84 @@ export function createLiveRuntimeResources(
       let startupPhase: LiveRuntimeDiagnostic["phase"] = "offer";
       let startupReported = false;
 
-      const takeEvent = (): boolean => {
+      const takeEvent = (source: EventSource): boolean => {
+        const bucket = eventBuckets[source];
         const now = clock.now();
-        const elapsed = Math.max(0, now - eventBucketAt);
-        eventTokens = Math.min(
+        const elapsed = Math.max(0, now - bucket.at);
+        bucket.tokens = Math.min(
           LIVE_LIMITS.eventBucket,
-          eventTokens + (elapsed / 1_000) * LIVE_LIMITS.eventRefillPerSecond,
+          bucket.tokens + (elapsed / 1_000) * LIVE_LIMITS.eventRefillPerSecond,
         );
-        eventBucketAt = now;
-        if (eventTokens < 1) return false;
-        eventTokens -= 1;
+        bucket.at = now;
+        if (bucket.tokens < 1) return false;
+        bucket.tokens -= 1;
         return true;
       };
 
       const protocolFailure = (): void =>
         failActive("protocol-error", "protocol");
 
-      const emitTranscript = (
+      const appendSpeech = (
         role: "user" | "assistant",
-        text: string,
+        delta: string,
       ): void => {
-        const retained = utf8Tail(text, LIVE_LIMITS.textBytes);
-        latestTranscripts.set(role, retained);
+        const last = speech.at(-1);
+        if (last?.role === role) last.text += delta;
+        else speech.push({ role, text: delta });
+        speechBytes += Buffer.byteLength(delta, "utf8");
+        while (speechBytes > LIVE_LIMITS.textBytes && speech.length > 0) {
+          const first = speech[0]!;
+          const firstBytes = Buffer.byteLength(first.text, "utf8");
+          const excess = speechBytes - LIVE_LIMITS.textBytes;
+          if (firstBytes <= excess) {
+            speech.shift();
+            speechBytes -= firstBytes;
+          } else {
+            first.text = utf8Tail(first.text, firstBytes - excess);
+            speechBytes -= firstBytes - Buffer.byteLength(first.text, "utf8");
+          }
+        }
+        const current = speech.at(-1);
+        if (current?.role !== role) return;
         try {
-          options.callbacks?.onTranscript?.({ role, text: retained });
+          options.callbacks?.onTranscript?.({ role, text: current.text });
         } catch {
           // Caller callbacks are isolated from transport ownership.
         }
       };
 
-      const processEvent = (payload: string): void => {
+      const takeHandoffRequest = (): string => {
+        const request = speech
+          .map(
+            (segment) =>
+              `${segment.role === "user" ? "User" : "Voice assistant"}: ${segment.text.trim()}`,
+          )
+          .filter((line) => !/^[^:]+: $/.test(line))
+          .join("\n");
+        speech.length = 0;
+        speechBytes = 0;
+        return request;
+      };
+
+      const reportServiceError = (error: unknown): void => {
+        const code =
+          isUnknownRecord(error) &&
+          typeof error.code === "string" &&
+          /^[a-z0-9_.-]{1,64}$/.test(error.code)
+            ? error.code
+            : "unknown";
+        try {
+          options.callbacks?.onServiceError?.(code);
+        } catch {
+          // Caller callbacks are isolated from transport ownership.
+        }
+      };
+
+      // The data channel and the attached sideband both carry session events.
+      // The data channel observes the session from its start, so it owns
+      // transcripts and delegations; the sideband reports only the outcome of
+      // commands sent on it and the session end.
+      const processEvent = (payload: string, source: EventSource): void => {
         if (!active || input.signal.aborted || closeController.signal.aborted)
           return;
         let parsed: unknown;
@@ -1572,123 +1299,67 @@ export function createLiveRuntimeResources(
               protocolFailure();
             return;
           }
-          case "input_transcript.added":
-          case "output_transcript.added": {
-            const item = parsed.item;
+          case "session.input_transcript.delta":
+          case "session.output_transcript.delta": {
+            if (source !== "native") return;
+            const delta = parsed.delta;
             if (
-              !isUnknownRecord(item) ||
-              typeof item.text !== "string" ||
-              !isValidUtf8String(item.text)
+              typeof delta !== "string" ||
+              !isValidUtf8String(delta) ||
+              !byteLengthWithin(delta, LIVE_LIMITS.textBytes)
             ) {
               protocolFailure();
               return;
             }
-            emitTranscript(
-              parsed.type === "input_transcript.added" ? "user" : "assistant",
-              item.text,
+            appendSpeech(
+              parsed.type === "session.input_transcript.delta"
+                ? "user"
+                : "assistant",
+              delta,
             );
             return;
           }
-          case "turn.done": {
-            const turn = parsed.turn;
+          case "session.delegation.created": {
+            if (source !== "native") return;
+            const delegation = parsed.delegation;
             if (
-              !isUnknownRecord(turn) ||
-              (turn.role !== "user" && turn.role !== "assistant") ||
-              typeof turn.transcript !== "string" ||
-              !isValidUtf8String(turn.transcript)
+              !isUnknownRecord(delegation) ||
+              delegation.target !== "client" ||
+              !validCredentialField(delegation.id, LIVE_LIMITS.idBytes)
             ) {
               protocolFailure();
               return;
             }
-            emitTranscript(turn.role, turn.transcript);
-            return;
-          }
-          case "delegation.created": {
-            const item = parsed.item;
-            if (
-              !isUnknownRecord(item) ||
-              item.type !== "delegation" ||
-              item.target !== "client" ||
-              !validCredentialField(item.id, LIVE_LIMITS.idBytes) ||
-              !Array.isArray(item.content) ||
-              item.content.length === 0 ||
-              item.content.length > LIVE_LIMITS.contentEntries
-            ) {
-              protocolFailure();
-              return;
-            }
-            const content: string[] = [];
-            let requestBytes = 0;
-            for (const entry of item.content) {
-              if (
-                !isUnknownRecord(entry) ||
-                entry.type !== "input_text" ||
-                typeof entry.text !== "string" ||
-                !isValidUtf8String(entry.text)
-              ) {
-                protocolFailure();
-                return;
-              }
-              requestBytes +=
-                (content.length === 0 ? 0 : 1) +
-                Buffer.byteLength(entry.text, "utf8");
-              if (requestBytes > LIVE_LIMITS.textBytes) {
-                protocolFailure();
-                return;
-              }
-              content.push(entry.text);
-            }
-            const joinedRequest = content.join("\n");
-            if (!byteLengthWithin(joinedRequest, LIVE_LIMITS.textBytes)) {
-              protocolFailure();
-              return;
-            }
-            const request = joinedRequest.trim();
-            if (request.length === 0) {
-              protocolFailure();
-              return;
-            }
-            const fingerprint = JSON.stringify(content);
-            const previous = seenRequests.get(item.id);
-            if (previous !== undefined) {
-              if (previous !== fingerprint) protocolFailure();
-              return;
-            }
-            if (seenRequests.size >= LIVE_LIMITS.seenIds) {
-              protocolFailure();
-              return;
-            }
-            seenRequests.set(item.id, fingerprint);
-            if (activeDelegationId !== undefined || requestAdmissionPending) {
-              protocolFailure();
-              return;
-            }
-            let admitted = false;
-            requestAdmissionPending = true;
+            const request = takeHandoffRequest();
+            replyTo = delegation.id;
             try {
-              admitted =
-                options.callbacks?.onRequest?.({
-                  id: item.id,
-                  text: request,
-                }) === true;
+              options.callbacks?.onRequest?.({
+                id: delegation.id,
+                text:
+                  request ||
+                  "(The voice assistant handed off without a transcript. Ask the user what they need.)",
+              });
             } catch {
-              // #5 owns request admission; callback failures stay outside wire data.
-            } finally {
-              requestAdmissionPending = false;
+              protocolFailure();
             }
-            if (!effectAllowed()) return;
-            if (admitted) activeDelegationId = item.id;
             return;
           }
-          case "error":
-            protocolFailure();
-            return;
-          case "output_audio.delta":
+          case "error": {
+            const error = parsed.error;
             if (
-              typeof parsed.audio !== "string" ||
-              !isValidUtf8String(parsed.audio)
+              source === "sideband" &&
+              !(
+                isUnknownRecord(error) &&
+                typeof error.client_event_id === "string"
+              )
             )
-              protocolFailure();
+              return;
+            reportServiceError(error);
+            return;
+          }
+          case "session.closed":
+            if (sessionCloseSent) return;
+            failActive("remote-ended", "protocol");
             return;
           default:
             return;
@@ -1701,7 +1372,7 @@ export function createLiveRuntimeResources(
         if (
           !(bytes instanceof Uint8Array) ||
           bytes.byteLength > LIVE_LIMITS.inboundBytes ||
-          !takeEvent()
+          !takeEvent("sideband")
         ) {
           protocolFailure();
           return;
@@ -1713,7 +1384,7 @@ export function createLiveRuntimeResources(
           protocolFailure();
           return;
         }
-        processEvent(payload);
+        processEvent(payload, "sideband");
       };
 
       const receiveNative = (payload: string): void => {
@@ -1723,12 +1394,12 @@ export function createLiveRuntimeResources(
           typeof payload !== "string" ||
           !isValidUtf8String(payload) ||
           !byteLengthWithin(payload, LIVE_LIMITS.inboundBytes) ||
-          !takeEvent()
+          !takeEvent("native")
         ) {
           protocolFailure();
           return;
         }
-        processEvent(payload);
+        processEvent(payload, "native");
       };
 
       function releaseRetained(producer: WriterProducer): void {
@@ -1761,7 +1432,6 @@ export function createLiveRuntimeResources(
         producer.text = undefined;
         producer.pong = undefined;
         producer.delegationId = undefined;
-        if (producer.final) finalProducerPending = false;
         if (error) producer.reject(error);
         else producer.resolve();
       }
@@ -1792,21 +1462,16 @@ export function createLiveRuntimeResources(
           const chunk = liveTextChunkAt(producer.text, producer.offset);
           nextOffset = chunk.next;
           completed = nextOffset >= producer.text.length;
-          const message = producer.delegationId
-            ? {
-                type: "delegation.context.append",
-                delegation_item_id: producer.delegationId,
-                ...(producer.dataKind === "application"
-                  ? { channel: "commentary" }
-                  : {}),
-                content: [{ type: "input_text", text: chunk.text }],
-              }
-            : {
-                type: "session.context.append",
-                channel: "commentary",
-                content: [{ type: "input_text", text: chunk.text }],
-              };
-          payload = JSON.stringify(message);
+          // Progress is quiet context; Pi's final reply is for speech.
+          payload = JSON.stringify({
+            type:
+              producer.dataKind === "final"
+                ? "session.commentary.append"
+                : "session.thinking.append",
+            event_id: randomId(),
+            delegation_id: producer.delegationId ?? null,
+            content: chunk.text,
+          });
         }
         const payloadBytes =
           typeof payload === "string"
@@ -2085,9 +1750,8 @@ export function createLiveRuntimeResources(
               text: string;
               dataKind: "application" | "final";
               delegationId?: string;
-              final: boolean;
             }
-          | { kind: "pong"; pong: Uint8Array; final: false },
+          | { kind: "pong"; pong: Uint8Array },
         retainedBytes: number,
         deadline: number,
       ): Promise<void> => {
@@ -2098,8 +1762,7 @@ export function createLiveRuntimeResources(
           retainedBytes < 0 ||
           pendingProducers >= LIVE_LIMITS.pendingProducers ||
           queuedRetainedBytes + retainedBytes >
-            LIVE_LIMITS.retainedProducerBytes ||
-          (specification.final && finalProducerPending)
+            LIVE_LIMITS.retainedProducerBytes
         )
           return Promise.reject(fixedRuntimeError("protocol"));
         let resolveProducer!: () => void;
@@ -2121,7 +1784,6 @@ export function createLiveRuntimeResources(
         };
         pendingProducers += 1;
         queuedRetainedBytes += retainedBytes;
-        if (producer.final) finalProducerPending = true;
         producerQueue.push(producer);
         materializeWaitingProducers();
         startWriter();
@@ -2133,14 +1795,14 @@ export function createLiveRuntimeResources(
         if (
           !(payload instanceof Uint8Array) ||
           payload.byteLength > LIVE_CONTROL_FRAME_BYTES ||
-          !takeEvent()
+          !takeEvent("sideband")
         ) {
           protocolFailure();
           return;
         }
         const retainedPayload = payload.slice();
         void queueProducer(
-          { kind: "pong", pong: retainedPayload, final: false },
+          { kind: "pong", pong: retainedPayload },
           retainedPayload.byteLength,
           clock.now() + LIVE_SEND_MS,
         ).catch(() => protocolFailure());
@@ -2210,13 +1872,7 @@ export function createLiveRuntimeResources(
           }
           throw fixedRuntimeError("protocol");
         }
-        const realtimeSessionId = randomId();
-        const headers = buildLiveHeaders(
-          credentials,
-          options.sessionId,
-          realtimeSessionId,
-          attestation,
-        );
+        const headers = buildLiveHeaders(credentials);
 
         requireEffectAllowed();
         try {
@@ -2254,7 +1910,7 @@ export function createLiveRuntimeResources(
         );
         const signalingHeaders = {
           ...headers,
-          Accept: "*/*",
+          Accept: "application/json",
           "Content-Type": "application/json",
         };
         if (
@@ -2346,7 +2002,7 @@ export function createLiveRuntimeResources(
               pendingNetworkReads,
               readBoundedBody(
                 response,
-                LIVE_LIMITS.sdpBytes,
+                LIVE_LIMITS.signalingResponseBytes,
                 true,
                 signalingDeadline,
                 clock,
@@ -2358,9 +2014,9 @@ export function createLiveRuntimeResources(
             signal,
           );
           if (answerBytes.byteLength === 0) throw fixedRuntimeError("protocol");
-          const answer = decodeUtf8(answerBytes);
-          if (answer === undefined) throw fixedRuntimeError("protocol");
-          const callId = parseLiveCallLocation(response.location);
+          const answerBody = decodeUtf8(answerBytes);
+          if (answerBody === undefined) throw fixedRuntimeError("protocol");
+          const { sessionId, answer } = parseLiveSessionAnswer(answerBody);
           if (!peer) throw fixedRuntimeError("protocol");
           startupPhase = "answer";
           requireEffectAllowed();
@@ -2384,7 +2040,7 @@ export function createLiveRuntimeResources(
           peer.setMuted(false);
 
           startupPhase = "sideband";
-          const sidebandUrl = `wss://api.openai.com/v1/live/${callId}`;
+          const sidebandUrl = `wss://api.openai.com/v1/live/sessions/${sessionId}/attach`;
           requireEffectAllowed();
           const sidebandProxy = await waitForRuntimePhase(
             Promise.resolve(proxyForUrl(sidebandUrl)),
@@ -2449,7 +2105,7 @@ export function createLiveRuntimeResources(
                   if (!effectAllowed()) return;
                   if (
                     payload.byteLength > LIVE_LIMITS.inboundBytes ||
-                    !takeEvent()
+                    !takeEvent("sideband")
                   ) {
                     protocolFailure();
                     return;
@@ -2473,7 +2129,7 @@ export function createLiveRuntimeResources(
                   if (!effectAllowed()) return;
                   if (
                     payload.byteLength > LIVE_CONTROL_FRAME_BYTES ||
-                    !takeEvent()
+                    !takeEvent("sideband")
                   )
                     protocolFailure();
                 },
@@ -2566,6 +2222,13 @@ export function createLiveRuntimeResources(
             if (!peer) throw fixedRuntimeError("cancelled");
             requireEffectAllowed();
             peer.pushAudio(samples);
+            let sum = 0;
+            for (const sample of samples) sum += sample * sample;
+            options.callbacks?.onLevel?.(
+              samples.length === 0
+                ? 0
+                : Math.min(1, Math.sqrt(sum / samples.length)),
+            );
           },
           sendData(data) {
             if (!effectAllowed() || !sideband)
@@ -2582,15 +2245,11 @@ export function createLiveRuntimeResources(
               !byteLengthWithin(data.text, LIVE_LIMITS.textBytes)
             )
               return Promise.reject(fixedRuntimeError("protocol"));
-            const delegationId = activeDelegationId;
-            if (dataKind === "final" && !delegationId)
-              return Promise.reject(fixedRuntimeError("protocol"));
-            const boundedText =
-              dataKind === "final" ? truncateLiveFinal(data.text) : data.text;
+            const delegationId = replyTo;
+            if (dataKind === "final" && !delegationId) return Promise.resolve();
+            if (dataKind === "final") replyTo = undefined;
             const text =
-              dataKind === "final"
-                ? `"Agent Final Message":\n\n${boundedText}`
-                : boundedText;
+              dataKind === "final" ? truncateLiveFinal(data.text) : data.text;
             const deadline = clock.now() + LIVE_SEND_MS;
             const operation = queueProducer(
               {
@@ -2598,19 +2257,10 @@ export function createLiveRuntimeResources(
                 text,
                 dataKind,
                 ...(delegationId ? { delegationId } : {}),
-                final: dataKind === "final",
               },
               Buffer.byteLength(text, "utf8"),
               deadline,
             );
-            if (dataKind === "final")
-              void operation.then(
-                () => {
-                  if (activeDelegationId === delegationId)
-                    activeDelegationId = undefined;
-                },
-                () => undefined,
-              );
             return operation;
           },
           closeSession(request) {
@@ -2730,7 +2380,6 @@ interface DefaultNativeBindings {
     onLevel: (error: Error | null, level: number) => void,
     onFailure: (error: Error | null, message: string) => void,
   ) => DefaultNativePeer;
-  deviceCheckGenerateToken(): Promise<LiveDeviceCheckResult>;
   __ompInstallTokioRuntime(): void;
 }
 
@@ -2756,7 +2405,6 @@ function loadDefaultLiveNativeBindings(): DefaultNativeBindings {
     !isUnknownRecord(loaded) ||
     typeof loaded.AudioCapture !== "function" ||
     typeof loaded.LiveWebRtcPeer !== "function" ||
-    typeof loaded.deviceCheckGenerateToken !== "function" ||
     typeof loaded.__ompInstallTokioRuntime !== "function"
   )
     throw new Error("Live native bindings are invalid.");
@@ -2768,11 +2416,6 @@ function loadDefaultLiveNativeBindings(): DefaultNativeBindings {
 
 function createDefaultLiveNativeAdapter(): LiveNativeAdapter {
   return {
-    deviceCheck: {
-      async generateToken(): Promise<LiveDeviceCheckResult> {
-        return loadDefaultLiveNativeBindings().deviceCheckGenerateToken();
-      },
-    },
     createPeer(input) {
       let nativePeer: DefaultNativePeer;
       try {
@@ -3007,7 +2650,6 @@ export function createDefaultLiveNetworkAdapter(
         response = {
           status: fetched.status,
           statusText: fetched.statusText,
-          location: fetched.headers.get("location") ?? undefined,
           body: ownedBody,
           cancel(): Promise<void> {
             cancellation ??= (async () => {
@@ -3306,8 +2948,7 @@ function certificationMatches(
 function admissionDiagnostic(
   facts: LiveAdmissionFacts,
 ): LiveDiagnostic | undefined {
-  if (facts.conflict || facts.dialog || !facts.idle || facts.pendingWork)
-    return "busy";
+  if (facts.conflict || facts.dialog) return "busy";
   if (!facts.tui || !facts.compatible) return "denied";
   return undefined;
 }
@@ -3324,15 +2965,18 @@ export function createLiveLifecycle(
     ({
       accountHome: () => userInfo().homedir,
       environmentHome: () => process.env.HOME,
-      certify: () => ({ certified: false }),
+      // Refuses unless the development-only PI_LIVE_DEV_TRUST_HOME=1 trusts a
+      // manually prepared ~/.local/state/pi-live (mode 0700). Standalone setup
+      // (#6) replaces this with certification.
+      certify: (observation) =>
+        process.env.PI_LIVE_DEV_TRUST_HOME === "1"
+          ? { certified: true, ...observation }
+          : { certified: false },
     } satisfies HomeAuthority);
   const resources: LiveResources =
     options.resources ??
     ({
       credentials: async () => {
-        throw new Error("unavailable");
-      },
-      attestation: async () => {
         throw new Error("unavailable");
       },
       connect: () => {
@@ -3344,7 +2988,9 @@ export function createLiveLifecycle(
   let lastFailure: LiveDiagnostic | undefined = coordination
     ? undefined
     : "cleanup-blocked";
-  let voice = isLiveVoice(options.initialVoice) ? options.initialVoice : "sol";
+  let voice = isLiveVoice(options.initialVoice)
+    ? options.initialVoice
+    : DEFAULT_LIVE_VOICE;
   let attempt: CallAttempt | undefined;
   let projectedPending: string | undefined;
 
@@ -3443,12 +3089,6 @@ export function createLiveLifecycle(
         )
           void beginStop(attempt);
         else if (
-          attempt.delegation !== undefined &&
-          clock.now() >= attempt.delegation.deadline
-        ) {
-          attempt.delegation = undefined;
-          void beginStop(attempt);
-        } else if (
           (state === "acquiring" || state === "connecting") &&
           attempt.connectDeadline !== undefined &&
           clock.now() >= attempt.connectDeadline
@@ -4193,7 +3833,6 @@ export function createLiveLifecycle(
     current.stopDeadline = stopDeadline;
     current.stopObservation = stopObservation;
     state = "stopping";
-    current.delegation = undefined;
     current.controller.abort();
     current.cancelled.resolve();
     clearAttemptTimers(current);
@@ -4487,34 +4126,6 @@ export function createLiveLifecycle(
     }
     if (!currentAttempt(current) || state !== "acquiring")
       return { kind: "cancelled", state };
-    const attestationDeadline = Math.min(
-      current.connectDeadline,
-      current.callDeadline!,
-      clock.now() + DATA_PHASE_MS,
-    );
-    const attestationResult = await waitFor(
-      current,
-      () => {
-        if (
-          !currentAttempt(current) ||
-          state !== "acquiring" ||
-          !sharedContinuationAllowed(current)
-        )
-          throw new Error("call attempt fenced");
-        return resources.attestation({
-          signal: current.controller.signal,
-          credentials: credentialResult.value,
-        });
-      },
-      attestationDeadline,
-    );
-    if (attestationResult.kind !== "value") {
-      if (attestationResult.kind === "error")
-        void beginStop(current, "protocol-error");
-      return { kind: "cancelled", state };
-    }
-    if (!currentAttempt(current) || state !== "acquiring")
-      return { kind: "cancelled", state };
 
     if (!sharedContinuationAllowed(current))
       return { kind: "cancelled", state };
@@ -4536,7 +4147,6 @@ export function createLiveLifecycle(
             signal: current.controller.signal,
             deadline: connectionDeadline,
             credentials: credentialResult.value,
-            attestation: attestationResult.value,
             voice: current.voice,
             onFailure(diagnostic) {
               if (attempt === current && currentAttempt(current))
@@ -4659,54 +4269,6 @@ export function createLiveLifecycle(
             : undefined,
       );
     },
-    delegationAdmitted(): LiveDelegationAdmissionResult {
-      refreshProjection();
-      const current = attempt;
-      if (!current || state !== "active" || current.delegation)
-        return { kind: "refused", state, diagnostic: "busy" };
-      const token = {};
-      const deadline = clock.now() + DELEGATION_MS;
-      const observeDelegationDeadline = () => {
-        const delegation = current.delegation;
-        if (attempt !== current || !delegation || delegation.token !== token)
-          return;
-        if (clock.now() < deadline) {
-          delegation.timer = schedule(
-            current,
-            deadline - clock.now(),
-            observeDelegationDeadline,
-          );
-          return;
-        }
-        current.delegation = undefined;
-        void beginStop(current);
-      };
-      const delegation: NonNullable<CallAttempt["delegation"]> = {
-        token,
-        deadline,
-      };
-      current.delegation = delegation;
-      const timer = schedule(current, DELEGATION_MS, observeDelegationDeadline);
-      if (
-        attempt === current &&
-        state === "active" &&
-        current.delegation === delegation
-      )
-        delegation.timer = timer;
-      else clearAttemptTimer(current, timer);
-      return {
-        kind: "updated",
-        state: "active",
-        settle(): void {
-          if (attempt !== current) return;
-          const delegation = current.delegation;
-          if (!delegation || delegation.token !== token) return;
-          clearAttemptTimer(current, delegation.timer);
-          current.delegation = undefined;
-          if (clock.now() >= delegation.deadline) void beginStop(current);
-        },
-      };
-    },
   };
   return lifecycle;
 }
@@ -4722,17 +4284,6 @@ function compatibilityText(result: CompatibilityResult): string {
   return result.supported
     ? "supported"
     : `unsupported (${result.issues.join(", ")})`;
-}
-
-function setupWidget(
-  voice: string,
-  compatibility: CompatibilityResult,
-): string[] {
-  return [
-    "Pi Live: off (setup-only)",
-    `Voice: ${voice}`,
-    `Compatibility: ${compatibilityText(compatibility)}`,
-  ];
 }
 
 function delegationText(content: unknown): string {
@@ -4765,7 +4316,9 @@ function fitLine(
 ): string {
   if (width <= 0) return "";
   return truncateToWidth(
-    text.replace(/[\u0000-\u001f\u007f-\u009f]/g, " "),
+    text
+      .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+      .replace(/[\u0000-\u001f\u007f-\u009f]/g, " "),
     width,
     "",
   );
@@ -4775,6 +4328,87 @@ export interface LiveDependencies {
   preferences: PreferenceStore;
   compatibility: CompatibilityChecker;
   truncateToWidth: TruncateToWidth;
+  packageSources?(ctx: ExtensionContext): Promise<readonly string[]>;
+  runtime?: {
+    lifecycle?: Omit<
+      LiveLifecycleOptions,
+      "admission" | "consent" | "resources"
+    >;
+    resources?(options: LiveRuntimeResourcesOptions): LiveResources;
+    executionHost?(): string;
+    configuredPackageSources?: readonly string[];
+  };
+}
+
+async function readLiveSettings(file: string): Promise<string | undefined> {
+  let handle: FileHandle | undefined;
+  try {
+    handle = await open(file, constants.O_RDONLY | constants.O_NONBLOCK);
+    const info = await handle.stat();
+    if (!info.isFile() || info.size > 1_024 * 1_024)
+      throw new Error("settings unavailable");
+    const bytes = Buffer.alloc(1_024 * 1_024 + 1);
+    let length = 0;
+    while (length < bytes.length) {
+      const { bytesRead } = await handle.read(
+        bytes,
+        length,
+        bytes.length - length,
+        null,
+      );
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    if (length > 1_024 * 1_024) throw new Error("settings unavailable");
+    return bytes.subarray(0, length).toString("utf8");
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") return undefined;
+    throw error;
+  } finally {
+    await handle?.close();
+  }
+}
+
+async function configuredLivePackageSources(
+  ctx: ExtensionContext,
+): Promise<readonly string[]> {
+  const projectTrusted = ctx.isProjectTrusted();
+  const [global, project] = await Promise.all([
+    readLiveSettings(path.join(getAgentDir(), "settings.json")),
+    projectTrusted
+      ? readLiveSettings(path.join(ctx.cwd, CONFIG_DIR_NAME, "settings.json"))
+      : undefined,
+  ]);
+  // Use Pi's public parser/migrations with immutable read snapshots. The ordinary
+  // file-backed SettingsManager takes file locks even to read; this backend
+  // never writes settings or creates locks before consent.
+  const settings = SettingsManager.fromStorage(
+    {
+      withLock(scope, read) {
+        if (read(scope === "global" ? global : project) !== undefined)
+          throw new Error("settings are read-only");
+      },
+    },
+    { projectTrusted },
+  );
+  if (settings.drainErrors().length) throw new Error("settings unavailable");
+  const sources: string[] = [];
+  for (const value of [
+    settings.getGlobalSettings(),
+    settings.getProjectSettings(),
+  ]) {
+    if (!isUnknownRecord(value)) throw new Error("settings unavailable");
+    const packages: unknown = value.packages;
+    if (packages === undefined) continue;
+    if (!Array.isArray(packages)) throw new Error("settings unavailable");
+    for (const entry of packages) {
+      if (typeof entry === "string") sources.push(entry);
+      else if (isUnknownRecord(entry) && typeof entry.source === "string")
+        sources.push(entry.source);
+      else throw new Error("settings unavailable");
+    }
+  }
+  return sources;
 }
 
 export function createLiveDependencies(
@@ -4784,94 +4418,287 @@ export function createLiveDependencies(
     preferences: createFilePreferenceStore(),
     compatibility: createCompatibilityChecker(),
     truncateToWidth,
+    packageSources: configuredLivePackageSources,
   };
 }
 
+const LIVE_DISCLOSURE =
+  "Uses the execution host microphone and speakers with OpenAI GPT-Live, billed to the OpenAI API key Pi uses for the openai provider. Audio, speech transcripts, the conversation leading to each request, a progress note for every tool-using Pi turn (its narration and the tools it ran, including typed work), and Pi's final replies are shared with OpenAI. Typed input and installed Pi extensions can influence those results. Existing HTTP/WebSocket proxy settings do not establish WebRTC/ICE media proxying. Pi reports only outermost extension dialogs, with a microtask delay; shortcut-opened dialogs and unreported nested dialogs may leave voice active. Stop voice first before opening such dialogs when capture and delivery must stop. Muting stops microphone capture; speakers may continue. Voice requests do not grant approvals. Native/proxy cleanup may remain unconfirmed and block restart; home certification and recovery require standalone setup.";
+
+const LIVE_INSTRUCTIONS = `You are Pi Live, the voice interface to the user's current Pi coding session. Reply briefly in speech-friendly language. Delegate coding, repository, tool and verification requests; Pi receives the conversation that led to the handoff and handles it with its usual tools and approvals. While Pi works, its progress arrives as background context: use it when the user asks what Pi is doing. When Pi finishes, its reply arrives for you to tell the user; summarize it naturally instead of reading code or long lists aloud. Voice does not grant approvals.`;
 export function registerPiLive(
   pi: ExtensionAPI,
   dependencies: LiveDependencies,
-): void {
+): LiveLifecycleBinding {
+  let ctx: ExtensionContext | undefined;
+  let retired = false;
+  let controlVersion = 0;
+  let preparing = false;
+  let widgetVisible = false;
+  let level = 0;
+  let working = false;
+  let final: string | undefined;
+  let transcripts: Partial<Record<"user" | "assistant", string>> = {};
+  let activeSignal: AbortSignal | undefined;
+  const resources = new WeakMap<AbortSignal, LiveResources>();
+  const host = dependencies.runtime?.executionHost ?? hostname;
+
+  const paint = (): void => {
+    if (!ctx || ctx.mode !== "tui" || retired) return;
+    const state = binding.lifecycle.snapshot();
+    if (["off", "stopping", "releasing", "blocked"].includes(state.state)) {
+      if (widgetVisible) clearPresentation(ctx);
+      widgetVisible = false;
+      return;
+    }
+    const phase =
+      state.state === "active"
+        ? state.muted
+          ? "muted"
+          : working
+            ? "working"
+            : "listening"
+        : state.state;
+    const wave =
+      state.state === "active" && !state.muted
+        ? "▁▂▃▄▅▆▇█"[Math.min(7, Math.floor(level * 8))]!.repeat(8)
+        : "--------";
+    const lines = [
+      `Pi Live: ${phase}${state.muted && working ? " / working" : ""} | ${wave} | ${state.voice}`,
+      ...(transcripts.user ? [`You: ${transcripts.user}`] : []),
+      ...(transcripts.assistant ? [`Voice: ${transcripts.assistant}`] : []),
+    ];
+    ctx.ui.setWidget(WIDGET_KEY, () => ({
+      render: (width: number) =>
+        lines.map((line) => fitLine(line, width, dependencies.truncateToWidth)),
+      invalidate: () => undefined,
+    }));
+    widgetVisible = true;
+  };
+  const getResources = (signal: AbortSignal): LiveResources => {
+    const resource = resources.get(signal);
+    if (!resource) throw fixedRuntimeError("cancelled");
+    return resource;
+  };
+  const binding = bindPiLiveLifecycle(pi, {
+    facts: {
+      async check(current) {
+        ctx = current;
+        working = !current.isIdle();
+        return {
+          compatible: (await dependencies.compatibility.check()).supported,
+          configuredPackageSources:
+            dependencies.runtime?.configuredPackageSources ??
+            (await dependencies.packageSources?.(current)),
+        };
+      },
+    },
+    consent: {
+      async request(input) {
+        activeSignal = input.signal;
+        final = undefined;
+        transcripts = {};
+        level = 0;
+        paint();
+        input.signal.addEventListener(
+          "abort",
+          () => {
+            if (activeSignal !== input.signal) return;
+            activeSignal = undefined;
+            transcripts = {};
+            level = 0;
+            paint();
+            const failure = binding.lifecycle.snapshot().lastFailure;
+            if (!retired && failure && ctx?.mode === "tui")
+              ctx.ui.notify(
+                `Pi Live: ${runtimeDiagnosticText(failure)} Coding output remains in Pi.`,
+                "warning",
+              );
+          },
+          { once: true },
+        );
+        return input.openConfirm(
+          "Start Pi Live voice?",
+          `Execution host: ${host()}\n${LIVE_DISCLOSURE}`,
+        );
+      },
+    },
+    lifecycle: {
+      ...dependencies.runtime?.lifecycle,
+      resources: {
+        credentials(input) {
+          if (!ctx || input.signal.aborted)
+            throw fixedRuntimeError("cancelled");
+          paint();
+          const callbacks: NonNullable<
+            LiveRuntimeResourcesOptions["callbacks"]
+          > = {
+            onRequest(request) {
+              if (input.signal.aborted || activeSignal !== input.signal) return;
+              pi.sendUserMessage(`[Voice]\n${request.text}`, {
+                deliverAs: "steer",
+              });
+            },
+            onTranscript(transcript) {
+              if (input.signal.aborted || activeSignal !== input.signal) return;
+              transcripts[transcript.role] = utf8Tail(
+                transcript.text,
+                LIVE_LIMITS.textBytes,
+              );
+              paint();
+            },
+            onLevel(value) {
+              if (input.signal.aborted || activeSignal !== input.signal) return;
+              level = value;
+              paint();
+            },
+            onServiceError(code) {
+              if (input.signal.aborted || activeSignal !== input.signal) return;
+              if (!retired && ctx?.mode === "tui")
+                ctx.ui.notify(`Pi Live: OpenAI reported ${code}.`, "warning");
+            },
+          };
+          const resource = (
+            dependencies.runtime?.resources ?? createLiveRuntimeResources
+          )({
+            registry: ctx.modelRegistry,
+            instructions: LIVE_INSTRUCTIONS,
+            clock: dependencies.runtime?.lifecycle?.clock,
+            callbacks,
+          });
+          resources.set(input.signal, resource);
+          return resource.credentials(input);
+        },
+        connect(input) {
+          paint();
+          return getResources(input.signal).connect(input);
+        },
+      },
+    },
+  });
+
+  const usage =
+    "Usage: /live [start|stop|mute|unmute|voice <name>|status|help]";
   const handleTui = async (
     command: string,
-    ctx: ExtensionContext,
+    current: ExtensionContext,
   ): Promise<void> => {
+    ctx = current;
+    binding.enter(current);
+    const lifecycle = binding.lifecycle;
+    if (command === "help") {
+      current.ui.notify(
+        `Execution host: ${host()}. ${LIVE_DISCLOSURE} Controls: /live, start, stop, mute, unmute, voice <name>, status, help; Ctrl+Shift+L uses the same toggle. Use commands if shifted keys are unsupported. Do not load another live extension alongside Pi Live; known-source checks cannot inventory every extension.`,
+        "info",
+      );
+      return;
+    }
     if (command === "status") {
       const preferences = await dependencies.preferences.load();
       const compatibility = await dependencies.compatibility.check();
-      const compatibilitySummary = compatibility.supported
-        ? "compatibility ready"
-        : `compatibility unavailable (${compatibility.issues.join(", ")})`;
-      ctx.ui.notify(
-        `Pi Live: off; voice ${preferences.voice}; ${compatibilitySummary}; calling unavailable (setup-only).`,
+      const state = lifecycle.snapshot();
+      current.ui.notify(
+        `Pi Live: ${state.state}; ${state.muted ? "muted" : "unmuted"}; voice ${state.state === "off" ? preferences.voice : state.voice}; compatibility ${compatibilityText(compatibility)}${state.lastFailure ? `; ${state.lastFailure}` : ""}.`,
         "info",
-      );
-      return;
-    }
-    if (command === "help") {
-      ctx.ui.notify(
-        "Pi Live is setup-only: calling is unavailable. Future reviewed calling uses this host microphone and speaker with an OpenAI experimental protocol, shares the Pi session identifier and final coding result, and handles one coding request at a time. Pi cannot report shortcut-opened dialogs; stop voice first before opening one when capture and delivery must stop. Controls: /live, start, stop, mute, unmute, voice <name>, status, help; shortcut Ctrl+Shift+L.",
-        "info",
-      );
-      return;
-    }
-    if (command === "voice") {
-      ctx.ui.notify(
-        "Usage: /live [start|stop|mute|unmute|voice <name>|status|help]",
-        "error",
       );
       return;
     }
     if (command.startsWith("voice ")) {
-      const selected = command.slice("voice ".length).trim();
+      const selected = command.slice(6).trim();
       if (!isLiveVoice(selected)) {
-        ctx.ui.notify(
+        current.ui.notify(
           `Unknown Pi Live voice. Available: ${LIVE_VOICE_VALUES.join(", ")}.`,
           "error",
         );
         return;
       }
+      if (preparing || lifecycle.snapshot().state !== "off") {
+        current.ui.notify(
+          "Pi Live: stop voice before changing its voice preference.",
+          "warning",
+        );
+        return;
+      }
       await dependencies.preferences.setVoice(selected);
-      ctx.ui.notify(
+      await lifecycle.selectVoice(selected);
+      current.ui.notify(
         `Pi Live voice set to ${selected} for the next call.`,
         "info",
       );
       return;
     }
-    if (command === "stop") {
-      clearPresentation(ctx);
-      ctx.ui.notify("Pi Live is off.", "info");
+    if (command === "stop" || (command === "" && preparing)) {
+      ++controlVersion;
+      preparing = false;
+      await lifecycle.stop();
+      paint();
+      current.ui.notify(`Pi Live: ${lifecycle.snapshot().state}.`, "info");
       return;
     }
     if (command === "mute" || command === "unmute") {
-      ctx.ui.notify(`Pi Live is off; ${command} is unavailable.`, "warning");
+      const result = await lifecycle.setMuted(command === "mute");
+      paint();
+      current.ui.notify(
+        `Pi Live: ${result.state}${"muted" in result ? (result.muted ? "; muted" : "; unmuted") : `; ${command} unavailable`}.`,
+        result.kind === "refused" ? "warning" : "info",
+      );
       return;
     }
-    if (command === "" || command === "start") {
-      const preferences = await dependencies.preferences.load();
-      const compatibility = await dependencies.compatibility.check();
-      ctx.ui.setWidget(
-        WIDGET_KEY,
-        setupWidget(preferences.voice, compatibility),
-      );
-      ctx.ui.notify(
-        "Pi Live calling is unavailable in this setup-only package.",
+    if (command !== "" && command !== "start") {
+      current.ui.notify(usage, "error");
+      return;
+    }
+    if (preparing) {
+      current.ui.notify("Pi Live: preparing.", "info");
+      return;
+    }
+    if (lifecycle.snapshot().state === "off") {
+      const version = ++controlVersion;
+      preparing = true;
+      try {
+        const preferences = await dependencies.preferences.load();
+        if (version !== controlVersion || retired) return;
+        const compatibility = await dependencies.compatibility.check();
+        if (version !== controlVersion || retired) return;
+        if (!compatibility.supported) {
+          current.ui.notify(
+            `Pi Live: ${compatibilityText(compatibility)}.`,
+            "warning",
+          );
+          return;
+        }
+        await lifecycle.selectVoice(preferences.voice);
+      } finally {
+        if (version === controlVersion) preparing = false;
+      }
+      if (version !== controlVersion || retired) return;
+    }
+    const result =
+      command === "" ? await lifecycle.toggle() : await lifecycle.start();
+    paint();
+    const state = lifecycle.snapshot();
+    if ("kind" in result && result.kind === "refused")
+      current.ui.notify(
+        `Pi Live: ${state.state}; ${result.diagnostic}.`,
         "warning",
       );
-      return;
-    }
-    ctx.ui.notify(
-      "Usage: /live [start|stop|mute|unmute|voice <name>|status|help]",
-      "error",
-    );
+    else if (state.state !== "active")
+      current.ui.notify(
+        `Pi Live: ${state.state}${state.lastFailure ? `; ${state.lastFailure}` : ""}.`,
+        "info",
+      );
   };
-
-  const handle = async (args: string, ctx: ExtensionContext): Promise<void> => {
-    if (ctx.mode !== "tui") {
-      ctx.ui.notify("Pi Live requires interactive TUI mode.", "warning");
+  const handle = async (
+    args: string,
+    current: ExtensionContext,
+  ): Promise<void> => {
+    if (current.mode !== "tui") {
+      current.ui.notify("Pi Live requires interactive TUI mode.", "warning");
       return;
     }
+    if (retired) return;
     try {
-      await handleTui(args.trim(), ctx);
+      await handleTui(args.trim(), current);
     } catch (error) {
       if (error instanceof PreferenceError) {
         const description =
@@ -4880,13 +4707,14 @@ export function registerPiLive(
             : error.code === "invalid-voice"
               ? "selects an invalid voice"
               : "could not be accessed or written";
-        ctx.ui.notify(`Pi Live preference ${description}.`, "error");
-        return;
+        current.ui.notify(`Pi Live preference ${description}.`, "error");
+      } else {
+        await binding.lifecycle.interrupt("failure");
+        current.ui.notify("Pi Live: protocol-error.", "error");
       }
-      ctx.ui.notify("Pi Live preference could not be accessed.", "error");
+      paint();
     }
   };
-
   pi.registerMessageRenderer(DELEGATION_MESSAGE_TYPE, (message) => {
     const text = delegationText(message.content).trim();
     return {
@@ -4900,16 +4728,60 @@ export function registerPiLive(
     };
   });
   pi.registerCommand("live", {
-    description: "Control the setup-only Pi Live voice package",
+    description: "Control Pi Live voice",
     handler: handle,
   });
   pi.registerShortcut("ctrl+shift+l", {
     description: "Toggle Pi Live voice",
-    handler: (ctx) => handle("", ctx),
+    handler: (current) => handle("", current),
   });
-  pi.on("session_shutdown", (_event, ctx) => clearPresentation(ctx));
+  pi.on("agent_start", () => {
+    working = true;
+    final = undefined;
+    paint();
+  });
+  pi.on("message_end", ({ message }) => {
+    if (message.role !== "assistant") return;
+    final =
+      message.stopReason === "stop"
+        ? truncateLiveFinal(delegationText(message.content))
+        : undefined;
+  });
+  pi.on("turn_end", ({ message, toolResults }) => {
+    if (message.role !== "assistant" || toolResults.length === 0) return;
+    const narration = delegationText(message.content).trim();
+    const tools = toolResults
+      .map((result) => `${result.toolName}${result.isError ? " (failed)" : ""}`)
+      .join(", ");
+    binding.lifecycle.createOutgoingSender()?.({
+      kind: "application",
+      text: utf8Prefix(
+        `Pi progress: ${narration ? `${narration} ` : ""}Ran ${tools}.`,
+        LIVE_LIMITS.contextChunkBytes,
+      ),
+    });
+  });
+  pi.on("agent_settled", () => {
+    working = false;
+    binding.lifecycle.createOutgoingSender()?.({
+      kind: "final",
+      text: final || "Pi finished without a reply. Check the terminal.",
+    });
+    final = undefined;
+    paint();
+  });
+  pi.on("session_shutdown", (_event, current) => {
+    retired = true;
+    ++controlVersion;
+    preparing = false;
+    clearPresentation(current);
+    widgetVisible = false;
+    transcripts = {};
+  });
+  return binding;
 }
-// --- Dormant Pi lifecycle/conflict binding (issue #3) ---
+
+// --- Public Pi lifecycle/conflict binding ---
 
 export const PINNED_BETTER_OPENAI_PACKAGE_SOURCES = [
   "npm:@monotykamary/pi-better-openai@0.2.6",
@@ -4949,6 +4821,7 @@ export interface LiveLifecycleBindingOptions {
 
 export interface LiveLifecycleBinding {
   lifecycle: LiveLifecycle;
+  enter(ctx: ExtensionContext): void;
 }
 
 function isSourceInfoObservation(value: unknown): boolean {
@@ -5084,8 +4957,6 @@ export function bindPiLiveLifecycle(
           compatible: facts.compatible,
           conflict: observedCommandConflict || facts.conflict === true,
           dialog: reportedPromptOpen !== undefined || facts.dialog === true,
-          idle: ctx.isIdle(),
-          pendingWork: ctx.hasPendingMessages() || ctx.signal !== undefined,
         };
       },
     },
@@ -5256,5 +5127,12 @@ export function bindPiLiveLifecycle(
     void interrupt("pooling").catch(() => undefined);
   });
 
-  return { lifecycle };
+  return {
+    lifecycle,
+    enter: (ctx) => {
+      // Pi shortcuts receive an unwrapped UI. Keep the session-event context so
+      // our own consent still uses Pi's reported confirm primitive.
+      currentContext ??= ctx;
+    },
+  };
 }

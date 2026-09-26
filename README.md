@@ -1,42 +1,74 @@
 # pi-live
 
-Private, experimental Pi extension extracted for standalone development. It is
-setup-only: it does not make voice calls.
+Private, experimental Pi extension. Voice feeds requests into the current Pi
+conversation and receives Pi's reply. Pi handles typed and spoken input together,
+including its normal extensions, tools and retries.
+
+Home certification is not implemented yet, so the shipped package refuses real
+calls unless the development-only `PI_LIVE_DEV_TRUST_HOME=1` switch is set (see
+below). One real microphone trial has been run on macOS arm64; no rollout has
+been performed.
 
 ## Current behavior
 
-The package exports one Pi extension factory. Loading it registers:
+The package exports one Pi extension factory. Discovery registers `/live`,
+`Ctrl+Shift+L`, the historical live-message renderer and public lifecycle,
+dialog and delegation listeners. Discovery does not load the native addon,
+resolve credentials, create call timers, touch ownership or contact a provider.
 
-- `/live` with `start`, `stop`, `mute`, `unmute`, `voice`, `status`, and `help`
-  subcommands;
-- `Ctrl+Shift+L` as the same setup-only toggle path;
-- one renderer for historical live-delegation messages; and
-- a shutdown handler that clears its widget.
+- `/live` toggles voice; `start` and `stop` are explicit forms. Each new attempt
+  requires ordinary TUI consent. The shifted shortcut follows the same path;
+  commands remain the fallback for unsupported shifted-key encoding.
+- `mute` stops microphone capture while speaker playback may continue. `unmute`
+  reopens capture only within the same active call.
+- `voice <name>` changes the host-local preference while off. `status` reports
+  state, mute, voice, compatibility and a fixed last-failure code. `help` explains
+  controls, data sharing and limitations.
+- The render-only `pi-live` widget shows input level, current role transcripts,
+  mute and working state. It does not replace the footer/editor or intercept
+  their keys. Teardown removes it; there is no widget animation timer.
+- Voice requests become visible Pi messages, including while Pi is working.
+  Pi handles follow-ups and typed input normally. When it settles, its successful
+  reply returns to voice; if it has no reply, voice gets a short notice to check
+  the terminal. Stopping voice stops audio and delivery, while Pi work continues.
 
-`/live` and `/live start` display an **off (setup-only)** widget. `stop` clears
-it, `mute` and `unmute` report that calling is unavailable, and `status` reports
-metadata compatibility. Voice selection writes only the private Pi Live
-preference file and preserves unknown fields when possible.
+Voice runs on OpenAI's GPT-Live API (`gpt-live-1`), billed to the OpenAI API
+key Pi uses for its `openai` provider. While Pi works, voice receives short quiet
+progress notes; when Pi finishes, voice summarizes its reply aloud.
 
-The shipped extension does not import the native addon, open audio devices, read
-credentials, authenticate, contact a provider, or start a live session. Its
-compatibility check reads package metadata only. Nothing in this repository is
-an installation, device, service, or real-home authorization.
+Consent identifies the execution host, OpenAI GPT-Live, microphone and speakers,
+the conversation, progress and reply sharing, and proxy limitations. Reported non-live extension dialogs fence
+voice when their delayed notification arrives. Shortcut-opened and unreported
+nested dialogs can leave voice active; stop voice before opening them when
+capture and delivery must stop. Voice never answers or grants an approval.
 
-Issue #3 adds a dormant lifecycle module with fixture-tested ownership,
-cancellation, mute, deadlines, asynchronous release, and Pi lifecycle binding.
-The default factory does not construct it. Issue #4 adds dormant extracted auth,
-attestation, signaling, native/sideband adapters and bounded transport, verified
-with fake native/network resources and the real SDK's fake credential store.
-It does not enable calls or change the pinned upstream/dependency versions.
+The default home certifier refuses unless the development switch is set. Issue #6 owns production home certification
+and recovery. Real native and proxied-sideband close interfaces still cannot
+confirm cleanup: their adapters report uncertainty and retain blocked ownership.
+Fake adapters positively confirm cleanup for tests. Issue #5 does not repair
+those dependencies or establish safe real-call restart.
 
-The real native close and proxied-sideband close interfaces do not establish
-confirmed cleanup. Those adapters therefore report unconfirmed shutdown and the
-lifecycle retains blocked ownership, rather than claiming a safe restart. Real
-access, production home certification and enabled controls remain later work.
-See the [transport verification and limits](docs/ISSUE-4-VERIFICATION.md),
-[lifecycle verification](docs/ISSUE-3-VERIFICATION.md) and
-[test-cleanup record](docs/TEST-CLEANUP-VERIFICATION.md).
+### Trying a real call before standalone setup
+
+Until #6 provides home certification, a real call needs a development-only
+override on a macOS arm64 host:
+
+1. Give Pi an OpenAI API key for the `openai` provider (Pi's credential store or
+   `OPENAI_API_KEY`).
+2. Create the ownership directory: `mkdir -p -m 700 ~/.local/state/pi-live`.
+3. Start Pi with `PI_LIVE_DEV_TRUST_HOME=1` and this extension loaded
+   (`pi -e /path/to/pi-live/index.ts`), then run `/live`.
+
+The lifecycle still inspects that directory's ownership and mode; the variable
+only skips certification. macOS asks the terminal app for microphone access on
+first use. Real native cleanup is reported unconfirmed, so after a real call the
+ownership lock is kept on purpose and later calls report busy: quit Pi, then
+remove `~/.local/state/pi-live/active.lock` before the next attempt.
+
+See [delegation/control verification](docs/ISSUE-5-VERIFICATION.md),
+[transport limits](docs/ISSUE-4-VERIFICATION.md), and
+[lifecycle verification](docs/ISSUE-3-VERIFICATION.md). Real credentials,
+media/provider access, provisioning and adoption remain separate.
 
 The preference writer uses an optimistic read/compare/retry sequence and atomic
 same-directory rename. That does **not** guarantee that every concurrent change

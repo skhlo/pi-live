@@ -102,7 +102,7 @@ test("real child contenders using different Pi agent directories produce exactly
   assert.deepEqual(firstStarted, {
     event: "started",
     result: { kind: "started", state: "active" },
-    snapshot: { state: "active", muted: false, voice: "sol" },
+    snapshot: { state: "active", muted: false, voice: "marin" },
   });
   assert.equal((await stat(fixture.lock)).isDirectory(), true);
 
@@ -113,7 +113,7 @@ test("real child contenders using different Pi agent directories produce exactly
     snapshot: {
       state: "off",
       muted: false,
-      voice: "sol",
+      voice: "marin",
       lastFailure: "busy",
     },
   });
@@ -126,7 +126,7 @@ test("real child contenders using different Pi agent directories produce exactly
   assert.deepEqual(await stoppedLine, {
     event: "stopped",
     result: { status: "off" },
-    snapshot: { state: "off", muted: false, voice: "sol" },
+    snapshot: { state: "off", muted: false, voice: "marin" },
   });
   first.process.stdin.end();
   const firstExit = await first.waitExited();
@@ -172,7 +172,7 @@ test("simultaneous ready-barrier children produce exactly one real owner", async
   assert.deepEqual(results[winnerIndexes[0]!], {
     event: "started",
     result: { kind: "started", state: "active" },
-    snapshot: { state: "active", muted: false, voice: "sol" },
+    snapshot: { state: "active", muted: false, voice: "marin" },
   });
   assert.deepEqual(results[refusedIndexes[0]!], {
     event: "started",
@@ -180,7 +180,7 @@ test("simultaneous ready-barrier children produce exactly one real owner", async
     snapshot: {
       state: "off",
       muted: false,
-      voice: "sol",
+      voice: "marin",
       lastFailure: "busy",
     },
   });
@@ -192,7 +192,7 @@ test("simultaneous ready-barrier children produce exactly one real owner", async
   assert.deepEqual(await stopped, {
     event: "stopped",
     result: { status: "off" },
-    snapshot: { state: "off", muted: false, voice: "sol" },
+    snapshot: { state: "off", muted: false, voice: "marin" },
   });
   winner.process.stdin.end();
   assert.deepEqual(await winner.waitExited(), { code: 0, signal: null });
@@ -263,7 +263,7 @@ test("a second real child stays busy while the first fake resource close is pend
   assert.deepEqual(await afterClose.next(), {
     event: "started",
     result: { kind: "started", state: "active" },
-    snapshot: { state: "active", muted: false, voice: "sol" },
+    snapshot: { state: "active", muted: false, voice: "marin" },
   });
   const stopped = afterClose.next();
   afterClose.process.stdin.write("stop\n");
@@ -284,10 +284,10 @@ test("the default cell rejects malformed state without contaminating an isolated
     defaultSnapshot: {
       state: "blocked",
       muted: false,
-      voice: "sol",
+      voice: "marin",
       lastFailure: "cleanup-blocked",
     },
-    isolatedSnapshot: { state: "off", muted: false, voice: "sol" },
+    isolatedSnapshot: { state: "off", muted: false, voice: "marin" },
     globalVersion: 2,
   });
   assert.deepEqual(await child.waitExited(), { code: 0, signal: null });
@@ -336,7 +336,7 @@ test("actual process exit records exact acquisition and publication remnants wit
           snapshot: {
             state: mode === "exit-verified-ownership" ? "active" : "acquiring",
             muted: false,
-            voice: "sol",
+            voice: "marin",
           },
           coordination: { kind: "none" },
         },
@@ -406,7 +406,7 @@ test("actual process exit records release remnants and never treats an unacknowl
       assert.deepEqual(await original.next(), {
         event: "started",
         result: { kind: "started", state: "active" },
-        snapshot: { state: "active", muted: false, voice: "sol" },
+        snapshot: { state: "active", muted: false, voice: "marin" },
       });
       const boundary = original.next();
       original.process.stdin.write("stop\n");
@@ -430,7 +430,7 @@ test("actual process exit records release remnants and never treats an unacknowl
           event: "exit-boundary",
           boundary: mode,
           exitKind: "process-without-sdk-dispose",
-          snapshot: { state: "releasing", muted: false, voice: "sol" },
+          snapshot: { state: "releasing", muted: false, voice: "marin" },
           coordinationKind: "pending",
         },
       );
@@ -452,7 +452,7 @@ test("actual process exit records release remnants and never treats an unacknowl
         assert.deepEqual(await replacement.next(), {
           event: "started",
           result: { kind: "started", state: "active" },
-          snapshot: { state: "active", muted: false, voice: "sol" },
+          snapshot: { state: "active", muted: false, voice: "marin" },
         });
         assertCompleteOwner(await lockInventory(fixture.lock));
         await exitChildAtBarrier(original);
@@ -462,7 +462,7 @@ test("actual process exit records release remnants and never treats an unacknowl
         assert.deepEqual(await stopped, {
           event: "stopped",
           result: { status: "off" },
-          snapshot: { state: "off", muted: false, voice: "sol" },
+          snapshot: { state: "off", muted: false, voice: "marin" },
         });
         replacement.process.stdin.end();
         assert.deepEqual(
@@ -577,7 +577,7 @@ test("every post-mkdir publication fault is sticky and leaves child contenders b
       assert.deepEqual(lifecycle.snapshot(), {
         state: "blocked",
         muted: false,
-        voice: "sol",
+        voice: "marin",
         lastFailure: "cleanup-blocked",
       });
       assert.equal((await stat(fixture.lock)).isDirectory(), true);
@@ -781,7 +781,7 @@ test("an asynchronous release reports pending across reload and only its origina
     state: "releasing",
     diagnostic: "busy",
   });
-  assert.deepEqual(await original.selectVoice("vale"), {
+  assert.deepEqual(await original.selectVoice("cedar"), {
     kind: "refused",
     state: "releasing",
     diagnostic: "busy",
@@ -948,7 +948,7 @@ test("a completed rmdir with a parked callback cannot touch a replacement child 
   assert.deepEqual(await replacement.next(), {
     event: "started",
     result: { kind: "started", state: "active" },
-    snapshot: { state: "active", muted: false, voice: "sol" },
+    snapshot: { state: "active", muted: false, voice: "marin" },
   });
   assert.equal((await stat(fixture.lock)).isDirectory(), true);
   assert.deepEqual(await lifecycle.start(), {
@@ -1301,7 +1301,7 @@ test("special permission bits on a newly-created lock are rejected", async (t) =
   assert.deepEqual(lifecycle.snapshot(), {
     state: "blocked",
     muted: false,
-    voice: "sol",
+    voice: "marin",
     lastFailure: "cleanup-blocked",
   });
   assert.equal((await lstat(fixture.lock)).mode & 0o7000, 0o4000);
