@@ -225,6 +225,17 @@ same-directory rename. That does **not** guarantee that every concurrent change
 is preserved: another writer can still win after the final observation. A deterministic regression covers a competing update observed before the final
 comparison; the design makes no general compare-and-swap claim.
 
+## Codex hand-off to Pi
+
+Separate from Pi Live, Codex (including Codex voice) running in this checkout
+can hand requests to Pi. The repository skill `.agents/skills/pi-handoff` tells
+Codex to run `pi -p --session-id codex-voice --thinking low '<request>'` and
+relay Pi's reply; the `codex-voice` Pi session carries context across hand-offs.
+Codex loads both the skill and `.codex/rules/pi-handoff.rules` only for a
+trusted project. That rule lets the command run outside Codex's sandbox without
+an approval, so trusting this checkout in Codex lets any Codex request start Pi
+with Pi's full permissions. Pi has no `live_browser` tool in these runs.
+
 ## Development
 
 The compatibility baseline is Node >=22.19.0, pnpm 11.8.0, Pi/TUI 0.87.1, and

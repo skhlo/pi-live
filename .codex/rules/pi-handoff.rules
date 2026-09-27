@@ -1,0 +1,17 @@
+# Lets Codex, including Codex voice, hand a request to Pi without an approval
+# prompt. The allow decision also runs Pi outside Codex's sandbox, which Pi
+# needs to write its session and reach its provider. See
+# .agents/skills/pi-handoff/SKILL.md.
+prefix_rule(
+    pattern = ["pi", "-p", "--session-id", "codex-voice", "--thinking", "low"],
+    decision = "allow",
+    justification = "Codex hands this checkout's work to Pi through the pi-handoff skill.",
+    match = [
+        "pi -p --session-id codex-voice --thinking low 'What branch is this checkout on?'",
+    ],
+    not_match = [
+        "pi -p 'What branch is this checkout on?'",
+        "pi -p --session-id other --thinking low 'What branch is this checkout on?'",
+        "pi -p --session-id codex-voice --thinking high 'What branch is this checkout on?'",
+    ],
+)
