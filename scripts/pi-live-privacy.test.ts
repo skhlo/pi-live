@@ -35,7 +35,7 @@ interface RuntimeHarness {
   sent: string[];
   diagnostics: LiveRuntimeDiagnostic[];
   serviceErrors: string[];
-  requests: Array<{ id: string; text: string }>;
+  requests: Array<{ id: string; text: string; userText: string }>;
   transcripts: Array<{ role: "user" | "assistant"; text: string }>;
 }
 
@@ -47,7 +47,11 @@ async function runtimeHarness(
     sendText?: (payload: string) => Promise<void>;
     sendPong?: (payload: Uint8Array) => Promise<void>;
     onSocketClose?: () => void;
-    onRequest?: (request: { id: string; text: string }) => void;
+    onRequest?: (request: {
+      id: string;
+      text: string;
+      userText: string;
+    }) => void;
     onNativeCallbacks?: (
       callbacks: Parameters<LiveNativeAdapter["createPeer"]>[0],
     ) => void;
@@ -61,7 +65,7 @@ async function runtimeHarness(
   const serviceErrors: string[] = [];
   const sent: string[] = [];
   const diagnostics: LiveRuntimeDiagnostic[] = [];
-  const requests: Array<{ id: string; text: string }> = [];
+  const requests: Array<{ id: string; text: string; userText: string }> = [];
   const transcripts: Array<{
     role: "user" | "assistant";
     text: string;
@@ -371,8 +375,8 @@ test("voice requests pass through while earlier Pi work is pending", async (t) =
   harness.handoff("first", "first task");
   harness.handoff("second", "second task");
   assert.deepEqual(harness.requests, [
-    { id: "first", text: "User: first task" },
-    { id: "second", text: "User: second task" },
+    { id: "first", text: "User: first task", userText: "first task" },
+    { id: "second", text: "User: second task", userText: "second task" },
   ]);
   assert.deepEqual(harness.diagnostics, []);
 });
@@ -389,12 +393,60 @@ test("a handoff carries both speakers since the previous handoff, in order", asy
     {
       id: "one",
       text: "Voice assistant: Should I run the tests?\nUser: Yes, please.",
+      userText: "Yes, please.",
     },
     {
       id: "empty",
       text: "(The voice assistant handed off without a transcript. Ask the user what they need.)",
+      userText: "",
     },
   ]);
+});
+
+test("a handoff's user text is the latest turn, without transcript noise", async (t) => {
+  const harness = await runtimeHarness(t);
+  harness.native(speech("user", "for, plong-pong"));
+  harness.native(speech("assistant", "Sorry?"));
+  harness.native(
+    speech("user", "[sniff] Search for the Blancpain 2150 [tongue click ]"),
+  );
+  harness.native(delegation("latest"));
+  harness.native(speech("user", "Open the results"));
+  harness.native(speech("assistant", "Which one?"));
+  harness.native(speech("user", "The second one"));
+  harness.native(delegation("short"));
+  harness.native(speech("user", "[laughs open wikipedia"));
+  harness.native(delegation("unclosed"));
+  assert.deepEqual(
+    harness.requests.map((request) => request.userText),
+    [
+      "Search for the Blancpain 2150",
+      "Open the results The second one",
+      "open wikipedia",
+    ],
+  );
+  assert.ok(harness.requests[0]!.text.includes("User: for, plong-pong"));
+});
+
+test("a reply naming its handoff leaves the reply slot to the handoff it replaced", async (t) => {
+  const harness = await runtimeHarness(t);
+  harness.handoff("coding", "run the tests");
+  harness.handoff("scroll", "scroll down");
+  // The browser answers its own handoff; Pi's later reply still reaches the
+  // coding handoff instead of being dropped.
+  await harness.connection.sendData?.({
+    kind: "final",
+    text: "Done: scroll down.",
+    delegationId: "scroll",
+  });
+  await harness.connection.sendData?.({ kind: "final", text: "Tests pass." });
+  assert.ok(harness.sent[0]?.includes('"delegation_id":"scroll"'));
+  assert.ok(harness.sent[1]?.includes('"delegation_id":"coding"'));
+  assert.ok(harness.sent[1]?.includes("Tests pass."));
+  // Once answered, the slot is empty again.
+  await harness.connection.sendData?.({ kind: "final", text: "typed work" });
+  assert.equal(harness.sent.length, 2);
+  assert.deepEqual(harness.diagnostics, []);
 });
 
 test("the sideband does not duplicate data-channel transcripts or delegations", async (t) => {

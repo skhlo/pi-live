@@ -16,7 +16,8 @@ explicit; no global registration or dotfiles integration was added.
 
 One default factory registers `/live`, `Ctrl+Shift+L`, the historical request
 renderer and required public lifecycle/dialog/delegation listeners. It registers
-no tool or provider and does not replace Pi's model, instructions, footer,
+one tool, `live_browser`, kept inactive outside browser mode (see
+[Browser delegation](#browser-delegation)), and no provider. It does not replace Pi's model, instructions, footer,
 editor, authentication, memory or MCP configuration. Discovery remains free of
 native import, credentials, ownership, timers and provider operations.
 
@@ -143,7 +144,8 @@ single-flight requirements. Voice is another input to the current Pi conversatio
 Installed extensions, typed clarifications, retries and context processing are
 part of ordinary Pi execution and can influence the answer returned to voice.
 
-The bridge has one path in and one path out. A voice request calls
+In an ordinary call the bridge has one path in and one path out; browser mode
+adds a second destination (see [Browser delegation](#browser-delegation)). A voice request calls
 `pi.sendUserMessage` with a visible voice-origin label and Pi's normal steering
 delivery. Input and agent-start extensions run as they do for other Pi input.
 GPT-Live's delegation event carries no task text, so the request is the
@@ -161,12 +163,79 @@ request quota, local receipt, branch snapshot, transcript hash or context audit.
 Pi being busy does not block starting voice. The extra receipt deadline and
 thirty-minute coding timer are removed. The transport retains the latest service
 delegation ID only to address the wire reply, matching the upstream protocol.
+A reply may instead name its delegation; it then hands the slot back to the
+delegation it replaced, so a browser outcome does not consume Pi's reply.
 The bounded writer can drain successive replies normally.
 
 Audio resource ownership, transport bounds, explicit consent, mute and stop keep
 their existing jobs. Stopping voice closes its resources and discards unsent data;
 it does not abort Pi. Pi lifecycle changes tear down the call through the existing
 lifecycle binding. No additional result-confirmation dialog is introduced.
+
+## Browser delegation
+
+Browser mode (#16) keeps client delegation and chooses a destination per
+request. `/live browser` selects it for the next call only; the call keeps its
+choice for its lifetime and gets its own instructions and disclosure. The
+transport reports each handoff's latest user turn (`userText`) beside the full
+exchange, keeping the turn before it when the latest has three words or fewer
+("the second one") and dropping transcript noise tags such as `[sniff]`.
+Earlier turns are left out because GPT-Live can reply between them without
+handing off, which glued fragments into one command.
+
+A router asks Jev one `choice` over raw HTTPS with that user turn and the tab
+on screen: `browser_step`, `browser_task` (web work needing several actions or
+judgment) or `other`. Jev resolves single commands well but acts on the last
+clause of a compound request instead of refusing it, so refusal alone cannot
+route multi-step work. A missing key or an undecided, failed or timed-out
+router call tries the controller first. The router's deadline is a plain timer,
+because `AbortSignal.timeout()` does not keep Node running. It uses Node's
+`fetch`, which ignores proxy environment variables unless Node enables them.
+A newer request or a stop does not cancel routing: a request routed to Pi is
+still delivered, as in an ordinary call, and only browser waits are abandoned.
+
+`src/browser.ts` sends a single step to voice-browser's loopback WebSocket as a
+final transcript with a Pi Live utterance ID, then reads the controller's
+broadcast events: the echoed transcript marks the request as registered, and
+the first decision, candidate list or error after it becomes the outcome. The
+events carry no request ID, so an action counts only after this request's `act`
+decision, or when a spoken number picked a listed choice; an earlier request's
+action can still finish after this one registers. An action waits briefly for
+the refreshed page snapshot and otherwise says the page may still be loading.
+Done, confirmation and numbered choices return through the `final` path,
+addressed to their own delegation. A refusal, a failed action, a controller
+error or a repeated `wait` decision is handed to Pi instead, as is an
+unreachable controller when Pi has the tool. Whenever a request ends without an
+action, including a stop, a question or a timeout, an empty utterance stops the
+controller re-asking Jev. The client opens one socket per request, never
+retries, and never reports an action it did not observe. Timeouts and
+disconnects are spoken rather than handed off, because the browser may still act.
+Outcome texts carry no label, because the voice model reads labels aloud.
+
+Browser tasks go to Pi as ordinary voice input with a note naming the tab on
+screen and the `live_browser` tool (`src/browser-tool.ts`). The tool talks to
+Chrome's DevTools endpoint with Node's fetch and WebSocket: it picks the visible
+tab, clicks with real mouse events, types with `Input.insertText`, follows the
+main frame's navigation events until the new document finishes loading, and
+returns the resulting page with numbered element refs, so each action is also
+its check. A submit presses Enter once and says so when nothing navigated. Back
+uses DevTools history, since a cached page can replace the document before an
+evaluated `history.back()` returns. Controls that look like buying, paying,
+deleting, sending, booking or signing in, password fields and forms containing
+them are refused with a message for the user: voice cannot grant approvals. It removes
+`target=_blank` before a click so voice-browser, which follows only its own
+tabs, stays on the same tab. The tool is registered at load, kept inactive by
+`session_start`, and activated by the first browser-mode call with a DevTools
+endpoint; it stays active afterwards so handed-off work can finish. A web task
+lowers Pi's thinking to `low` (never raising it) and `agent_settled` restores
+the previous level if the level is still the one lowering applied; typed work
+started meanwhile shares the lower level. A new Pi session forgets the saved
+level and deactivates the tool.
+
+The public GPT-Live API gives client delegations no task text, and its function
+tools exist only under Responses delegation, which is chosen per session and
+adds a backend model. Browser mode therefore does not compose commands;
+Responses delegation with a browser tool remains open in #16.
 
 ## Remaining limits
 

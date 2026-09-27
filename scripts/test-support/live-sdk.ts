@@ -108,6 +108,9 @@ interface SdkFixtureOptions {
   tools?: NonNullable<Parameters<typeof createAgentSession>[0]>["customTools"];
   controls?: boolean;
   resources?: NonNullable<LiveDependencies["runtime"]>["resources"];
+  browser?: LiveDependencies["browser"];
+  /** Tool names the session may use and starts with active; default none. */
+  allowedTools?: string[];
   retry?: boolean;
   configuredSourcesFromSettings?: boolean;
   /** Home certification refuses, as before `/live setup`. */
@@ -277,6 +280,7 @@ export async function createSdkFixture(
               check: async () => ({ supported: true, issues: [] }),
             },
             truncateToWidth: (text, width) => text.slice(0, width),
+            ...(options.browser ? { browser: options.browser } : {}),
             ...(options.configuredSourcesFromSettings
               ? {
                   packageSources: createLiveDependencies((text) => text)
@@ -366,7 +370,9 @@ export async function createSdkFixture(
       resourceLoader,
       sessionManager,
       sessionStartEvent,
-      noTools: options.tools ? "builtin" : "all",
+      ...(options.allowedTools
+        ? { tools: options.allowedTools }
+        : { noTools: options.tools ? "builtin" : "all" }),
       ...(options.provider
         ? { model: modelRuntime.getModel("live-fixture", "fixture") }
         : {}),

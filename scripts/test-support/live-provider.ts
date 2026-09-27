@@ -22,13 +22,17 @@ export function fakeProvider(
   options: {
     hold?: Promise<void>;
     error?: boolean;
-    tool?: boolean;
+    /** The first call requests a tool: the fixture tool, or the one named here. */
+    tool?: boolean | { name: string; arguments: { [key: string]: string } };
     final?: string;
     retry?: boolean;
+    reasoning?: boolean;
   } = {},
 ) {
   let calls = 0;
   const contexts: string[] = [];
+  /** Per call: the requested reasoning level. */
+  const requests: Array<{ reasoning: unknown }> = [];
   const provider: Parameters<ModelRuntime["registerProvider"]>[1] = {
     api: "live-fixture-api",
     apiKey: "synthetic-fixture-key",
@@ -37,7 +41,7 @@ export function fakeProvider(
       {
         id: "fixture",
         name: "Offline fixture",
-        reasoning: false,
+        reasoning: options.reasoning ?? false,
         input: ["text"],
         contextWindow: 8000,
         maxTokens: 1000,
@@ -46,6 +50,7 @@ export function fakeProvider(
     ],
     streamSimple(model, _context, input) {
       contexts.push(JSON.stringify(_context.messages));
+      requests.push({ reasoning: input?.reasoning });
       const stream = createStream();
       const call = ++calls;
       void (async () => {
@@ -85,8 +90,14 @@ export function fakeProvider(
                     {
                       type: "toolCall",
                       id: "fixture-tool",
-                      name: "fixture_tool",
-                      arguments: {},
+                      name:
+                        typeof options.tool === "object"
+                          ? options.tool.name
+                          : "fixture_tool",
+                      arguments:
+                        typeof options.tool === "object"
+                          ? options.tool.arguments
+                          : {},
                     },
                   ]
                 : [
@@ -134,5 +145,5 @@ export function fakeProvider(
       return stream;
     },
   };
-  return { provider, calls: () => calls, contexts };
+  return { provider, calls: () => calls, contexts, requests };
 }
