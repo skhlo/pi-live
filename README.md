@@ -64,8 +64,10 @@ Pi Live is checked on macOS arm64 with Node 22.19.0 or later, Pi 0.87.1 and
 
 2. Give Pi an OpenAI API key for its `openai` provider, in Pi's credential store
    or as `OPENAI_API_KEY`. Calls are billed to that key.
-3. Start Pi with the extension: `pi -e /path/to/pi-live/index.ts`. Loading it
-   does nothing until you use `/live`; Pi without `-e` is unchanged.
+3. Start Pi with the extension: `pi -e /path/to/pi-live/index.ts`. Pi started
+   inside this checkout loads it through `.pi/settings.json` once you trust the
+   project, so `-e` is not needed there. Loading it does nothing until you use
+   `/live`; Pi elsewhere without `-e` is unchanged.
 4. Run `/live setup` once. After you confirm, it creates
    `~/.local/state/pi-live`, private to your account, checks that it is on a
    local disk, and records it in `setup.json` there. Calls refuse with
