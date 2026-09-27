@@ -93,6 +93,18 @@ environment for routing. When voice-browser drives a Chrome started with remote
 debugging, set `PI_LIVE_BROWSER_CDP` (for example `http://127.0.0.1:9333`) to give
 Pi a `live_browser` tool on that Chrome.
 
+`scripts/browser-sidecar.sh` starts Chrome and voice-browser together on one
+host: a visible Chrome with its own profile and DevTools at
+`http://127.0.0.1:9333`, and voice-browser attached to it on port 8787 (both
+ports fixed). Set `VOICE_BROWSER_DIR` to a voice-browser checkout with its
+dependencies installed (checked with commit `198a076`), and provide the key as
+`TYPESAFE_API_KEY`, `JEV_API_KEY` or an env file named by `SIDECAR_KEY_FILE`.
+The script uses Google Chrome's macOS path unless `SIDECAR_CHROME` names another
+binary, and keeps its profile in `~/.cache/pi-live/browser-profile` unless
+`SIDECAR_CHROME_PROFILE` names another. Then start Pi with the key in its own
+environment and `PI_LIVE_BROWSER_CDP=http://127.0.0.1:9333`. Ctrl+C stops
+voice-browser and Chrome.
+
 For each handoff, Pi Live asks TypeSafe's Jev model what kind of work the user's
 request is:
 
