@@ -8,6 +8,7 @@ import type {
 } from "../src/browser.ts";
 import type { BrowserTool, BrowserToolParams } from "../src/browser-tool.ts";
 import type { LiveBrowserMode } from "../src/live.ts";
+import { SIDECAR_PROMPT } from "../src/browser-sidecar.ts";
 import {
   createSdkFixture,
   emptyUi,
@@ -94,6 +95,158 @@ async function browserCall(
   assert.equal(fixture.current().lifecycle.snapshot().state, "active");
   return { provider, media, fixture };
 }
+
+test("the sidecar offer finishes before voice, serves that call, survives voice stop and stops on Pi shutdown", async (t) => {
+  const browser = recordingBrowser(["browser_step", "browser_task"], {
+    tool: false,
+  });
+  const media = fakeMedia();
+  const prompts: string[] = [];
+  let starts = 0;
+  let stops = 0;
+  let ready = false;
+  const toolCalls: BrowserToolParams[] = [];
+  browser.mode.sidecar = {
+    url: "ws://127.0.0.1:8787",
+    directory: "/fixture/voice-browser",
+    probe: async () => ready,
+    start: () => {
+      starts++;
+      return {
+        logPath: "/fixture/sidecar.log",
+        failure: () => undefined,
+        stop: async () => {
+          stops++;
+        },
+      };
+    },
+    tool: {
+      currentPage: async () => undefined,
+      run: async (params) => {
+        toolCalls.push(params);
+        return { text: "sidecar Chrome" };
+      },
+    },
+  };
+  const provider = fakeProvider({
+    tool: { name: "live_browser", arguments: { action: "look" } },
+  });
+  const fixture = await createSdkFixture(t, {
+    controls: true,
+    resources: media.resources,
+    provider: provider.provider,
+    browser: () => ({ ...browser.mode }),
+    allowedTools: ["live_browser"],
+    ui: emptyUi(async (title, message) => {
+      prompts.push(title);
+      if (title === SIDECAR_PROMPT) {
+        assert.match(message, /third-party voice-browser.*TypeSafe key/);
+        assert.match(message, /until this Pi session ends/);
+      }
+      return true;
+    }),
+  });
+  const first = fixture.runtime.session.prompt("/live browser");
+  await waitUntil(() => starts === 1, "sidecar start");
+  assert.deepEqual(prompts, [SIDECAR_PROMPT]);
+  assert.equal(
+    media.counts().resourcesCreated,
+    0,
+    "voice waits for the controller",
+  );
+  ready = true;
+  await first;
+  assert.equal(fixture.current().lifecycle.snapshot().state, "active");
+  media.request("sidecar", "Scroll down");
+  await waitUntil(
+    () => browser.commands.length === 1,
+    "same-call browser step",
+  );
+  browser.finish("sidecar", { text: "Scrolled down", handOff: false });
+  await waitUntil(() => media.finals().length === 1, "browser outcome");
+  await fixture.runtime.session.prompt("/live stop");
+  assert.equal(stops, 0);
+  await fixture.runtime.session.prompt("/live browser");
+  assert.equal(prompts.filter((title) => title === SIDECAR_PROMPT).length, 1);
+  assert.equal(starts, 1);
+  media.request("tool", "Read the page");
+  await waitUntil(
+    () => toolCalls.length === 1,
+    "automatic sidecar DevTools tool",
+  );
+  await fixture.runtime.session.waitForIdle();
+  await fixture.disposeRuntime();
+  await fixture.disposeRuntime();
+  assert.equal(stops, 1, "session_shutdown must stop the owned sidecar");
+});
+
+test("decline, absent checkout and existing controller keep calls working without a child", async (t) => {
+  for (const kind of ["decline", "unconfigured", "existing"] as const) {
+    await t.test(kind, async (t) => {
+      const browser = recordingBrowser();
+      let offers = 0;
+      browser.mode.sidecar = {
+        url: "ws://127.0.0.1:8787",
+        directory: kind === "unconfigured" ? undefined : "/fixture/checkout",
+        probe: async () => kind === "existing",
+        start: () => {
+          assert.fail("must not start a sidecar");
+        },
+      };
+      const fixture = await createSdkFixture(t, {
+        controls: true,
+        browser: () => browser.mode,
+        ui: emptyUi(async (title) => {
+          if (title !== SIDECAR_PROMPT) return true;
+          offers++;
+          return false;
+        }),
+      });
+      for (let call = 0; call < 2; call++) {
+        await fixture.runtime.session.prompt("/live browser");
+        assert.equal(fixture.current().lifecycle.snapshot().state, "active");
+        await fixture.runtime.session.prompt("/live stop");
+      }
+      assert.equal(offers, kind === "decline" ? 1 : 0);
+    });
+  }
+});
+
+test("a sidecar failure reports one browser notice with the cause and log and continues the call", async (t) => {
+  const browser = recordingBrowser(["other"]);
+  let stops = 0;
+  browser.mode.sidecar = {
+    url: "ws://127.0.0.1:8787",
+    directory: "/fixture/missing",
+    probe: async () => false,
+    start: () => ({
+      logPath: "/fixture/failure.log",
+      failure: () => "voice-browser checkout is missing",
+      stop: async () => {
+        stops++;
+      },
+    }),
+  };
+  const notices: string[] = [];
+  const media = fakeMedia();
+  const provider = fakeProvider();
+  const fixture = await createSdkFixture(t, {
+    controls: true,
+    browser: () => browser.mode,
+    resources: media.resources,
+    provider: provider.provider,
+    ui: { ...emptyUi(), notify: (message) => notices.push(message) },
+  });
+  await fixture.runtime.session.prompt("/live browser");
+  assert.equal(fixture.current().lifecycle.snapshot().state, "active");
+  assert.equal(stops, 1);
+  assert.deepEqual(notices, [
+    "Pi Live: browser mode: voice-browser checkout is missing. Log: /fixture/failure.log",
+  ]);
+  media.request("fallback", "Run the tests");
+  await waitUntil(() => provider.calls() === 1, "Pi fallback");
+  await fixture.runtime.session.waitForIdle();
+});
 
 test("single browser steps go to the fast controller, not Pi", async (t) => {
   const browser = recordingBrowser(["browser_step"]);
@@ -309,7 +462,7 @@ test("ordinary calls still delegate to Pi, and browser mode needs a usable contr
   await fixture.runtime.session.prompt("/live browser");
   assert.ok(
     notices.includes(
-      "Pi Live: PI_LIVE_BROWSER_CDP is not an http:// loopback address, so Pi gets no browser tool.",
+      "Pi Live: browser mode: PI_LIVE_BROWSER_CDP is not an http:// loopback address, so Pi gets no browser tool.",
     ),
   );
   await fixture.runtime.session.prompt("/live stop");

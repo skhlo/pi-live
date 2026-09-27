@@ -100,6 +100,7 @@ const BROWSER_VARIABLES = [
   "PI_LIVE_BROWSER_CDP",
   "TYPESAFE_API_KEY",
   "JEV_API_KEY",
+  "VOICE_BROWSER_DIR",
 ] as const;
 export type BrowserVariable = (typeof BROWSER_VARIABLES)[number];
 

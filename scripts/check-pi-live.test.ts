@@ -48,7 +48,7 @@ async function fixture(t: TestContext): Promise<string> {
   t.after(async () => rm(fixtureParent, { recursive: true }));
   const fixtureRoot = path.join(fixtureParent, "package");
   copyPiLivePayloadFixture(inspectPiLivePackagePayload(root), fixtureRoot);
-  await mkdir(path.join(fixtureRoot, "scripts"));
+  await mkdir(path.join(fixtureRoot, "scripts"), { recursive: true });
   await mkdir(path.join(fixtureRoot, "upstream"));
   for (const name of [
     "check-pi-live.ts",

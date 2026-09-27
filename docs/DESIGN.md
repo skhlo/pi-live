@@ -174,6 +174,34 @@ lifecycle binding. No additional result-confirmation dialog is introduced.
 
 ## Browser delegation
 
+Before a browser-mode call, `browserEnvironment` reads five browser variables
+from Pi's environment with the checkout's optional `.env` as fallback, including
+`VOICE_BROWSER_DIR`. `src/browser-sidecar.ts` probes the controller without
+sending a command. An answering controller is reused without ownership; only
+the script's fixed loopback port 8787 endpoint and a configured checkout permit
+an offer. An interactive confirmation discloses Chrome, third-party code,
+TypeSafe key access and the Pi-session lifetime. A decline is remembered by
+that session. No dialog-capable UI means no offer or start.
+
+On acceptance, Pi starts `scripts/browser-sidecar.sh` as one child with stdin
+ignored and both output streams in a private temporary log. The script alone
+owns launching and stopping Chrome and voice-browser. A bounded readiness wait
+finishes before voice consent, resources or provider connection. Missing
+checkout, Chrome or key, early exit and readiness timeout produce a single
+browser-mode notice with the cause and log path; failed children are stopped
+before the call continues. The browser setup supplies injectable probe/start/
+stop operations for tests. The package payload includes the script.
+
+Sidecar ownership belongs to the Pi binding, independent of voice ownership.
+Voice stop and later calls keep it running and preserve the current browser.
+With no configured `PI_LIVE_BROWSER_CDP`, an owned running sidecar supplies
+`http://127.0.0.1:9333` for `live_browser`. `session_shutdown` signals the script
+and awaits its exit; the script's traps stop and await both children. Shutdown
+is idempotent and cancels pending readiness or consent without a late launch.
+Crash cleanup is intentionally absent: a later session reuses the controller
+and does not own it. Multiple Pi sessions are not coordinated; the owner stops
+the shared sidecar when it exits. Logs remain in the temporary directory.
+
 Browser mode (#16) keeps client delegation and chooses a destination per
 request. `/live browser` selects it for the next call only; the call keeps its
 choice for its lifetime and gets its own instructions and disclosure. The

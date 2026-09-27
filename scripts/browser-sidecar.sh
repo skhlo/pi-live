@@ -6,7 +6,8 @@
 #   PI_LIVE_BROWSER_CDP=http://127.0.0.1:9333 pi
 # or with both set in the checkout's .env (see .env.example).
 #
-# Only this script reads these; Pi reads the key from its own environment.
+# Pi Live can also launch this script after an interactive offer, passing its
+# browser settings from the environment or the checkout's .env.
 # VOICE_BROWSER_DIR       voice-browser checkout with dependencies installed
 #                         (github.com/moritzkremb/jev-voice-browser)
 # TYPESAFE_API_KEY        Jev key (or JEV_API_KEY), from the environment or
@@ -50,17 +51,27 @@ fi
 }
 
 chrome="${SIDECAR_CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
+[ -x "$chrome" ] || {
+  echo "Chrome executable is missing: $chrome" >&2
+  exit 1
+}
 profile="${SIDECAR_CHROME_PROFILE:-${XDG_CACHE_HOME:-$HOME/.cache}/pi-live/browser-profile}"
 mkdir -p "$profile"
+chrome_pid=
+voice_browser_pid=
+cleanup() {
+  # Wait for both children so the caller can await this script's shutdown.
+  kill $voice_browser_pid $chrome_pid 2>/dev/null || true
+  wait $voice_browser_pid $chrome_pid 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 "$chrome" \
   --remote-debugging-address=127.0.0.1 --remote-debugging-port="$cdp_port" \
   --user-data-dir="$profile" --no-first-run --no-default-browser-check \
   --window-size=1280,900 about:blank >"$profile/chrome.log" 2>&1 &
 chrome_pid=$!
-voice_browser_pid=
-trap 'kill $voice_browser_pid "$chrome_pid" 2>/dev/null || true' EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
 
 ready=
 for _ in $(seq 1 50); do

@@ -581,6 +581,7 @@ test("every non-TUI command and the shortcut refuse before touching terminal pre
   for (const args of [
     "",
     "start",
+    "browser",
     "stop",
     "end",
     "off",
@@ -597,7 +598,7 @@ test("every non-TUI command and the shortcut refuse before touching terminal pre
   }
   await harness.shortcuts.get("ctrl+shift+l")?.handler(ctx);
 
-  assert.equal(notifications.length, 14);
+  assert.equal(notifications.length, 15);
   for (const notification of notifications) {
     assert.deepEqual(notification, [
       "Pi Live requires interactive TUI mode.",
@@ -606,6 +607,37 @@ test("every non-TUI command and the shortcut refuse before touching terminal pre
   }
   assert.deepEqual(widgetCalls, []);
   assert.equal(dependencyCalls, 0);
+});
+
+test("browser sidecars are not probed or offered without a dialog-capable UI", async () => {
+  const harness = registrationHarness();
+  const notifications: Array<[string, string | undefined]> = [];
+  const current = context("tui", notifications, []);
+  current.hasUI = false;
+  registerPiLive(harness.pi, {
+    preferences: {
+      load: async () => ({ voice: "marin", fields: {} }),
+      setVoice: async () => {},
+    },
+    compatibility: { check: async () => ({ supported: true, issues: [] }) },
+    truncateToWidth: noClip,
+    browser: () => ({
+      controller: { page: () => undefined, run: async () => undefined },
+      sidecar: {
+        url: "ws://127.0.0.1:8787",
+        directory: "/fixture/checkout",
+        probe: async () => {
+          assert.fail("no sidecar probe without UI");
+        },
+        start: () => {
+          assert.fail("no sidecar start without UI");
+        },
+      },
+    }),
+    runtime: { lifecycle: { coordination: createIsolatedLiveCoordination() } },
+  });
+  await commandFrom(harness).handler("browser", current);
+  assert.ok(!notifications.some(([message]) => /protocol-error/.test(message)));
 });
 
 test("/live setup asks first, reports the result, and is unavailable without a setup dependency", async () => {

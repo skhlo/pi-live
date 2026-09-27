@@ -89,15 +89,41 @@ with `cleanup-blocked`.
 browser controller and everything else to Pi
 ([#16](https://github.com/skhlo/pi-live/issues/16)). It needs
 [voice-browser](https://github.com/moritzkremb/jev-voice-browser) running
-separately on the same host (for example `npm start` in its checkout). Pi Live
+on the same host. Pi Live can offer to start it with Chrome for this Pi session,
+or reuse a controller you start yourself. Pi Live
 connects to `ws://127.0.0.1:8787`; set `PI_LIVE_BROWSER_URL` to another `ws://`
 loopback address if needed. Pi needs `TYPESAFE_API_KEY` (or `JEV_API_KEY`) for
 routing. When voice-browser drives a Chrome started with remote debugging, set
 `PI_LIVE_BROWSER_CDP` (for example `http://127.0.0.1:9333`) to give Pi a
-`live_browser` tool on that Chrome. These four settings can live in a
+`live_browser` tool on that Chrome. While Pi owns a running sidecar, the tool
+uses `http://127.0.0.1:9333` automatically when `PI_LIVE_BROWSER_CDP` is unset.
+These settings and `VOICE_BROWSER_DIR` can live in a
 gitignored `.env` at the checkout's root, as in `.env.example`; Pi Live reads
 it when `/live browser` starts, reads no other variables from it, and prefers
 values set in Pi's environment.
+
+### Browser sidecar
+
+Set `VOICE_BROWSER_DIR` to an installed voice-browser checkout to enable the
+offer. When no controller answers on loopback port 8787, `/live browser` asks
+before starting Chrome and third-party voice-browser code with your TypeSafe
+key. It waits up to about 15 seconds for the controller before starting the
+voice call. Declining keeps today's externally managed browser behavior and
+suppresses further offers in this Pi session. No checkout configured, a custom
+controller endpoint, or no interactive confirmation UI means no offer or start.
+An already answering controller is always reused, without a prompt or restart.
+
+The sidecar keeps its Chrome window, logins, tabs and current page across calls,
+`/live stop` and voice ending. Normal Pi session shutdown stops both processes
+if this session started them. A Pi crash leaves them running; the next Pi
+session reuses them without taking ownership. Several Pi sessions can share a
+controller, but the session that started it stops it on exit. There is no
+coordination between sessions.
+
+Startup failures give one browser-mode notice naming the cause and the private
+log file, stop what was started, and let the voice call continue with the
+existing controller/Pi fallback behavior. Sidecar output goes to that log rather
+than the Pi terminal. Logs are retained in the host's temporary directory.
 
 `scripts/browser-sidecar.sh` starts Chrome and voice-browser together on one
 host: a visible Chrome with its own profile and DevTools at
@@ -111,6 +137,11 @@ binary, and keeps its profile in `~/.cache/pi-live/browser-profile` unless
 `SIDECAR_CHROME_PROFILE` names another. Then start Pi with the key and
 `PI_LIVE_BROWSER_CDP=http://127.0.0.1:9333` in its environment or `.env`. Ctrl+C stops
 voice-browser and Chrome.
+
+The script also remains usable directly from a terminal. Set `VOICE_BROWSER_DIR`
+in that terminal's environment; the script itself reads only the key from `.env`.
+
+### Browser requests
 
 For each handoff, Pi Live asks TypeSafe's Jev model what kind of work the user's
 request is:
