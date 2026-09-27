@@ -1,12 +1,13 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { closeSync, openSync, readFileSync } from "node:fs";
+import { closeSync, openSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { loopbackUrl } from "./browser.ts";
 
 export const SIDECAR_CDP = "http://127.0.0.1:9333";
+const STOP_MS = 5_000;
 export const SIDECAR_PROMPT = "Start the browser sidecar?";
 export const SIDECAR_DISCLOSURE =
   "Starts Chrome and third-party voice-browser code with your TypeSafe key. Both run until this Pi session ends, including after voice stops. A Pi crash leaves them running for the next session to reuse.";
@@ -15,7 +16,11 @@ export interface BrowserSidecar {
   logPath: string;
   /** Undefined while running; a fixed, non-secret cause after exit. */
   failure(): string | undefined;
-  stop(): Promise<void>;
+  /**
+   * Ends the sidecar within a bounded time. The log is deleted only after a
+   * clean stop of a running sidecar, unless a notice names it (`keepLog`).
+   */
+  stop(options?: { keepLog?: boolean }): Promise<void>;
 }
 
 export interface BrowserSidecarSetup {
@@ -89,10 +94,11 @@ function exitCause(logPath: string): string {
 /** The shell script alone owns the Chrome and voice-browser processes. */
 export function startBrowserSidecar(
   environment: NodeJS.ProcessEnv,
+  options: { stopMs?: number } = {},
 ): BrowserSidecar {
   const logPath = path.join(tmpdir(), `pi-live-browser-${randomUUID()}.log`);
   let failure: string | undefined;
-  let stop = async (): Promise<void> => {};
+  let stop = async (_keepLog: boolean): Promise<void> => {};
   let fd: number | undefined;
   try {
     fd = openSync(logPath, "wx", 0o600);
@@ -102,6 +108,8 @@ export function startBrowserSidecar(
       {
         env: environment,
         stdio: ["ignore", fd, fd],
+        // Its own process group, so a stalled stop can end every process in it.
+        detached: true,
       },
     );
     const exited = new Promise<void>((resolve) => {
@@ -115,17 +123,39 @@ export function startBrowserSidecar(
       });
     });
     let stopping: Promise<void> | undefined;
-    stop = () =>
+    stop = (keepLog) =>
       (stopping ??= (async () => {
-        if (!failure) child.kill("SIGTERM");
+        if (failure) return;
+        // The script's traps stop Chrome and voice-browser; force only a stall.
+        let forced = false;
+        const force = setTimeout(() => {
+          forced = true;
+          try {
+            if (child.pid) process.kill(-child.pid, "SIGKILL");
+          } catch {
+            // The group has already exited.
+          }
+        }, options.stopMs ?? STOP_MS);
+        child.kill("SIGTERM");
         await exited;
+        clearTimeout(force);
+        if (forced || keepLog) return;
+        try {
+          rmSync(logPath, { force: true });
+        } catch {
+          // A leftover private log is harmless; stopping must not fail on it.
+        }
       })());
   } catch {
     failure = "could not create the sidecar log or start its script";
   } finally {
     if (fd !== undefined) closeSync(fd);
   }
-  return { logPath, failure: () => failure, stop: () => stop() };
+  return {
+    logPath,
+    failure: () => failure,
+    stop: (stopOptions) => stop(stopOptions?.keepLog ?? false),
+  };
 }
 
 /** One owner per Pi session. Calls may come and go without stopping Chrome. */
@@ -185,7 +215,7 @@ export function createBrowserSidecarSession(
       }
       const cause =
         sidecar.failure() ?? "browser controller did not answer in time";
-      await (stopping ?? sidecar.stop());
+      await (stopping ?? sidecar.stop({ keepLog: true }));
       if (owned === sidecar) owned = undefined;
       return {
         owned: false,

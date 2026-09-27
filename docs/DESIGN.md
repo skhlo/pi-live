@@ -195,14 +195,19 @@ stop operations for tests. The package payload includes the script.
 Sidecar ownership belongs to the Pi binding, independent of voice ownership.
 Voice stop and later calls keep it running and preserve the current browser.
 With no configured `PI_LIVE_BROWSER_CDP`, an owned running sidecar supplies
-`http://127.0.0.1:9333` for `live_browser`. `session_shutdown` signals the script
-and awaits its exit; the script's traps stop and await both children. Shutdown
-is idempotent and cancels pending readiness or consent without a late launch.
-The script bounds each DevTools HTTP probe to one second, so a stalled response
+`http://127.0.0.1:9333` for `live_browser`. `session_shutdown`, which Pi also
+emits for `/new`, `/resume`, `/fork` and `/reload`, signals the script and
+awaits its exit; the script's traps stop and await both children. Pi awaits
+shutdown handlers without a timeout, so the script runs in its own process group
+and a stop still pending after five seconds kills that group. Shutdown is
+idempotent and cancels pending readiness or consent without a late launch. The
+script bounds each DevTools HTTP probe to one second, so a stalled response
 cannot indefinitely delay its signal trap or Pi's startup failure handling.
-Crash cleanup is intentionally absent: a later session reuses the controller
-and does not own it. Multiple Pi sessions are not coordinated; the owner stops
-the shared sidecar when it exits. Logs remain in the temporary directory.
+Crash cleanup is intentionally absent: a later session reuses the controller and
+does not own it. Multiple Pi sessions are not coordinated; the owner stops the
+shared sidecar when it exits. A clean stop of a running sidecar deletes its log;
+startup failures, readiness timeouts and forced stops keep it, since a notice
+may name it.
 
 Browser mode (#16) keeps client delegation and chooses a destination per
 request. `/live browser` selects it for the next call only; the call keeps its
