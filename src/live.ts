@@ -31,8 +31,8 @@ import type { Dispatcher } from "undici";
 import {
   BROWSER_TOOL_SCHEMA,
   createBrowserTool,
+  browserToolParams,
   type BrowserTool,
-  type BrowserToolParams,
 } from "./browser-tool.ts";
 import {
   browserControllerUrl,
@@ -260,7 +260,14 @@ export interface LiveCapture {
 }
 
 export type LiveOutgoingData =
-  { kind: "application"; text: string } | { kind: "final"; text: string };
+  | { kind: "application"; text: string }
+  /**
+   * A reply for voice. Without `delegationId` it answers the latest handoff
+   * and uses up that reply slot. With one, it answers that handoff and hands
+   * the slot back to the handoff it replaced, so a reply still owed there is
+   * not lost.
+   */
+  | { kind: "final"; text: string; delegationId?: string };
 
 export interface LiveSessionCloseRequest {
   signal: AbortSignal;
@@ -1416,6 +1423,9 @@ export function createLiveRuntimeResources(
       const speech: Array<{ role: "user" | "assistant"; text: string }> = [];
       let speechBytes = 0;
       let replyTo: string | undefined;
+      // The reply slot each recent handoff replaced, for replies that name
+      // their own handoff.
+      const replacedReply = new Map<string, string | undefined>();
       type WriterFragment = {
         kind: "text" | "pong";
         payload: string | Uint8Array;
@@ -1506,12 +1516,13 @@ export function createLiveRuntimeResources(
           .filter((line) => !/^[^:]+: $/.test(line))
           .join("\n");
         // The user's latest turn is the request; a short one ("the second
-        // one") keeps the turn before it. Transcript noise tags are dropped.
+        // one") keeps the turn before it. Transcript noise tags are dropped;
+        // an unclosed one ("[laughs open wikipedia") takes only its own word.
         const turns = speech
           .filter((segment) => segment.role === "user")
           .map((segment) =>
             segment.text
-              .replace(/\[[^\]\n]{0,40}(\]|$)/g, " ")
+              .replace(/\[[^\]\n]{0,40}\]|\[\S*/g, " ")
               .replace(/\s+/g, " ")
               .trim(),
           )
@@ -1601,6 +1612,9 @@ export function createLiveRuntimeResources(
               return;
             }
             const request = takeHandoffRequest();
+            replacedReply.set(delegation.id, replyTo);
+            if (replacedReply.size > 16)
+              replacedReply.delete(replacedReply.keys().next().value!);
             replyTo = delegation.id;
             try {
               options.callbacks?.onRequest?.({
@@ -2516,9 +2530,21 @@ export function createLiveRuntimeResources(
               !byteLengthWithin(data.text, LIVE_LIMITS.textBytes)
             )
               return Promise.reject(fixedRuntimeError("protocol"));
-            const delegationId = replyTo;
+            const named =
+              data.kind === "final" && typeof data.delegationId === "string"
+                ? data.delegationId
+                : undefined;
+            if (
+              named !== undefined &&
+              !validCredentialField(named, LIVE_LIMITS.idBytes)
+            )
+              return Promise.reject(fixedRuntimeError("protocol"));
+            const delegationId = named ?? replyTo;
             if (dataKind === "final" && !delegationId) return Promise.resolve();
-            if (dataKind === "final") replyTo = undefined;
+            if (named !== undefined) {
+              if (replyTo === named) replyTo = replacedReply.get(named);
+              replacedReply.delete(named);
+            } else if (dataKind === "final") replyTo = undefined;
             const text =
               dataKind === "final" ? truncateLiveFinal(data.text) : data.text;
             const deadline = clock.now() + LIVE_SEND_MS;
@@ -3782,10 +3808,16 @@ export function createLiveLifecycle(
       )
         return false;
       try {
-        const sent = sendData.call(connection, {
-          kind: data.kind,
-          text: data.text,
-        });
+        const sent = sendData.call(
+          connection,
+          data.kind === "final" && typeof data.delegationId === "string"
+            ? {
+                kind: "final",
+                text: data.text,
+                delegationId: data.delegationId,
+              }
+            : { kind: data.kind, text: data.text },
+        );
         if (sent !== undefined)
           void Promise.resolve(sent).catch(() => {
             if (
@@ -4592,6 +4624,8 @@ function fitLine(
 
 export interface LiveBrowserMode {
   controller: BrowserController;
+  /** Configuration problems to show before the call starts. */
+  notices?: string[];
   /** Absent without a TypeSafe key: every request then tries the controller first. */
   router?: BrowserRouter;
   /** Pi's tool on the controller's Chrome, present when its DevTools endpoint is set. */
@@ -4704,8 +4738,21 @@ export function createLiveDependencies(
       const key =
         process.env.TYPESAFE_API_KEY?.trim() || process.env.JEV_API_KEY?.trim();
       const devToolsUrl = browserDevToolsUrl(process.env.PI_LIVE_BROWSER_CDP);
+      const notices = [
+        ...(key
+          ? []
+          : [
+              "no TYPESAFE_API_KEY or JEV_API_KEY, so every request tries voice-browser first.",
+            ]),
+        ...(process.env.PI_LIVE_BROWSER_CDP?.trim() && !devToolsUrl
+          ? [
+              "PI_LIVE_BROWSER_CDP is not an http:// loopback address, so Pi gets no browser tool.",
+            ]
+          : []),
+      ];
       return {
         controller: createBrowserController(url),
+        ...(notices.length ? { notices } : {}),
         ...(key ? { router: createBrowserRouter(key) } : {}),
         ...(devToolsUrl ? { tool: createBrowserTool(devToolsUrl) } : {}),
       };
@@ -4717,9 +4764,13 @@ const LIVE_DISCLOSURE =
   "Uses the execution host microphone and speakers with OpenAI GPT-Live, billed to the OpenAI API key Pi uses for the openai provider. Audio, speech transcripts, the conversation leading to each request, a progress note for every tool-using Pi turn (its narration and the tools it ran, including typed work), and Pi's final replies are shared with OpenAI. Typed input and installed Pi extensions can influence those results. Existing HTTP/WebSocket proxy settings do not establish WebRTC/ICE media proxying. Pi reports only outermost extension dialogs, with a microtask delay; shortcut-opened dialogs and unreported nested dialogs may leave voice active. Stop voice first before opening such dialogs when capture and delivery must stop. Muting stops microphone capture; speakers may continue. Voice requests do not grant approvals. Run /live setup once before the first call. Behind an HTTPS proxy, cleanup cannot be confirmed: each call keeps its lock, which must be removed by hand after quitting Pi (see the README).";
 
 const LIVE_BROWSER_DISCLOSURE =
-  "Browser mode: Pi Live asks TypeSafe's Jev model, using TYPESAFE_API_KEY, what kind of work each spoken request is, sending the request and the current page address. Single browser steps go to the voice-browser controller you run on this host (PI_LIVE_BROWSER_URL, default ws://127.0.0.1:8787), which sends the request and a summary of the page to Jev and acts in its browser. Longer web tasks, requests the controller refuses or fails, and other work go to Pi with the current page address. With PI_LIVE_BROWSER_CDP set, Pi gets a live_browser tool on that Chrome for the rest of the Pi session and handles web tasks at low thinking. Browser outcomes, including page titles, addresses and text Pi reads, are shared with OpenAI. Stopping voice does not undo browser actions already started.";
+  "Browser mode: Pi Live asks TypeSafe's Jev model, using TYPESAFE_API_KEY or JEV_API_KEY, what kind of work each spoken request is, sending your latest spoken turn and the current page's address and title. Single browser steps go to the voice-browser controller you run on this host (PI_LIVE_BROWSER_URL, default ws://127.0.0.1:8787), which sends the request and a summary of the page to Jev and acts in its browser. Longer web tasks, requests the controller refuses or fails, and other work go to Pi with the current page's address and title. With PI_LIVE_BROWSER_CDP set, Pi gets a live_browser tool on that Chrome for the rest of the Pi session and handles web tasks at low thinking; the tool refuses buying, paying, deleting, sending, booking and signing in, which stay with you. Browser outcomes, including page titles, addresses and text Pi reads, are shared with OpenAI. Stopping voice does not undo browser actions already started.";
 
-const LIVE_BROWSER_INSTRUCTIONS = `You are Pi Live in browser mode: the voice interface to the user's browser and their current Pi coding session. Reply briefly in speech-friendly language. Delegate every browser, coding, repository, tool and verification request. Pi Live sends a single browser step to a fast browser controller, which receives only the user's latest turn, and sends longer web tasks and everything else to Pi, which receives the conversation. If the user is vague, such as "search something interesting", suggest a concrete option and let the user say it before you delegate. Replies from the browser controller and from Pi arrive the same way: tell the user what they say in your own words, never say an action happened unless the reply says it was done, and relay a question or numbered choice as it is. While Pi works, its progress arrives as background context. Voice does not grant approvals.`;
+// Shared by both instruction sets: how Pi's progress and replies reach voice.
+const LIVE_PI_REPLIES =
+  "While Pi works, its progress arrives as background context: use it when the user asks what Pi is doing. When Pi finishes, its reply arrives for you to tell the user; summarize it naturally instead of reading code or long lists aloud. Voice does not grant approvals.";
+
+const LIVE_BROWSER_INSTRUCTIONS = `You are Pi Live in browser mode: the voice interface to the user's browser and their current Pi coding session. Reply briefly in speech-friendly language. Delegate every browser, coding, repository, tool and verification request. Pi Live sends a single browser step to a fast browser controller, which receives only the user's latest turn, and sends longer web tasks and everything else to Pi, which receives the conversation. If the user is vague, such as "search something interesting", suggest a concrete option and let the user say it before you delegate. Browser controller results arrive the same way as Pi's replies: never say an action happened unless the reply says it was done, and relay a question or numbered choice as it is. ${LIVE_PI_REPLIES}`;
 
 const BROWSER_TOOL_NAME = "live_browser";
 type ThinkingLevel = ReturnType<ExtensionAPI["getThinkingLevel"]>;
@@ -4730,9 +4781,10 @@ const THINKING_ORDER: readonly ThinkingLevel[] = [
   "medium",
   "high",
   "xhigh",
+  "max",
 ];
 
-const LIVE_INSTRUCTIONS = `You are Pi Live, the voice interface to the user's current Pi coding session. Reply briefly in speech-friendly language. Delegate coding, repository, tool and verification requests; Pi receives the conversation that led to the handoff and handles it with its usual tools and approvals. While Pi works, its progress arrives as background context: use it when the user asks what Pi is doing. When Pi finishes, its reply arrives for you to tell the user; summarize it naturally instead of reading code or long lists aloud. Voice does not grant approvals.`;
+const LIVE_INSTRUCTIONS = `You are Pi Live, the voice interface to the user's current Pi coding session. Reply briefly in speech-friendly language. Delegate coding, repository, tool and verification requests; Pi receives the conversation that led to the handoff and handles it with its usual tools and approvals. ${LIVE_PI_REPLIES}`;
 export function registerPiLive(
   pi: ExtensionAPI,
   dependencies: LiveDependencies,
@@ -4753,8 +4805,19 @@ export function registerPiLive(
   let browserResult: string | undefined;
   // Set by the first browser-mode call; handed-off work keeps it after voice ends.
   let browserTool: BrowserTool | undefined;
-  // The level to restore once Pi settles after a web task ran at low thinking.
+  // The level to restore once Pi settles after a web task ran at low
+  // thinking, and the level the model actually applied for "low".
   let restoreThinking: ThinkingLevel | undefined;
+  let loweredTo: ThinkingLevel | undefined;
+  // Web tasks need quick steps, not deep reasoning. Typed work running
+  // meanwhile shares the lower level until Pi settles; it is never raised.
+  const lowerThinking = (): void => {
+    const level = pi.getThinkingLevel();
+    if (THINKING_ORDER.indexOf(level) <= THINKING_ORDER.indexOf("low")) return;
+    restoreThinking ??= level;
+    pi.setThinkingLevel("low");
+    loweredTo = pi.getThinkingLevel();
+  };
   const resources = new WeakMap<AbortSignal, LiveResources>();
   const host = dependencies.runtime?.executionHost ?? hostname;
 
@@ -4865,19 +4928,21 @@ export function registerPiLive(
             onRequest(request) {
               if (input.signal.aborted || activeSignal !== input.signal) return;
               const toPi = (note?: string): void => {
+                if (retired) return;
                 pi.sendUserMessage(
                   `[Voice]\n${request.text}${note ? `\n\n[Browser] ${note}` : ""}`,
                   { deliverAs: "steer" },
                 );
               };
               if (!browser || !request.userText) return toPi();
-              // A newer handoff supersedes a browser request in flight; replies
-              // address only the latest delegation. Work handed to Pi stays Pi's.
+              // A newer handoff or a stop abandons a browser wait. Requests
+              // bound for Pi are still delivered, as ordinary calls deliver
+              // them at once; work handed to Pi stays Pi's.
               browserRun?.abort();
               const run = new AbortController();
               browserRun = run;
               paint();
-              const current = (): boolean =>
+              const waiting = (): boolean =>
                 !run.signal.aborted &&
                 !input.signal.aborted &&
                 activeSignal === input.signal;
@@ -4886,40 +4951,31 @@ export function registerPiLive(
                 paint();
               };
               const currentPage = async () =>
-                (await browser.tool?.currentPage(run.signal)) ??
+                (await browser.tool?.currentPage()) ??
                 browser.controller.page();
               const handOff = async (
                 reason: string,
                 webTask: boolean,
               ): Promise<void> => {
                 const page = describePage(await currentPage());
-                if (!current()) return release();
-                browserResult = "Browser: handed to Pi";
+                if (browserRun === run) browserResult = "Browser: handed to Pi";
                 release();
-                if (webTask) {
-                  // Web tasks need quick steps, not deep reasoning; typed work
-                  // started meanwhile shares the lower level until Pi settles.
-                  const level = pi.getThinkingLevel();
-                  if (
-                    THINKING_ORDER.indexOf(level) >
-                    THINKING_ORDER.indexOf("low")
-                  ) {
-                    restoreThinking ??= level;
-                    pi.setThinkingLevel("low");
-                  }
-                }
+                if (webTask) lowerThinking();
+                const tool = !browser.tool
+                  ? ""
+                  : webTask
+                    ? ` Use the ${BROWSER_TOOL_NAME} tool: it drives that browser, and each action returns the resulting page, so no separate check is needed. Reply in one or two short sentences for voice.`
+                    : ` If this is web work, use the ${BROWSER_TOOL_NAME} tool: it drives that browser, and each action returns the resulting page.`;
                 toPi(
-                  `${reason}${page ? ` The user's browser shows ${page}.` : ""}${browser.tool ? ` Use the ${BROWSER_TOOL_NAME} tool: it drives that browser, and each action returns the resulting page, so no separate check is needed. Reply in one or two short sentences for voice.` : ""}`,
+                  `${reason}${page ? ` The user's browser shows ${page}.` : ""}${tool}`,
                 );
               };
               void (async () => {
                 const route = await browser.router?.route(
                   request.userText,
                   await currentPage(),
-                  run.signal,
                 );
-                if (!current()) return release();
-                if (route === "pi") {
+                if (route === "other") {
                   release();
                   return toPi();
                 }
@@ -4928,22 +4984,26 @@ export function registerPiLive(
                     "Pi Live routed this web task to Pi because it needs more than one browser step.",
                     true,
                   );
+                if (!waiting()) return release();
                 const outcome = await browser.controller.run(
                   request.id,
                   request.userText,
                   run.signal,
                 );
-                if (!outcome || !current()) return release();
-                if (outcome.handOff)
+                if (!outcome || !waiting()) return release();
+                // Pi takes over what the controller refused or failed; an
+                // unreachable controller only when Pi has a browser to use.
+                if (outcome.handOff && (!outcome.unreachable || browser.tool))
                   return handOff(
                     `Pi Live tried the fast browser controller first: ${outcome.text}.`,
-                    route === "browser",
+                    route === "browser_step",
                   );
                 browserResult = outcome.text;
                 release();
                 binding.lifecycle.createOutgoingSender()?.({
                   kind: "final",
                   text: outcome.text,
+                  delegationId: request.id,
                 });
               })();
             },
@@ -5121,6 +5181,8 @@ export function registerPiLive(
           );
           return;
         }
+        for (const notice of nextBrowser.notices ?? [])
+          current.ui.notify(`Pi Live: ${notice}`, "warning");
       }
     }
     if (lifecycle.snapshot().state === "off") {
@@ -5218,11 +5280,9 @@ export function registerPiLive(
         throw new Error(
           "No Pi Live browser-mode call has connected a browser with PI_LIVE_BROWSER_CDP in this Pi session.",
         );
-      // Pi validated params against BROWSER_TOOL_SCHEMA before this call.
-      const result = await browserTool.run(
-        params as unknown as BrowserToolParams,
-        signal,
-      );
+      const checked = browserToolParams(params);
+      if (!checked) throw new Error("Invalid live_browser arguments.");
+      const result = await browserTool.run(checked, signal);
       return {
         content: [{ type: "text", text: result.text }],
         details: undefined,
@@ -5230,6 +5290,7 @@ export function registerPiLive(
     },
   });
   pi.on("session_start", () => {
+    restoreThinking = loweredTo = undefined;
     // The tool stays out of the model's view until a browser-mode call needs it.
     const active = pi.getActiveTools();
     if (active.includes(BROWSER_TOOL_NAME))
@@ -5272,8 +5333,9 @@ export function registerPiLive(
   pi.on("agent_settled", () => {
     working = false;
     if (restoreThinking !== undefined) {
-      if (pi.getThinkingLevel() === "low") pi.setThinkingLevel(restoreThinking);
-      restoreThinking = undefined;
+      if (pi.getThinkingLevel() === loweredTo)
+        pi.setThinkingLevel(restoreThinking);
+      restoreThinking = loweredTo = undefined;
     }
     binding.lifecycle.createOutgoingSender()?.({
       kind: "final",

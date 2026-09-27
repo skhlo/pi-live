@@ -415,11 +415,38 @@ test("a handoff's user text is the latest turn, without transcript noise", async
   harness.native(speech("assistant", "Which one?"));
   harness.native(speech("user", "The second one"));
   harness.native(delegation("short"));
+  harness.native(speech("user", "[laughs open wikipedia"));
+  harness.native(delegation("unclosed"));
   assert.deepEqual(
     harness.requests.map((request) => request.userText),
-    ["Search for the Blancpain 2150", "Open the results The second one"],
+    [
+      "Search for the Blancpain 2150",
+      "Open the results The second one",
+      "open wikipedia",
+    ],
   );
   assert.ok(harness.requests[0]!.text.includes("User: for, plong-pong"));
+});
+
+test("a reply naming its handoff leaves the reply slot to the handoff it replaced", async (t) => {
+  const harness = await runtimeHarness(t);
+  harness.handoff("coding", "run the tests");
+  harness.handoff("scroll", "scroll down");
+  // The browser answers its own handoff; Pi's later reply still reaches the
+  // coding handoff instead of being dropped.
+  await harness.connection.sendData?.({
+    kind: "final",
+    text: "Done: scroll down.",
+    delegationId: "scroll",
+  });
+  await harness.connection.sendData?.({ kind: "final", text: "Tests pass." });
+  assert.ok(harness.sent[0]?.includes('"delegation_id":"scroll"'));
+  assert.ok(harness.sent[1]?.includes('"delegation_id":"coding"'));
+  assert.ok(harness.sent[1]?.includes("Tests pass."));
+  // Once answered, the slot is empty again.
+  await harness.connection.sendData?.({ kind: "final", text: "typed work" });
+  assert.equal(harness.sent.length, 2);
+  assert.deepEqual(harness.diagnostics, []);
 });
 
 test("the sideband does not duplicate data-channel transcripts or delegations", async (t) => {

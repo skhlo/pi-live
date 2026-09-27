@@ -10,12 +10,13 @@ setup, calls and recovery.
 ## Current behavior
 
 The package exports one Pi extension factory. Discovery registers `/live`,
-`Ctrl+Shift+L`, the historical live-message renderer and public lifecycle,
-dialog and delegation listeners. Discovery does not load the native addon,
+`Ctrl+Shift+L`, the historical live-message renderer, public lifecycle, dialog
+and delegation listeners, and the `live_browser` tool, which stays inactive
+until a browser-mode call connects it. Discovery does not load the native addon,
 resolve credentials, create call timers, touch ownership or contact a provider.
 
 - `/live` toggles voice; `start` and `stop` are explicit forms, and `end` or
-  `off` also stop. Each new attempt requires ordinary TUI consent. The shifted shortcut follows the same path;
+  `off` also stop. `browser` starts a browser-mode call (see below). Each new attempt requires ordinary TUI consent. The shifted shortcut follows the same path;
   commands remain the fallback for unsupported shifted-key encoding.
 - `mute` stops microphone capture while speaker playback may continue. `unmute`
   reopens capture only within the same active call.
@@ -97,21 +98,32 @@ request is:
 
 - A single browser step (open a site, search, click a named link, scroll, type,
   go back, confirm, pick a number) goes to voice-browser, and voice says the
-  observed outcome: done with the resulting page, a confirmation question, or a
-  numbered choice.
+  observed outcome: done with the resulting page (or that it may still be
+  loading), a confirmation question, or a numbered choice.
 - A longer web task (several steps, comparing, reading a page, filling a form)
   goes to Pi with the page on screen. Pi uses `live_browser`, whose every action
   waits for the page and returns what it now shows, and runs at low thinking
   until it settles; then the previous level returns.
 - Anything else, such as coding, goes to Pi unchanged.
 
-When voice-browser refuses or fails a request, Pi gets it too. Without a
-TypeSafe key, every request tries voice-browser first. `live_browser` appears
+When voice-browser refuses or fails a request, Pi gets it too, and so does a
+request voice-browser was not running for, when Pi has `live_browser`. Without a
+TypeSafe key, every request tries voice-browser first; `/live browser` warns
+about that and about an unusable `PI_LIVE_BROWSER_CDP`. The router uses Node's
+`fetch`, which ignores `HTTPS_PROXY` unless Node is configured for proxies (on
+recent Node versions, `NODE_USE_ENV_PROXY=1`); where a proxy is required, routing fails and
+requests go to voice-browser first.
+
+`live_browser` refuses to click, submit or press Enter on anything that looks
+like buying, paying, deleting, sending, booking or signing in, and says so; voice
+cannot approve those steps, so the user does them. It presses Enter once per
+submit and reports when the page did not navigate rather than trying again. `live_browser` appears
 in Pi's tools once a browser-mode call has connected it and stays for the rest
 of that Pi session, so handed-off work can finish after voice ends.
 
-A newer browser request replaces one still waiting; work already handed to Pi
-continues. Stopping voice does not undo a browser action already started.
+A newer browser request replaces one still waiting; work already handed to Pi,
+or already routed to Pi, continues. Unfinished requests are withdrawn from
+voice-browser so it stops asking Jev about them. Stopping voice does not undo a browser action already started.
 GPT-Live's client handoff carries no text, so the voice model cannot rewrite a
 vague request into a command; it is instructed to suggest a concrete option and
 let the user say it. voice-browser follows only tabs it opened itself: after Pi

@@ -49,6 +49,17 @@ _Avoid_: Off, retryable failure, releasing call
 A voice request sent into the existing Pi conversation. Pi handles it alongside
 other input. Stopping voice does not stop Pi work.
 
+**Browser mode**:
+A voice call started with `/live browser`, whose handoffs are routed per request
+to browser delegation or coding delegation. The choice holds for that call only.
+_Avoid_: Browser call, browser session
+
+**Web task**:
+A browser-mode request needing more than one browser action or a judgment,
+such as comparing, reading or filling a form. It becomes a coding delegation
+that Pi handles with `live_browser` at low thinking.
+_Avoid_: Multi-step command
+
 **Browser delegation**:
 A single-step voice request in a browser-mode call, sent to a separately running
 voice-browser controller instead of Pi. The controller decides and acts; voice

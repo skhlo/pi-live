@@ -3,8 +3,7 @@
 // loopback WebSocket. The controller owns page observation, Jev's decision and
 // Playwright execution; this client turns its broadcast events into one
 // outcome per request. It never retries or rolls back browser actions.
-// A router asks Jev beforehand whether a request is one browser step or a
-// task for Pi.
+// A router asks Jev beforehand what kind of work a request is.
 
 export const DEFAULT_BROWSER_URL = "ws://127.0.0.1:8787";
 const RESULT_TIMEOUT_MS = 20_000;
@@ -21,6 +20,8 @@ export interface BrowserOutcome {
   text: string;
   /** The controller refused or failed in a way Pi may handle instead. */
   handOff: boolean;
+  /** The controller could not be reached, so nothing was attempted. */
+  unreachable?: boolean;
 }
 
 export interface BrowserController {
@@ -34,15 +35,19 @@ export interface BrowserController {
   page(): BrowserPage | undefined;
 }
 
-/** One fast browser step, several steps of web work, or anything else for Pi. */
-export type BrowserRoute = "browser" | "browser_task" | "pi";
+/** Jev's answer: one browser step, several steps of web work, or other work. */
+export const BROWSER_ROUTES = [
+  "browser_step",
+  "browser_task",
+  "other",
+] as const;
+export type BrowserRoute = (typeof BROWSER_ROUTES)[number];
 
 export interface BrowserRouter {
   /** Resolves undefined when the router cannot decide. */
   route(
     request: string,
     page: BrowserPage | undefined,
-    signal: AbortSignal,
   ): Promise<BrowserRoute | undefined>;
 }
 
@@ -62,24 +67,43 @@ export type BrowserSocketFactory = (
   events: BrowserSocketEvents,
 ) => BrowserSocket;
 
-/** Returns the controller URL when it is a plain ws:// loopback address. */
-export function browserControllerUrl(
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Returns `value` when it is a plain loopback URL with the given scheme. */
+export function loopbackUrl(
   value: string | undefined,
+  protocol: "ws:" | "http:",
 ): string | undefined {
   let parsed: URL;
   try {
-    parsed = new URL(value?.trim() || DEFAULT_BROWSER_URL);
+    parsed = new URL(value?.trim() ?? "");
   } catch {
     return undefined;
   }
   if (
-    parsed.protocol !== "ws:" ||
+    parsed.protocol !== protocol ||
     !["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname) ||
     parsed.username ||
     parsed.password
   )
     return undefined;
   return parsed.href.replace(/\/$/, "");
+}
+
+/** The controller URL: a plain ws:// loopback address, by default port 8787. */
+export function browserControllerUrl(
+  value: string | undefined,
+): string | undefined {
+  return loopbackUrl(value?.trim() || DEFAULT_BROWSER_URL, "ws:");
+}
+
+/** The Chrome DevTools endpoint for Pi's tool: a plain http:// loopback address. */
+export function browserDevToolsUrl(
+  value: string | undefined,
+): string | undefined {
+  return value?.trim() ? loopbackUrl(value, "http:") : undefined;
 }
 
 // Node's built-in WebSocket keeps the module free of eager network imports.
@@ -94,10 +118,6 @@ function nodeSocket(url: string, events: BrowserSocketEvents): BrowserSocket {
     send: (text) => socket.send(text),
     close: () => socket.close(),
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function text(value: unknown): string {
@@ -147,23 +167,21 @@ export function createBrowserController(
         let socket: BrowserSocket | undefined;
         let opened = false;
         let registered = false;
+        let decidedToAct = false;
         let waits = 0;
         let action: { label: string; ok: boolean; detail: string } | undefined;
         let settle: ReturnType<typeof setTimeout> | undefined;
         let done = false;
 
-        const finish = (
-          outcome: BrowserOutcome | undefined,
-          release = false,
-        ): void => {
+        const finish = (outcome: BrowserOutcome | undefined): void => {
           if (done) return;
           done = true;
           clearTimeout(timer);
           clearTimeout(settle);
           signal.removeEventListener("abort", abort);
-          // An empty utterance replaces ours, so the controller stops
-          // re-asking Jev about a command it could not complete.
-          if (release && opened)
+          // Unless it acted, the controller may keep re-asking Jev about our
+          // words; an empty utterance replaces them and stops that.
+          if (!action && opened)
             try {
               socket?.send(
                 JSON.stringify({
@@ -184,13 +202,18 @@ export function createBrowserController(
           text,
           handOff: false,
         });
-        const actionOutcome = (): void => {
+        const unreachable: BrowserOutcome = {
+          text: `The browser controller is not reachable at ${url}. Start voice-browser first.`,
+          handOff: true,
+          unreachable: true,
+        };
+        const actionOutcome = (snapshot?: unknown): void => {
           if (!action) return;
-          const page = describePage(lastPage);
+          const page = describePage(observedPage(snapshot));
           finish(
             action.ok
               ? said(
-                  `Done: ${action.label}.${page ? ` The page is now ${page}.` : ""}`,
+                  `Done: ${action.label}. ${page ? `The page is now ${page}.` : "The page may still be loading."}`,
                 )
               : {
                   text: `the browser controller tried to ${action.label} and failed: ${action.detail || "no detail"}`,
@@ -206,7 +229,6 @@ export function createBrowserController(
                   said(
                     `No browser outcome within ${Math.round(timeoutMs / 1_000)} seconds; the browser may still act.`,
                   ),
-                  true,
                 ),
           timeoutMs,
         );
@@ -229,10 +251,15 @@ export function createBrowserController(
           }
           if (!registered) return;
           if (type === "snapshot") {
-            if (action) actionOutcome();
+            if (action) actionOutcome(payload);
             return;
           }
           if (type === "action" && isRecord(payload)) {
+            // Events carry no request ID. An action belongs to this request
+            // only after our decision to act, or when a spoken number picked a
+            // listed choice without a decision; an earlier request's action
+            // can still finish after ours registers.
+            if (!decidedToAct && payload.via !== "candidate-pick") return;
             action = {
               label: actionLabel(payload.action),
               ok: payload.ok === true,
@@ -263,6 +290,9 @@ export function createBrowserController(
           const policy = isRecord(payload.policy) ? payload.policy : {};
           const summary = text(policy.summary);
           switch (policy.decision) {
+            case "act":
+              decidedToAct = true;
+              return;
             case "confirm":
               return finish(
                 said(
@@ -280,13 +310,10 @@ export function createBrowserController(
               // A first wait can still resolve once the words settle; a
               // repeated one means the controller cannot complete it.
               if (++waits >= 2)
-                finish(
-                  {
-                    text: `the browser controller could not complete the command (${summary || "unclear"})`,
-                    handOff: true,
-                  },
-                  true,
-                );
+                finish({
+                  text: `the browser controller could not complete the command (${summary || "unclear"})`,
+                  handOff: true,
+                });
               return;
             default:
               return;
@@ -321,20 +348,16 @@ export function createBrowserController(
             onClose() {
               if (action) return actionOutcome();
               finish(
-                said(
-                  opened
-                    ? "The browser controller disconnected before reporting an outcome."
-                    : `The browser controller is not reachable at ${url}. Start voice-browser first.`,
-                ),
+                opened
+                  ? said(
+                      "The browser controller disconnected before reporting an outcome; the browser may still act.",
+                    )
+                  : unreachable,
               );
             },
           });
         } catch {
-          finish(
-            said(
-              `The browser controller is not reachable at ${url}. Start voice-browser first.`,
-            ),
-          );
+          finish(unreachable);
         }
       });
     },
@@ -352,8 +375,12 @@ export function createBrowserRouter(
   const request = options.fetch ?? fetch;
   const timeoutMs = options.timeoutMs ?? ROUTER_TIMEOUT_MS;
   return {
-    async route(spoken, page, signal) {
-      const timeout = AbortSignal.timeout(timeoutMs);
+    async route(spoken, page) {
+      // A plain timer keeps the process alive while it waits;
+      // AbortSignal.timeout() does not, so an unanswered request could
+      // outlive its own deadline.
+      const timeout = new AbortController();
+      const timer = setTimeout(() => timeout.abort(), timeoutMs);
       try {
         const response = await request(ROUTER_URL, {
           method: "POST",
@@ -383,44 +410,19 @@ export function createBrowserRouter(
               },
             },
           }),
-          signal: AbortSignal.any([signal, timeout]),
+          signal: timeout.signal,
         });
         if (!response.ok) return undefined;
         const body: unknown = await response.json();
         const answers = isRecord(body) ? body.answers : undefined;
         const route = isRecord(answers) ? answers.route : undefined;
         const picked = isRecord(route) ? route.choice : undefined;
-        return picked === "browser_step"
-          ? "browser"
-          : picked === "browser_task"
-            ? "browser_task"
-            : picked === "other"
-              ? "pi"
-              : undefined;
+        return BROWSER_ROUTES.find((known) => known === picked);
       } catch {
         return undefined;
+      } finally {
+        clearTimeout(timer);
       }
     },
   };
-}
-
-/** Returns the DevTools endpoint when it is a plain http:// loopback address. */
-export function browserDevToolsUrl(
-  value: string | undefined,
-): string | undefined {
-  if (!value?.trim()) return undefined;
-  let parsed: URL;
-  try {
-    parsed = new URL(value.trim());
-  } catch {
-    return undefined;
-  }
-  if (
-    parsed.protocol !== "http:" ||
-    !["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname) ||
-    parsed.username ||
-    parsed.password
-  )
-    return undefined;
-  return parsed.href.replace(/\/$/, "");
 }

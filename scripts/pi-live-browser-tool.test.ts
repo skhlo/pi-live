@@ -22,14 +22,27 @@ const PAGES: Record<string, string> = {
   "/results": `<!doctype html><title>Results</title><h1>Results</h1><p id=q></p><script>q.textContent=new URLSearchParams(location.search).get('q')</script>`,
   "/submariner": `<!doctype html><title>Submariner</title><h1>Submariner</h1><p>Oyster steel diver watch.</p>`,
   "/daytona": `<!doctype html><title>Daytona</title><h1>Daytona</h1>`,
+  "/slow-form": `<!doctype html><title>Slow Form</title><form action="/slow"><input placeholder="Slow search"></form>`,
+  "/shop": `<!doctype html><title>Shop</title><button>Buy now</button>
+<form action="/account"><input placeholder="Username"><input type="password" placeholder="Password"><button>Continue</button></form>`,
 };
 
 test(
   "the browser tool acts and reports on a real Chrome",
   { skip: chrome ? false : "set PI_LIVE_TEST_CHROME to a Chrome binary" },
   async (t) => {
+    let slowHits = 0;
     const site = createServer((request, response) => {
-      const page = PAGES[new URL(request.url ?? "/", "http://x").pathname];
+      const pathname = new URL(request.url ?? "/", "http://x").pathname;
+      if (pathname === "/slow") {
+        slowHits++;
+        setTimeout(() => {
+          response.writeHead(200, { "content-type": "text/html" });
+          response.end("<!doctype html><title>Slow results</title>");
+        }, 1_500);
+        return;
+      }
+      const page = PAGES[pathname];
       response.writeHead(page ? 200 : 404, { "content-type": "text/html" });
       response.end(page ?? "missing");
     });
@@ -86,27 +99,25 @@ test(
     assert.equal(home.text.match(/button "Related"/g)?.length, 1);
     assert.doesNotMatch(home.text, /link ""/);
 
-    // A submit is claimed only when the page moved; a blocked Enter falls
-    // back to the field's own form.
+    // A submit is claimed only when the page navigated, and Enter is never
+    // pressed twice.
+    const notDone =
+      /and pressed Enter; the page did not navigate, so it may have updated in place or ignored Enter\.\nPage: "Watch Shop"/;
     const notes = await tool.run({
       action: "type",
       target: "Notes",
       text: "hello",
       submit: true,
     });
-    assert.match(
-      notes.text,
-      /Typed into "Notes" and pressed Enter, but the page address did not change\./,
-    );
+    assert.match(notes.text, notDone);
     const guarded = await tool.run({
       action: "type",
       target: "Guarded search",
       text: "Daytona",
       submit: true,
     });
-    assert.match(guarded.text, /and submitted\.\nPage: "Results"/);
+    assert.match(guarded.text, notDone);
 
-    await tool.run({ action: "back" });
     const clicked = await tool.run({ action: "click", target: "Submariner" });
     assert.match(clicked.text, /Clicked "Submariner"/);
     assert.equal(clicked.page?.title, "Submariner");
@@ -130,12 +141,60 @@ test(
     const missing = await tool.run({ action: "click", ref: 999 });
     assert.match(missing.text, /No element matches ref 999/);
 
+    // A slow response is waited for, not submitted a second time.
+    await tool.run({ action: "open", url: `${origin}/slow-form` });
+    const slow = await tool.run({
+      action: "type",
+      target: "Slow search",
+      text: "Explorer",
+      submit: true,
+    });
+    assert.match(slow.text, /and submitted\.\nPage: "Slow results"/);
+    assert.equal(slowHits, 1);
+
+    // Voice cannot approve buying or signing in, so those are refused.
+    await tool.run({ action: "open", url: `${origin}/shop` });
+    const refused =
+      /^Refused: ".*" looks like buying, paying, deleting, sending, booking or signing in\..*\nPage: "Shop"/;
+    assert.match(
+      (await tool.run({ action: "click", target: "Buy now" })).text,
+      refused,
+    );
+    assert.match(
+      (await tool.run({ action: "type", target: "Password", text: "x" })).text,
+      refused,
+    );
+    assert.match(
+      (
+        await tool.run({
+          action: "type",
+          target: "Username",
+          text: "me",
+          submit: true,
+        })
+      ).text,
+      refused,
+    );
+    assert.match(
+      (await tool.run({ action: "type", target: "Username", text: "me" })).text,
+      /^Typed into "Username"\./,
+    );
+    assert.match(
+      (await tool.run({ action: "press", key: "Enter" })).text,
+      refused,
+    );
+    assert.equal((await tool.currentPage())?.title, "Shop");
+
     const tabbed = await tool.run({
       action: "new_tab",
       url: `${origin}/submariner`,
     });
     assert.match(tabbed.text, /Opened a new tab\.\nPage: "Submariner"/);
+    assert.match(
+      (await tool.run({ action: "back" })).text,
+      /^There was no earlier page to go back to\.\nPage: "Submariner"/,
+    );
     const switched = await tool.run({ action: "switch_tab", tab: 1 });
-    assert.match(switched.text, /Switched to tab 1\.\nPage: "Daytona"/);
+    assert.match(switched.text, /Switched to tab 1\.\nPage: "Shop"/);
   },
 );

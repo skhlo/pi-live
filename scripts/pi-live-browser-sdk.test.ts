@@ -16,7 +16,13 @@ import {
 import { fakeProvider } from "./test-support/live-provider.ts";
 import { fakeMedia } from "./test-support/live-media.ts";
 
-function recordingBrowser(routes: Array<BrowserRoute | undefined> = []) {
+// A route may be a promise, to answer only after a newer request arrives.
+function recordingBrowser(
+  routes: Array<
+    BrowserRoute | undefined | Promise<BrowserRoute | undefined>
+  > = [],
+  options: { tool?: boolean } = {},
+) {
   const commands: Array<{ id: string; command: string }> = [];
   const routed: string[] = [];
   const aborted: string[] = [];
@@ -53,7 +59,11 @@ function recordingBrowser(routes: Array<BrowserRoute | undefined> = []) {
       return { text: 'Current page.\nPage: "Google" https://www.google.com/' };
     },
   };
-  const mode: LiveBrowserMode = { controller, router, tool };
+  const mode: LiveBrowserMode = {
+    controller,
+    router,
+    ...(options.tool === false ? {} : { tool }),
+  };
   return {
     commands,
     routed,
@@ -86,7 +96,7 @@ async function browserCall(
 }
 
 test("single browser steps go to the fast controller, not Pi", async (t) => {
-  const browser = recordingBrowser(["browser"]);
+  const browser = recordingBrowser(["browser_step"]);
   const { provider, media, fixture } = await browserCall(t, browser);
   media.request("one", "Go to Wikipedia");
   await waitUntil(() => browser.commands.length === 1, "browser request");
@@ -144,7 +154,7 @@ test("web tasks go to Pi with its browser tool at low thinking, restored after",
 });
 
 test("other work goes to Pi unchanged", async (t) => {
-  const browser = recordingBrowser(["pi"]);
+  const browser = recordingBrowser(["other"]);
   const provider = fakeProvider({ reasoning: true });
   const { media, fixture } = await browserCall(t, browser, provider);
   fixture.runtime.session.setThinkingLevel("high");
@@ -178,7 +188,7 @@ test("a controller refusal falls back to Pi instead of being spoken", async (t) 
 });
 
 test("a newer browser request supersedes one in flight", async (t) => {
-  const browser = recordingBrowser(["browser", "browser"]);
+  const browser = recordingBrowser(["browser_step", "browser_step"]);
   const { media } = await browserCall(t, browser);
   media.request("one", "Open YouTube");
   await waitUntil(() => browser.commands.length === 1, "first request");
@@ -194,8 +204,61 @@ test("a newer browser request supersedes one in flight", async (t) => {
   assert.equal(media.finals()[0]!.delegation_id, "two");
 });
 
+test("a superseded request still reaches Pi when routed there, but never the controller", async (t) => {
+  let first!: (route: BrowserRoute) => void;
+  let second!: (route: BrowserRoute) => void;
+  const browser = recordingBrowser([
+    new Promise((resolve) => (first = resolve)),
+    new Promise((resolve) => (second = resolve)),
+    "browser_step",
+  ]);
+  const { provider, media } = await browserCall(t, browser);
+  media.request("one", "Run the tests");
+  media.request("two", "Open YouTube");
+  media.request("three", "Scroll down");
+  await waitUntil(() => browser.commands.length === 1, "newest request");
+  assert.equal(browser.commands[0]!.id, "three");
+  first("other");
+  second("browser_step");
+  await waitUntil(() => provider.calls() === 1, "Pi request");
+  assert.ok(provider.contexts[0]!.includes("Run the tests"));
+  assert.equal(browser.commands.length, 1, "the superseded step never runs");
+});
+
+test("an unreachable controller goes to Pi only when Pi has a browser", async (t) => {
+  const unreachable = {
+    text: "The browser controller is not reachable at ws://127.0.0.1:8787. Start voice-browser first.",
+    handOff: true,
+    unreachable: true,
+  };
+  const withTool = recordingBrowser(["browser_step"]);
+  const handed = await browserCall(t, withTool);
+  handed.media.request("one", "Scroll down");
+  await waitUntil(() => withTool.commands.length === 1, "browser request");
+  withTool.finish("one", unreachable);
+  await waitUntil(() => handed.provider.calls() === 1, "Pi request");
+  assert.ok(handed.provider.contexts[0]!.includes("is not reachable"));
+  assert.ok(
+    !handed.media.frames.some((frame) => frame.includes("Start voice-browser")),
+    "the unreachable notice is not spoken",
+  );
+
+  const withoutTool = recordingBrowser(["browser_step"], { tool: false });
+  const spoken = await browserCall(t, withoutTool);
+  spoken.media.request("one", "Scroll down");
+  await waitUntil(() => withoutTool.commands.length === 1, "browser request");
+  withoutTool.finish("one", unreachable);
+  await waitUntil(() => spoken.media.finals().length === 1, "spoken outcome");
+  assert.ok(
+    JSON.stringify(spoken.media.finals()[0]).includes(
+      "Start voice-browser first.",
+    ),
+  );
+  assert.equal(spoken.provider.calls(), 0);
+});
+
 test("stopping voice abandons the browser wait without speaking", async (t) => {
-  const browser = recordingBrowser(["browser"]);
+  const browser = recordingBrowser(["browser_step"]);
   const { media, fixture } = await browserCall(t, browser);
   media.request("one", "Scroll down");
   await waitUntil(() => browser.commands.length === 1, "browser request");
@@ -237,6 +300,17 @@ test("ordinary calls still delegate to Pi, and browser mode needs a usable contr
   assert.ok(
     !provider.contexts.join("\n").includes("live_browser"),
     "the browser tool stays inactive outside browser mode",
+  );
+  await fixture.runtime.session.prompt("/live stop");
+
+  browser.mode.notices = [
+    "PI_LIVE_BROWSER_CDP is not an http:// loopback address, so Pi gets no browser tool.",
+  ];
+  await fixture.runtime.session.prompt("/live browser");
+  assert.ok(
+    notices.includes(
+      "Pi Live: PI_LIVE_BROWSER_CDP is not an http:// loopback address, so Pi gets no browser tool.",
+    ),
   );
   await fixture.runtime.session.prompt("/live stop");
 

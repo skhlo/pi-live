@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
+import path from "node:path";
 import { test } from "node:test";
+import { promisify } from "node:util";
 import {
   browserControllerUrl,
   browserDevToolsUrl,
@@ -50,6 +53,13 @@ const decision = (policy: Record<string, unknown>, trigger = "debounce") => ({
   policy,
 });
 
+const release = (id: string) => ({
+  type: "transcript",
+  text: "",
+  final: true,
+  utteranceId: `pi-live-${id}-end`,
+});
+
 const settled = () => new Promise((resolve) => setImmediate(resolve));
 
 test("browser endpoints are plain loopback addresses", () => {
@@ -71,6 +81,7 @@ test("browser endpoints are plain loopback addresses", () => {
     assert.equal(browserControllerUrl(refused), undefined, refused);
 
   assert.equal(browserDevToolsUrl(undefined), undefined);
+  assert.equal(browserDevToolsUrl(" "), undefined);
   assert.equal(
     browserDevToolsUrl("http://127.0.0.1:9333"),
     "http://127.0.0.1:9333",
@@ -127,60 +138,122 @@ test("a completed action reports the observed page", async () => {
     url: "https://www.wikipedia.org/",
     title: "Wikipedia",
   });
+  // It acted, so there is nothing to release.
+  assert.equal(fake.sent.length, 1);
   assert.equal(fake.closed(), 1);
 });
 
+test("an earlier request's action is not reported as this one", async () => {
+  const fake = fakeController();
+  const run = createBrowserController("ws://127.0.0.1:1", {
+    socket: fake.socket,
+    settleMs: 5,
+  }).run("b", "scroll down", new AbortController().signal);
+  await settled();
+  fake.registered();
+  // Request A was still executing when B registered.
+  fake.emit("action", { action: { label: "open youtube" }, ok: true });
+  fake.emit("snapshot", { url: "https://youtube.com/", title: "YouTube" });
+  fake.emit("decision", decision({ decision: "act", summary: "scroll" }));
+  fake.emit("action", { action: { label: "scroll down" }, ok: true });
+  assert.deepEqual(await run, {
+    text: "Done: scroll down. The page may still be loading.",
+    handOff: false,
+  });
+});
+
+test("a spoken number that picks a listed choice acts without a decision", async () => {
+  const fake = fakeController();
+  const run = createBrowserController("ws://127.0.0.1:1", {
+    socket: fake.socket,
+  }).run("pick", "two", new AbortController().signal);
+  await settled();
+  fake.registered();
+  fake.emit("action", {
+    action: { label: "Turing machine" },
+    ok: true,
+    via: "candidate-pick",
+  });
+  fake.emit("snapshot", { url: "https://w.org/tm", title: "Turing machine" });
+  assert.equal(
+    (await run)?.text,
+    'Done: Turing machine. The page is now "Turing machine" (https://w.org/tm).',
+  );
+});
+
 test("refusals and failures are handed off; questions are relayed", async () => {
-  const cases: Array<[string, unknown, { text: string; handOff: boolean }]> = [
+  const cases: Array<
+    [Array<[string, unknown]>, { text: string; handOff: boolean }]
+  > = [
     [
-      "decision",
-      decision({ decision: "ignore", summary: "not a browser command" }),
+      [
+        [
+          "decision",
+          decision({ decision: "ignore", summary: "not a browser command" }),
+        ],
+      ],
       {
         text: "the browser controller did not recognize a browser command (not a browser command)",
         handOff: true,
       },
     ],
     [
-      "action",
-      {
-        action: { type: "select_option", label: "colour" },
-        ok: false,
-        detail: "no matching option",
-      },
+      [
+        ["decision", decision({ decision: "act", summary: "select" })],
+        [
+          "action",
+          {
+            action: { type: "select_option", label: "colour" },
+            ok: false,
+            detail: "no matching option",
+          },
+        ],
+      ],
       {
         text: "the browser controller tried to colour and failed: no matching option",
         handOff: true,
       },
     ],
     [
-      "log",
-      { level: "error", msg: "Jev error: 401 Unauthorized" },
+      [["log", { level: "error", msg: "Jev error: 401 Unauthorized" }]],
       {
         text: "the browser controller reported an error: Jev error: 401 Unauthorized",
         handOff: true,
       },
     ],
     [
-      "decision",
-      decision({
-        decision: "confirm",
-        summary: 'say "confirm" to click Buy',
-      }),
+      [
+        [
+          "decision",
+          decision({
+            decision: "confirm",
+            summary: 'say "confirm" to click Buy',
+          }),
+        ],
+      ],
       {
         text: 'Not done yet: it needs confirmation first (say "confirm" to click Buy). The user can say "confirm" or "cancel".',
         handOff: false,
       },
     ],
     [
-      "decision",
-      decision({ decision: "cancel", summary: "cancelled pending action" }),
+      [
+        [
+          "decision",
+          decision({ decision: "cancel", summary: "cancelled pending action" }),
+        ],
+      ],
       { text: "Cancelled the pending browser action.", handOff: false },
     ],
     [
-      "candidates",
       [
-        { n: 1, id: "a", label: "Alan Turing" },
-        { n: 2, id: "b", label: "Turing machine" },
+        [
+          "candidates",
+          [
+            { n: 1, id: "a", label: "Alan Turing" },
+            { n: 2, id: "b", label: "Turing machine" },
+          ],
+        ],
       ],
       {
         text: "Not done yet: more than one match. Ask which one: 1. Alan Turing; 2. Turing machine. The user can answer with the number.",
@@ -188,30 +261,30 @@ test("refusals and failures are handed off; questions are relayed", async () => 
       },
     ],
   ];
-  for (const [type, payload, expected] of cases) {
+  for (const [events, expected] of cases) {
     const fake = fakeController();
     const run = createBrowserController("ws://127.0.0.1:1", {
       socket: fake.socket,
     }).run("d1", "request", new AbortController().signal);
     await settled();
     fake.registered();
-    fake.emit(type, payload);
-    assert.deepEqual(await run, expected, type);
+    for (const [type, payload] of events) fake.emit(type, payload);
+    assert.deepEqual(await run, expected, events[0]![0]);
   }
 });
 
-test("an incomplete command is handed off and stops controller retries", async () => {
-  const fake = fakeController();
+test("an unfinished request releases the controller so it stops asking Jev", async () => {
+  const incomplete = fakeController();
   const run = createBrowserController("ws://127.0.0.1:1", {
-    socket: fake.socket,
+    socket: incomplete.socket,
   }).run("d1", "search something interesting", new AbortController().signal);
   await settled();
-  fake.registered();
-  fake.emit(
+  incomplete.registered();
+  incomplete.emit(
     "decision",
     decision({ decision: "wait", summary: "search for what?" }),
   );
-  fake.emit(
+  incomplete.emit(
     "decision",
     decision({ decision: "wait", summary: "search for what?" }, "silence"),
   );
@@ -219,15 +292,33 @@ test("an incomplete command is handed off and stops controller retries", async (
     text: "the browser controller could not complete the command (search for what?)",
     handOff: true,
   });
-  assert.deepEqual(fake.sent[1], {
-    type: "transcript",
-    text: "",
-    final: true,
-    utteranceId: "pi-live-d1-end",
-  });
+  assert.deepEqual(incomplete.sent[1], release("d1"));
+
+  // Numbered choices would otherwise be re-asked every few hundred ms.
+  const choices = fakeController();
+  const listed = createBrowserController("ws://127.0.0.1:1", {
+    socket: choices.socket,
+  }).run("d2", "open turing", new AbortController().signal);
+  await settled();
+  choices.registered();
+  choices.emit("candidates", [{ label: "Alan Turing" }]);
+  await listed;
+  assert.deepEqual(choices.sent[1], release("d2"));
+
+  // A stop releases too, before the socket closes.
+  const stopped = fakeController();
+  const stop = new AbortController();
+  const aborted = createBrowserController("ws://127.0.0.1:1", {
+    socket: stopped.socket,
+  }).run("d3", "go back", stop.signal);
+  await settled();
+  stop.abort();
+  assert.equal(await aborted, undefined);
+  assert.deepEqual(stopped.sent[1], release("d3"));
+  assert.equal(stopped.closed(), 1);
 });
 
-test("an unreachable controller, a stop or a timeout gives no false completion", async () => {
+test("an unreachable controller or a timeout gives no false completion", async () => {
   const run = createBrowserController("ws://127.0.0.1:1", {
     socket: (_url, events) => {
       queueMicrotask(() => events.onClose());
@@ -236,18 +327,9 @@ test("an unreachable controller, a stop or a timeout gives no false completion",
   }).run("d1", "go back", new AbortController().signal);
   assert.deepEqual(await run, {
     text: "The browser controller is not reachable at ws://127.0.0.1:1. Start voice-browser first.",
-    handOff: false,
+    handOff: true,
+    unreachable: true,
   });
-
-  const stopped = fakeController();
-  const stop = new AbortController();
-  const aborted = createBrowserController("ws://127.0.0.1:1", {
-    socket: stopped.socket,
-  }).run("d2", "go back", stop.signal);
-  await settled();
-  stop.abort();
-  assert.equal(await aborted, undefined);
-  assert.equal(stopped.closed(), 1);
 
   const quiet = fakeController();
   const timedOut = createBrowserController("ws://127.0.0.1:1", {
@@ -271,14 +353,12 @@ test("the router asks Jev one choice and reads its answer", async () => {
     return new Response(JSON.stringify({ answers: answer }), { status });
   };
   const router = createBrowserRouter("ts-test-key", { fetch: fetchStub });
-  const signal = new AbortController().signal;
   const page = { url: "https://www.rolex.com/", title: "Rolex" };
 
   assert.equal(
     await router.route(
       "look into Rolex all models and search for Submariner",
       page,
-      signal,
     ),
     "browser_task",
   );
@@ -299,24 +379,33 @@ test("the router asks Jev one choice and reads its answer", async () => {
   ]);
 
   answer = { route: { type: "choice", choice: "other" } };
-  assert.equal(await router.route("run the tests", undefined, signal), "pi");
+  assert.equal(await router.route("run the tests", undefined), "other");
   answer = { route: { type: "choice", choice: "browser_step" } };
-  assert.equal(await router.route("scroll down", undefined, signal), "browser");
+  assert.equal(await router.route("scroll down", undefined), "browser_step");
   answer = { route: { type: "choice", choice: "something_else" } };
-  assert.equal(await router.route("scroll down", undefined, signal), undefined);
+  assert.equal(await router.route("scroll down", undefined), undefined);
   status = 401;
-  assert.equal(await router.route("scroll down", undefined, signal), undefined);
+  assert.equal(await router.route("scroll down", undefined), undefined);
+});
 
-  const hung = createBrowserRouter("ts-test-key", {
-    timeoutMs: 5,
-    fetch: (_url, init) =>
-      new Promise((_resolve, reject) =>
-        init?.signal?.addEventListener("abort", () =>
-          reject(new Error("aborted")),
-        ),
-      ),
-  });
-  assert.equal(await hung.route("scroll down", undefined, signal), undefined);
+test("the router's timeout fires even when nothing else keeps Node running", async () => {
+  // A child process with nothing else pending: a timeout that does not hold
+  // the event loop lets the process exit before the router answers.
+  const script = `
+    import { createBrowserRouter } from ${JSON.stringify(path.join(import.meta.dirname, "../src/browser.ts"))};
+    const router = createBrowserRouter("ts-test-key", {
+      timeoutMs: 50,
+      fetch: (_url, init) => new Promise((_resolve, reject) =>
+        init.signal.addEventListener("abort", () => reject(new Error("aborted")))),
+    });
+    console.log(String(await router.route("scroll down", undefined)));
+  `;
+  const { stdout } = await promisify(execFile)(
+    process.execPath,
+    ["--input-type=module", "-e", script],
+    { timeout: 10_000 },
+  );
+  assert.equal(stdout.trim(), "undefined");
 });
 
 test("the default socket speaks to a real WebSocket server", async (t) => {
@@ -345,6 +434,7 @@ test("the default socket speaks to a real WebSocket server", async (t) => {
       const send = (type: string, payload: unknown) =>
         socket.send(JSON.stringify({ type, payload }));
       send("transcript", { utteranceId: request.utteranceId });
+      send("decision", { policy: { decision: "act" } });
       send("action", { action: { label: "scroll down" }, ok: true });
       send("snapshot", { url: "https://example.com/", title: "Example" });
     });
