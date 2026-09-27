@@ -77,6 +77,8 @@ const clock: LiveClock = {
 };
 const media = fakeMedia();
 const provider = fakeProvider({ tool: true });
+let sidecarStarts = 0;
+let sidecarStops = 0;
 let binding: LiveLifecycleBinding;
 let currentContext: ExtensionContext | undefined;
 let voice: "marin" | "cedar" = "marin";
@@ -86,6 +88,8 @@ const snapshot = () => ({
   timers: timers.size,
   ...media.counts(),
   frames: media.frames.length,
+  sidecarStarts,
+  sidecarStops,
 });
 const settingsManager = SettingsManager.inMemory({
   cacheWarming: "off",
@@ -133,6 +137,36 @@ const resourceLoader = new DefaultResourceLoader({
             check: async () => ({ supported: true, issues: [] }),
           },
           truncateToWidth,
+          ...(process.env.PI_LIVE_SIDECAR_FIXTURE
+            ? {
+                browser: () => ({
+                  controller: {
+                    page: () => undefined,
+                    run: async () => ({
+                      text: "Scrolled down",
+                      handOff: false,
+                    }),
+                  },
+                  sidecar: {
+                    url: "ws://127.0.0.1:8787",
+                    directory: "/fixture/voice-browser",
+                    probe: async () => sidecarStarts > 0,
+                    start: () => {
+                      sidecarStarts++;
+                      record("sidecar-start", snapshot());
+                      return {
+                        logPath: "/fixture/sidecar.log",
+                        failure: () => undefined,
+                        stop: async () => {
+                          sidecarStops++;
+                          record("sidecar-stop", snapshot());
+                        },
+                      };
+                    },
+                  },
+                }),
+              }
+            : {}),
           runtime: {
             lifecycle: {
               home: certifiedHome(path.join(root, "home")),

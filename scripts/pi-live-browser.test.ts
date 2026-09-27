@@ -15,6 +15,7 @@ import {
   createBrowserRouter,
   type BrowserSocketEvents,
 } from "../src/browser.ts";
+import { probeBrowserController } from "../src/browser-sidecar.ts";
 
 // A deterministic stand-in for voice-browser's WebSocket broadcast protocol.
 function fakeController() {
@@ -78,6 +79,7 @@ test("browser settings fall back to the env file, variable by variable", async (
         "PI_LIVE_BROWSER_CDP=http://127.0.0.1:9333",
         "PI_LIVE_BROWSER_URL=ws://127.0.0.1:9000",
         "OPENAI_API_KEY=not-read",
+        "VOICE_BROWSER_DIR='/tmp/voice browser'",
         "",
       ].join("\n"),
     );
@@ -96,8 +98,18 @@ test("browser settings fall back to the env file, variable by variable", async (
           PI_LIVE_BROWSER_CDP: "http://127.0.0.1:9333",
           TYPESAFE_API_KEY: "file-key",
           JEV_API_KEY: "shell-jev",
+          VOICE_BROWSER_DIR: "/tmp/voice browser",
         },
       },
+    );
+    assert.equal(
+      browserEnvironment({}, envFile).values.VOICE_BROWSER_DIR,
+      "/tmp/voice browser",
+    );
+    assert.equal(
+      browserEnvironment({ VOICE_BROWSER_DIR: "/shell/checkout" }, envFile)
+        .values.VOICE_BROWSER_DIR,
+      "/shell/checkout",
     );
     const unreadable = browserEnvironment(
       { TYPESAFE_API_KEY: "shell-key" },
@@ -493,6 +505,10 @@ test("the default socket speaks to a real WebSocket server", async (t) => {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   assert.ok(address && typeof address === "object");
+  assert.equal(
+    await probeBrowserController(`ws://127.0.0.1:${address.port}`),
+    true,
+  );
   const outcome = await createBrowserController(
     `ws://127.0.0.1:${address.port}`,
   ).run("d1", "scroll down", new AbortController().signal);
@@ -500,4 +516,22 @@ test("the default socket speaks to a real WebSocket server", async (t) => {
     text: 'Done: scroll down. The page is now "Example" (https://example.com/).',
     handOff: false,
   });
+});
+
+test("controller probes time out without a WebSocket handshake and handle refusal", async (t) => {
+  const server = createServer();
+  const sockets = new Set<import("node:net").Socket>();
+  server.on("connection", (socket) => sockets.add(socket));
+  t.after(() => {
+    for (const socket of sockets) socket.destroy();
+    server.close();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const url = `ws://127.0.0.1:${address.port}`;
+  assert.equal(await probeBrowserController(url, 10), false);
+  for (const socket of sockets) socket.destroy();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  assert.equal(await probeBrowserController(url), false);
 });

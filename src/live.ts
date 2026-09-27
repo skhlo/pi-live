@@ -35,6 +35,15 @@ import {
   type BrowserTool,
 } from "./browser-tool.ts";
 import {
+  createBrowserSidecarSession,
+  probeBrowserController,
+  startBrowserSidecar,
+  SIDECAR_CDP,
+  SIDECAR_PROMPT,
+  SIDECAR_DISCLOSURE,
+  type BrowserSidecarSetup,
+} from "./browser-sidecar.ts";
+import {
   browserControllerUrl,
   browserDevToolsUrl,
   browserEnvironment,
@@ -4625,6 +4634,8 @@ function fitLine(
 
 export interface LiveBrowserMode {
   controller: BrowserController;
+  /** Optional session sidecar and the tool to use only while we own it. */
+  sidecar?: BrowserSidecarSetup & { tool?: BrowserTool };
   /** Configuration problems to show before the call starts. */
   notices?: string[];
   /** Absent without a TypeSafe key: every request then tries the controller first. */
@@ -4757,6 +4768,15 @@ export function createLiveDependencies(
       ];
       return {
         controller: createBrowserController(url),
+        sidecar: {
+          url,
+          directory: env.VOICE_BROWSER_DIR,
+          probe: () => probeBrowserController(url),
+          start: () => startBrowserSidecar({ ...process.env, ...env }),
+          ...(!env.PI_LIVE_BROWSER_CDP
+            ? { tool: createBrowserTool(SIDECAR_CDP) }
+            : {}),
+        },
         ...(notices.length ? { notices } : {}),
         ...(key ? { router: createBrowserRouter(key) } : {}),
         ...(devToolsUrl ? { tool: createBrowserTool(devToolsUrl) } : {}),
@@ -4769,7 +4789,7 @@ const LIVE_DISCLOSURE =
   "Uses the execution host microphone and speakers with OpenAI GPT-Live, billed to the OpenAI API key Pi uses for the openai provider. Audio, speech transcripts, the conversation leading to each request, a progress note for every tool-using Pi turn (its narration and the tools it ran, including typed work), and Pi's final replies are shared with OpenAI. Typed input and installed Pi extensions can influence those results. Existing HTTP/WebSocket proxy settings do not establish WebRTC/ICE media proxying. Pi reports only outermost extension dialogs, with a microtask delay; shortcut-opened dialogs and unreported nested dialogs may leave voice active. Stop voice first before opening such dialogs when capture and delivery must stop. Muting stops microphone capture; speakers may continue. Voice requests do not grant approvals. Run /live setup once before the first call. Behind an HTTPS proxy, cleanup cannot be confirmed: each call keeps its lock, which must be removed by hand after quitting Pi (see the README).";
 
 const LIVE_BROWSER_DISCLOSURE =
-  "Browser mode: Pi Live asks TypeSafe's Jev model, using TYPESAFE_API_KEY or JEV_API_KEY, what kind of work each spoken request is, sending your latest spoken turn and the current page's address and title. Single browser steps go to the voice-browser controller you run on this host (PI_LIVE_BROWSER_URL, default ws://127.0.0.1:8787), which sends the request and a summary of the page to Jev and acts in its browser. Longer web tasks, requests the controller refuses or fails, and other work go to Pi with the current page's address and title. With PI_LIVE_BROWSER_CDP set, Pi gets a live_browser tool on that Chrome for the rest of the Pi session and handles web tasks at low thinking; the tool refuses buying, paying, deleting, sending, booking and signing in, which stay with you. Browser outcomes, including page titles, addresses and text Pi reads, are shared with OpenAI. Stopping voice does not undo browser actions already started.";
+  "Browser mode: Pi Live asks TypeSafe's Jev model, using TYPESAFE_API_KEY or JEV_API_KEY, what kind of work each spoken request is, sending your latest spoken turn and the current page's address and title. Single browser steps go to the voice-browser controller you run on this host (PI_LIVE_BROWSER_URL, default ws://127.0.0.1:8787), which sends the request and a summary of the page to Jev and acts in its browser. Longer web tasks, requests the controller refuses or fails, and other work go to Pi with the current page's address and title. With PI_LIVE_BROWSER_CDP set or a sidecar started by Pi, Pi gets a live_browser tool on that Chrome for the rest of the Pi session and handles web tasks at low thinking; the tool refuses buying, paying, deleting, sending, booking and signing in, which stay with you. Browser outcomes, including page titles, addresses and text Pi reads, are shared with OpenAI. Stopping voice does not undo browser actions already started.";
 
 // Shared by both instruction sets: how Pi's progress and replies reach voice.
 const LIVE_PI_REPLIES =
@@ -4810,6 +4830,7 @@ export function registerPiLive(
   let browserResult: string | undefined;
   // Set by the first browser-mode call; handed-off work keeps it after voice ends.
   let browserTool: BrowserTool | undefined;
+  const browserSidecar = createBrowserSidecarSession();
   // The level to restore once Pi settles after a web task ran at low
   // thinking, and the level the model actually applied for "low".
   let restoreThinking: ThinkingLevel | undefined;
@@ -5186,8 +5207,6 @@ export function registerPiLive(
           );
           return;
         }
-        for (const notice of nextBrowser.notices ?? [])
-          current.ui.notify(`Pi Live: ${notice}`, "warning");
       }
     }
     if (lifecycle.snapshot().state === "off") {
@@ -5206,6 +5225,32 @@ export function registerPiLive(
           return;
         }
         await lifecycle.selectVoice(preferences.voice);
+        if (nextBrowser) {
+          const notices = [...(nextBrowser.notices ?? [])];
+          if (
+            nextBrowser.sidecar &&
+            current.hasUI &&
+            typeof current.ui.confirm === "function"
+          ) {
+            const sidecar = await browserSidecar.prepare(
+              nextBrowser.sidecar,
+              async (signal) =>
+                (await current.ui.confirm(SIDECAR_PROMPT, SIDECAR_DISCLOSURE, {
+                  signal,
+                })) &&
+                version === controlVersion &&
+                !retired,
+            );
+            if (version !== controlVersion || retired) return;
+            if (sidecar.owned) nextBrowser.tool ??= nextBrowser.sidecar.tool;
+            if (sidecar.notice) notices.push(sidecar.notice);
+          }
+          if (notices.length)
+            current.ui.notify(
+              `Pi Live: browser mode: ${notices.join(" ")}`,
+              "warning",
+            );
+        }
       } finally {
         if (version === controlVersion) preparing = false;
       }
@@ -5283,7 +5328,7 @@ export function registerPiLive(
     async execute(_toolCallId, params, signal) {
       if (!browserTool)
         throw new Error(
-          "No Pi Live browser-mode call has connected a browser with PI_LIVE_BROWSER_CDP in this Pi session.",
+          "No Pi Live browser-mode call has connected a DevTools browser in this Pi session.",
         );
       const checked = browserToolParams(params);
       if (!checked) throw new Error("Invalid live_browser arguments.");
@@ -5349,13 +5394,14 @@ export function registerPiLive(
     final = undefined;
     paint();
   });
-  pi.on("session_shutdown", (_event, current) => {
+  pi.on("session_shutdown", async (_event, current) => {
     retired = true;
     ++controlVersion;
     preparing = false;
     clearPresentation(current);
     widgetVisible = false;
     transcripts = {};
+    await browserSidecar.stop();
   });
   return binding;
 }

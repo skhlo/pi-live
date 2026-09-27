@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import pty
+import re
 import select
 import signal
 import struct
@@ -13,7 +14,7 @@ import time
 
 REPO = Path(__file__).resolve().parent.parent
 POLICY = "(version 1) (allow default) (deny network*)"
-CASES = ["cancel", "late", "controls", "shortcut-no", "shortcut-cancel", "task-stop", "conversation"] + [
+CASES = ["cancel", "late", "controls", "shortcut-no", "shortcut-cancel", "task-stop", "conversation", "sidecar"] + [
     f"{kind}-{answer}"
     for kind, answers in {
         "confirm": ["yes", "no", "cancel"], "select": ["beta", "cancel"],
@@ -35,6 +36,8 @@ def run(case):
         "TERM": "xterm-256color", "LANG": "en_US.UTF-8", "PI_OFFLINE": "1",
         "PI_TELEMETRY": "0", "PI_SKIP_VERSION_CHECK": "1",
     }
+    if case == "sidecar":
+        env["PI_LIVE_SIDECAR_FIXTURE"] = "1"
     argv = ["/usr/bin/sandbox-exec", "-p", POLICY, "/opt/homebrew/bin/node", "--no-addons", str(REPO / "scripts/pi-live-tui-probe.ts")]
     (root / "command.json").write_text(json.dumps({"argv": argv, "env": env}, indent=2))
     pid, master = pty.fork()
@@ -97,7 +100,47 @@ def run(case):
         size(100)
         wait("ready", timeout=15)
         pause(.4)
-        if case in ("cancel", "late"):
+        if case == "sidecar":
+            command("/live browser")
+            prompt = wait("prompt-start")
+            assert prompt["title"] == "Start the browser sidecar?"
+            assert prompt["resourcesCreated"] == 0 and prompt["sidecarStarts"] == 0
+            pause()
+            key("\r")
+            started = wait("sidecar-start")
+            assert started["resourcesCreated"] == 0
+            pause()
+            assert b"Start Pi Live voice in browser mode?" in raw
+            key("\r")
+            pause()
+            assert state()["state"] == "active"
+            command("/live stop")
+            pause()
+            stopped = state()
+            assert stopped["state"] == "off" and stopped["sidecarStops"] == 0
+            before = len(events())
+            command("/live browser")
+            prompt = wait("prompt-start", before)
+            assert prompt["title"] == "Start Pi Live voice in browser mode?"
+            pause()
+            key("\r")
+            pause()
+            assert state()["state"] == "active"
+            command("/live stop")
+            pause()
+            key("\x04")
+            # InteractiveMode exits the process after dispatching shutdown.
+            disposed = wait("sidecar-stop")
+            assert disposed["sidecarStarts"] == 1 and disposed["sidecarStops"] == 1
+            assert b"third-party voice-browser" in raw and b"TypeSafe key" in raw
+            screen = re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", bytes(raw))
+            screen = re.sub(rb"\x1b\][^\x07]*\x07", b"", screen)
+            assert b"until this Pi session ends" in b" ".join(screen.split())
+            (root / "screen.txt").write_bytes(screen)
+            (root / "receipt.json").write_text(json.dumps({"case": case, "passed": True, "final": disposed}, indent=2))
+            print(f"PASS {case}: {root}", flush=True)
+            return
+        elif case in ("cancel", "late"):
             if case == "late":
                 command("/fixture late")
                 wait("late-armed")
@@ -206,7 +249,10 @@ def run(case):
         (root / "receipt.json").write_text(json.dumps({"case": case, "passed": True, "final": current}, indent=2))
         print(f"PASS {case}: {root}", flush=True)
     finally:
-        key("\x04")
+        try:
+            key("\x04")
+        except OSError:
+            pass  # The sidecar case already quit normally.
         pause(.3)
         try:
             done, _ = os.waitpid(pid, os.WNOHANG)

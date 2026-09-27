@@ -76,6 +76,7 @@ export const PI_LIVE_PAYLOAD_ROOT_FILES = [
 ] as const;
 
 export const PI_LIVE_PAYLOAD_SOURCE_FILES = [
+  "src/browser-sidecar.ts",
   "src/browser-tool.ts",
   "src/browser.ts",
   "src/compatibility.ts",
@@ -83,6 +84,8 @@ export const PI_LIVE_PAYLOAD_SOURCE_FILES = [
   "src/pi-tui.d.ts",
   "src/preferences.ts",
 ] as const;
+
+const PI_LIVE_PAYLOAD_SCRIPT_FILES = ["scripts/browser-sidecar.sh"] as const;
 
 export const PI_LIVE_MANIFEST = {
   name: "pi-live",
@@ -485,6 +488,7 @@ export function inspectPiLivePackagePayload(
   const relatives = [
     ...PI_LIVE_PAYLOAD_ROOT_FILES,
     ...PI_LIVE_PAYLOAD_SOURCE_FILES,
+    ...PI_LIVE_PAYLOAD_SCRIPT_FILES,
     PI_LIVE_NOTICE_MANIFEST_RELATIVE,
     ...noticeCorpus.files.map(({ packageRelative }) => packageRelative),
   ].sort(compare);
@@ -495,7 +499,11 @@ export function inspectPiLivePackagePayload(
   );
   const files = relatives.map((relative): PiLivePayloadFile => {
     const absolute = path.join(root, ...relative.split("/"));
-    assertRegularUnredirectedFile(absolute, `Pi Live payload file ${relative}`);
+    assertRegularUnredirectedFile(
+      absolute,
+      `Pi Live payload file ${relative}`,
+      relative === "scripts/browser-sidecar.sh" ? 0o755 : 0o644,
+    );
     const info = fs.lstatSync(absolute);
     return {
       relative,
@@ -518,6 +526,7 @@ export function inspectPiLivePackagePayload(
   );
   const directories = [
     ".",
+    "scripts",
     ...sourceDirectories,
     ...noticeCorpus.directories,
   ].sort(compare);
