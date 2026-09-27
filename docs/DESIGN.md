@@ -178,7 +178,7 @@ Before a browser-mode call, `browserEnvironment` reads five browser variables
 from Pi's environment with the checkout's optional `.env` as fallback, including
 `VOICE_BROWSER_DIR`. `src/browser-sidecar.ts` probes the controller without
 sending a command. An answering controller is reused without ownership; only
-the script's fixed loopback port 8787 endpoint and a configured checkout permit
+the script's fixed IPv4 loopback port 8787 endpoint (`127.0.0.1` or `localhost`) and a configured checkout permit
 an offer. An interactive confirmation discloses Chrome, third-party code,
 TypeSafe key access and the Pi-session lifetime. A decline is remembered by
 that session. No dialog-capable UI means no offer or start.
@@ -198,6 +198,8 @@ With no configured `PI_LIVE_BROWSER_CDP`, an owned running sidecar supplies
 `http://127.0.0.1:9333` for `live_browser`. `session_shutdown` signals the script
 and awaits its exit; the script's traps stop and await both children. Shutdown
 is idempotent and cancels pending readiness or consent without a late launch.
+The script bounds each DevTools HTTP probe to one second, so a stalled response
+cannot indefinitely delay its signal trap or Pi's startup failure handling.
 Crash cleanup is intentionally absent: a later session reuses the controller
 and does not own it. Multiple Pi sessions are not coordinated; the owner stops
 the shared sidecar when it exits. Logs remain in the temporary directory.

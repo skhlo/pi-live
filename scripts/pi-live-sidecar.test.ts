@@ -8,6 +8,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { createServer, type ServerResponse } from "node:http";
 import path from "node:path";
 import { test } from "node:test";
 import {
@@ -48,10 +49,11 @@ function fakeSidecar(options: { answer?: boolean; failure?: string } = {}) {
 }
 
 test("only the sidecar's fixed loopback endpoint is eligible", () => {
-  for (const host of ["127.0.0.1", "localhost", "[::1]"])
+  for (const host of ["127.0.0.1", "localhost"])
     assert.equal(isSidecarUrl(`ws://${host}:8787/`), true);
   for (const url of [
     "ws://example.com:8787",
+    "ws://[::1]:8787",
     "wss://localhost:8787",
     "ws://localhost:9000",
     "ws://localhost:8787/other",
@@ -204,4 +206,69 @@ test("the real script reports missing checkout, key and Chrome in a private log"
     await sidecar.stop();
     await sidecar.stop();
   }
+});
+
+test("startup cleanup finishes when Chrome DevTools stalls an HTTP request", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "pi-live-stalled-cdp-"));
+  t.after(() => rm(root, { recursive: true }));
+  await mkdir(path.join(root, "src"));
+  await writeFile(path.join(root, "src/server.js"), "process.exit(1);\n");
+  const chrome = path.join(root, "chrome");
+  await writeFile(chrome, "#!/bin/sh\nexec sleep 30\n", { mode: 0o755 });
+  const bin = path.join(root, "bin");
+  await mkdir(bin);
+  // Redirect only the URL, preserving the production curl flags. No fixed
+  // sidecar port or real Chrome is used by the unit suite.
+  await writeFile(
+    path.join(bin, "curl"),
+    '#!/bin/bash\nargs=("$@")\nargs[${#args[@]}-1]="$SIDECAR_TEST_CDP_URL"\nexec /usr/bin/curl "${args[@]}"\n',
+    { mode: 0o755 },
+  );
+  const responses = new Set<ServerResponse>();
+  const server = createServer((_request, response) => responses.add(response));
+  t.after(() => {
+    for (const response of responses) response.destroy();
+    server.close();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  // Release a broken implementation so a regression fails rather than leaving
+  // its child behind or hanging the test suite.
+  const release = setTimeout(() => {
+    for (const response of responses) response.end("late response");
+  }, 3000);
+  const session = createBrowserSidecarSession({ timeoutMs: 100, pollMs: 10 });
+  t.after(async () => {
+    clearTimeout(release);
+    await session.stop();
+  });
+  const started = performance.now();
+  const result = await session.prepare(
+    {
+      url: "ws://127.0.0.1:8787",
+      directory: root,
+      probe: async () => false,
+      start: () => {
+        const child = startBrowserSidecar({
+          PATH: `${bin}:${process.env.PATH}`,
+          HOME: root,
+          VOICE_BROWSER_DIR: root,
+          TYPESAFE_API_KEY: "fixture-only",
+          SIDECAR_CHROME: chrome,
+          SIDECAR_CHROME_PROFILE: path.join(root, "profile"),
+          SIDECAR_TEST_CDP_URL: `http://127.0.0.1:${address.port}`,
+        });
+        t.after(() => rm(child.logPath));
+        return child;
+      },
+    },
+    async () => true,
+  );
+  assert.ok(responses.size > 0, "the script reached the stalled HTTP endpoint");
+  assert.match(result.notice ?? "", /controller did not answer in time.*Log:/);
+  assert.ok(
+    performance.now() - started < 2500,
+    "cleanup must not wait for the stalled HTTP response",
+  );
 });

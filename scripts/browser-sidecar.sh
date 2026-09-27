@@ -75,7 +75,9 @@ chrome_pid=$!
 
 ready=
 for _ in $(seq 1 50); do
-  if curl -sf "$cdp_url/json/version" >/dev/null; then
+  # Bash defers TERM while a foreground command runs. Bound each request so
+  # Pi can stop this script even if DevTools accepts HTTP but never responds.
+  if curl --max-time 1 -sf "$cdp_url/json/version" >/dev/null; then
     ready=1
     break
   fi

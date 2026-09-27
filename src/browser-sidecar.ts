@@ -30,8 +30,13 @@ export function isSidecarUrl(value: string): boolean {
   const loopback = loopbackUrl(value, "ws:");
   if (!loopback) return false;
   const url = new URL(loopback);
+  // The script's voice-browser listens on IPv4 loopback, not ::1.
   return (
-    url.port === "8787" && url.pathname === "/" && !url.search && !url.hash
+    url.hostname !== "[::1]" &&
+    url.port === "8787" &&
+    url.pathname === "/" &&
+    !url.search &&
+    !url.hash
   );
 }
 

@@ -105,7 +105,7 @@ values set in Pi's environment.
 ### Browser sidecar
 
 Set `VOICE_BROWSER_DIR` to an installed voice-browser checkout to enable the
-offer. When no controller answers on loopback port 8787, `/live browser` asks
+offer. When no controller answers at `ws://127.0.0.1:8787` (or `localhost`), `/live browser` asks
 before starting Chrome and third-party voice-browser code with your TypeSafe
 key. It waits up to about 15 seconds for the controller before starting the
 voice call. Declining keeps today's externally managed browser behavior and
