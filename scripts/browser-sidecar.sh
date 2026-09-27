@@ -1,7 +1,8 @@
 #!/bin/bash
 # Starts a visible Chrome with its own profile and voice-browser attached to it
 # over DevTools, for `/live browser`. Then start Pi in another terminal with the
-# same key, from this checkout (or elsewhere with -e <pi-live checkout>/index.ts):
+# same key, from the trusted root of this checkout (elsewhere, add
+# -e <pi-live checkout>/index.ts):
 #   PI_LIVE_BROWSER_CDP=http://127.0.0.1:9333 pi
 #
 # Only this script reads these; Pi reads the key from its own environment.

@@ -64,10 +64,11 @@ Pi Live is checked on macOS arm64 with Node 22.19.0 or later, Pi 0.87.1 and
 
 2. Give Pi an OpenAI API key for its `openai` provider, in Pi's credential store
    or as `OPENAI_API_KEY`. Calls are billed to that key.
-3. Start Pi with the extension: `pi -e /path/to/pi-live/index.ts`. Pi started
-   inside this checkout loads it through `.pi/settings.json` once you trust the
-   project, so `-e` is not needed there. Loading it does nothing until you use
-   `/live`; Pi elsewhere without `-e` is unchanged.
+3. Start Pi in this checkout's root folder with `pi`. Once you trust the
+   project, Pi loads the extension through `.pi/settings.json`. Elsewhere, run
+   `pi -e /path/to/pi-live/index.ts`. Loading it does nothing until you use
+   `/live`. To load a different copy with `-e` from this root, add
+   `--no-approve`; two copies of Pi Live make Pi exit.
 4. Run `/live setup` once. After you confirm, it creates
    `~/.local/state/pi-live`, private to your account, checks that it is on a
    local disk, and records it in `setup.json` there. Calls refuse with
@@ -164,7 +165,8 @@ switches or opens a tab, quick commands still act on voice-browser's tab, so
   the `active.lock` folder. Behind an HTTPS proxy this happens after every
   call. Pi Live never automatically recovers a retained lock; normal confirmed
   shutdown removes the call's own lock.
-- **Going back:** start Pi without `-e` to stop using Pi Live. To use an earlier
+- **Going back:** start Pi outside this checkout's root without `-e`, or with
+  `--no-approve`, to stop using Pi Live. To use an earlier
   version, check out its tag and restore dependencies as in step 1. Before
   v0.1.0 there is no earlier supported version.
 
