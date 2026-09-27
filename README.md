@@ -114,9 +114,9 @@ controller endpoint, or no interactive confirmation UI means no offer or start.
 An already answering controller is always reused, without a prompt or restart.
 
 The sidecar keeps its Chrome window, logins, tabs and current page across calls,
-`/live stop` and voice ending. The end of the Pi session (quitting Pi, `/new`,
-`/resume`, `/fork` or `/reload`) stops both processes if this session started
-them, forcing them after about 5 seconds if they do not stop on their own. A Pi
+`/live stop` and voice ending. The end of the Pi session, not only quitting Pi
+(see **Browser sidecar** in [CONTEXT.md](CONTEXT.md)), stops both processes if
+this session started them, killing any still running after about 5 seconds. A Pi
 crash leaves them running; the next Pi session reuses them without taking
 ownership. Several Pi sessions can share a controller, but the session that
 started it stops it on exit. There is no coordination between sessions.
@@ -124,8 +124,9 @@ started it stops it on exit. There is no coordination between sessions.
 Startup failures give one browser-mode notice naming the cause and the private
 log file, stop what was started, and let the voice call continue with the
 existing controller/Pi fallback behavior. Sidecar output goes to that log rather
-than the Pi terminal. A sidecar's log is deleted when it stops cleanly and kept
-in the host's temporary directory after a failure or a forced stop.
+than the Pi terminal. A sidecar's log is deleted when it stops, unless a notice
+names it or the stop had to kill a process; kept logs stay in the host's
+temporary directory.
 
 `scripts/browser-sidecar.sh` starts Chrome and voice-browser together on one
 host: a visible Chrome with its own profile and DevTools at
