@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
 import {
   mkdir,
   mkdtemp,
@@ -203,27 +204,142 @@ test("the real script reports missing checkout, key and Chrome in a private log"
     assert.equal(sidecar.failure(), cause);
     assert.equal((await stat(sidecar.logPath)).mode & 0o777, 0o600);
     assert.ok((await readFile(sidecar.logPath, "utf8")).length > 0);
+    // A notice names the log, so its stop keeps it; later stops share that.
+    await sidecar.stop({ keepLog: true });
     await sidecar.stop();
-    await sidecar.stop();
+    await stat(sidecar.logPath);
   }
+  // Without a notice, even a failed sidecar's log is deleted.
+  const unnamed = startBrowserSidecar({
+    PATH: process.env.PATH,
+    HOME: root,
+    VOICE_BROWSER_DIR: path.join(root, "missing"),
+  });
+  t.after(() => rm(unnamed.logPath, { force: true }));
+  await waitUntil(() => !!unnamed.failure(), "script exit");
+  await unnamed.stop();
+  await assert.rejects(stat(unnamed.logPath), { code: "ENOENT" });
+});
+
+// The real script with fake Chrome, voice-browser and curl, so no fixed
+// sidecar port or real Chrome is touched. Each fake records its PID.
+async function scriptFixture(
+  root: string,
+  bodies: { chrome?: string; server?: string; curl?: string } = {},
+) {
+  await mkdir(path.join(root, "src"));
+  const serverPid = path.join(root, "server.pid");
+  await writeFile(
+    path.join(root, "src/server.js"),
+    `require("node:fs").writeFileSync(${JSON.stringify(serverPid)}, process.pid + "\\n");\n` +
+      (bodies.server ?? "setInterval(() => {}, 1000);\n"),
+  );
+  const bin = path.join(root, "bin");
+  await mkdir(bin);
+  await writeFile(
+    path.join(bin, "curl"),
+    bodies.curl ?? "#!/bin/sh\nexit 7\n",
+    {
+      mode: 0o755,
+    },
+  );
+  const chrome = path.join(root, "chrome");
+  const chromePid = path.join(root, "chrome.pid");
+  await writeFile(
+    chrome,
+    `#!/bin/bash\necho $$ > '${chromePid}'\n${bodies.chrome ?? "exec sleep 30\n"}`,
+    { mode: 0o755 },
+  );
+  const pid = async (file: string, name: string) => {
+    await waitUntil(
+      () => existsSync(file) && readFileSync(file, "utf8").endsWith("\n"),
+      `${name} start`,
+    );
+    return Number(readFileSync(file, "utf8").trim());
+  };
+  return {
+    environment: {
+      PATH: `${bin}:${process.env.PATH}`,
+      HOME: root,
+      VOICE_BROWSER_DIR: root,
+      TYPESAFE_API_KEY: "fixture-only",
+      SIDECAR_CHROME: chrome,
+      SIDECAR_CHROME_PROFILE: path.join(root, "profile"),
+    },
+    chromePid: () => pid(chromePid, "fake Chrome"),
+    serverPid: () => pid(serverPid, "fake voice-browser"),
+  };
+}
+
+function running(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// DevTools answers at once, so the script goes on to start voice-browser.
+const READY_CURL = "#!/bin/sh\nexit 0\n";
+
+test("a clean stop runs the script's cleanup and deletes the log", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "pi-live-sidecar-stop-"));
+  t.after(() => rm(root, { recursive: true }));
+  const fixture = await scriptFixture(root, { curl: READY_CURL });
+  const sidecar = startBrowserSidecar(fixture.environment);
+  t.after(async () => {
+    await sidecar.stop();
+    await rm(sidecar.logPath, { force: true });
+  });
+  const pids = [await fixture.chromePid(), await fixture.serverPid()];
+  await sidecar.stop();
+  assert.deepEqual(pids.filter(running), []);
+  await assert.rejects(stat(sidecar.logPath), { code: "ENOENT" });
+});
+
+test("a stop that stalls is forced within its bound and keeps the log", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "pi-live-sidecar-stall-"));
+  t.after(() => rm(root, { recursive: true }));
+  // Chrome and voice-browser both ignore SIGTERM, so without the bound the
+  // script's cleanup would wait for them forever.
+  const fixture = await scriptFixture(root, {
+    curl: READY_CURL,
+    chrome: "trap '' TERM\nexec sleep 30\n",
+    server: 'process.on("SIGTERM", () => {});\nsetInterval(() => {}, 1000);\n',
+  });
+  const sidecar = startBrowserSidecar(fixture.environment, { stopSeconds: 1 });
+  const pids: number[] = [];
+  t.after(async () => {
+    for (const pid of pids.filter(running)) process.kill(pid, "SIGKILL");
+    await sidecar.stop();
+    await rm(sidecar.logPath, { force: true });
+  });
+  pids.push(await fixture.chromePid(), await fixture.serverPid());
+  let timer: NodeJS.Timeout | undefined;
+  const stopped = await Promise.race([
+    sidecar.stop().then(() => true),
+    new Promise<boolean>((resolve) => {
+      timer = setTimeout(resolve, 3_000, false);
+    }),
+  ]);
+  clearTimeout(timer);
+  assert.equal(stopped, true, "stop must not wait for stalled children");
+  await waitUntil(() => pids.every((pid) => !running(pid)), "children killed");
+  assert.match(
+    await readFile(sidecar.logPath, "utf8"),
+    /forced to stop after 1s/,
+  );
 });
 
 test("startup cleanup finishes when Chrome DevTools stalls an HTTP request", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "pi-live-stalled-cdp-"));
   t.after(() => rm(root, { recursive: true }));
-  await mkdir(path.join(root, "src"));
-  await writeFile(path.join(root, "src/server.js"), "process.exit(1);\n");
-  const chrome = path.join(root, "chrome");
-  await writeFile(chrome, "#!/bin/sh\nexec sleep 30\n", { mode: 0o755 });
-  const bin = path.join(root, "bin");
-  await mkdir(bin);
-  // Redirect only the URL, preserving the production curl flags. No fixed
-  // sidecar port or real Chrome is used by the unit suite.
-  await writeFile(
-    path.join(bin, "curl"),
-    '#!/bin/bash\nargs=("$@")\nargs[${#args[@]}-1]="$SIDECAR_TEST_CDP_URL"\nexec /usr/bin/curl "${args[@]}"\n',
-    { mode: 0o755 },
-  );
+  // Redirect only the URL, preserving the production curl flags.
+  const fixture = await scriptFixture(root, {
+    server: "process.exit(1);\n",
+    curl: '#!/bin/bash\nargs=("$@")\nargs[${#args[@]}-1]="$SIDECAR_TEST_CDP_URL"\nexec /usr/bin/curl "${args[@]}"\n',
+  });
   const responses = new Set<ServerResponse>();
   const server = createServer((_request, response) => responses.add(response));
   t.after(() => {
@@ -251,12 +367,7 @@ test("startup cleanup finishes when Chrome DevTools stalls an HTTP request", asy
       probe: async () => false,
       start: () => {
         const child = startBrowserSidecar({
-          PATH: `${bin}:${process.env.PATH}`,
-          HOME: root,
-          VOICE_BROWSER_DIR: root,
-          TYPESAFE_API_KEY: "fixture-only",
-          SIDECAR_CHROME: chrome,
-          SIDECAR_CHROME_PROFILE: path.join(root, "profile"),
+          ...fixture.environment,
           SIDECAR_TEST_CDP_URL: `http://127.0.0.1:${address.port}`,
         });
         t.after(() => rm(child.logPath));

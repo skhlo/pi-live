@@ -1,12 +1,15 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { closeSync, openSync, readFileSync } from "node:fs";
+import { closeSync, openSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { loopbackUrl } from "./browser.ts";
 
 export const SIDECAR_CDP = "http://127.0.0.1:9333";
+const STOP_SECONDS = 5;
+// The script writes this when it had to kill a child that outlasted the bound.
+const FORCED_MARKER = "browser sidecar: forced to stop";
 export const SIDECAR_PROMPT = "Start the browser sidecar?";
 export const SIDECAR_DISCLOSURE =
   "Starts Chrome and third-party voice-browser code with your TypeSafe key. Both run until this Pi session ends, including after voice stops. A Pi crash leaves them running for the next session to reuse.";
@@ -15,7 +18,12 @@ export interface BrowserSidecar {
   logPath: string;
   /** Undefined while running; a fixed, non-secret cause after exit. */
   failure(): string | undefined;
-  stop(): Promise<void>;
+  /**
+   * Ends the sidecar within a bounded time. The log is deleted unless a notice
+   * names it (`keepLog`) or the stop had to kill. The first call's options win;
+   * later calls share its result.
+   */
+  stop(options?: { keepLog?: boolean }): Promise<void>;
 }
 
 export interface BrowserSidecarSetup {
@@ -86,13 +94,23 @@ function exitCause(logPath: string): string {
   return "browser sidecar exited early";
 }
 
+function forcedStop(logPath: string): boolean {
+  try {
+    return readFileSync(logPath, "utf8").includes(FORCED_MARKER);
+  } catch {
+    return false;
+  }
+}
+
 /** The shell script alone owns the Chrome and voice-browser processes. */
 export function startBrowserSidecar(
   environment: NodeJS.ProcessEnv,
+  options: { stopSeconds?: number } = {},
 ): BrowserSidecar {
   const logPath = path.join(tmpdir(), `pi-live-browser-${randomUUID()}.log`);
+  const stopSeconds = options.stopSeconds ?? STOP_SECONDS;
   let failure: string | undefined;
-  let stop = async (): Promise<void> => {};
+  let stop = async (_options: { keepLog?: boolean }): Promise<void> => {};
   let fd: number | undefined;
   try {
     fd = openSync(logPath, "wx", 0o600);
@@ -100,7 +118,8 @@ export function startBrowserSidecar(
       "/bin/bash",
       [path.join(import.meta.dirname, "../scripts/browser-sidecar.sh")],
       {
-        env: environment,
+        env: { ...environment, SIDECAR_STOP_SECONDS: String(stopSeconds) },
+        // Pi's process group, so terminal signals still reach the sidecar.
         stdio: ["ignore", fd, fd],
       },
     );
@@ -115,17 +134,37 @@ export function startBrowserSidecar(
       });
     });
     let stopping: Promise<void> | undefined;
-    stop = () =>
+    stop = ({ keepLog }) =>
       (stopping ??= (async () => {
+        // The script bounds its own cleanup; killing it is the last resort.
+        let killed = false;
+        const lastResort = setTimeout(
+          () => {
+            killed = true;
+            child.kill("SIGKILL");
+          },
+          (stopSeconds + 3) * 1000,
+        );
         if (!failure) child.kill("SIGTERM");
         await exited;
+        clearTimeout(lastResort);
+        if (keepLog || killed || forcedStop(logPath)) return;
+        try {
+          rmSync(logPath, { force: true });
+        } catch {
+          // A leftover private log is harmless; stopping must not fail on it.
+        }
       })());
   } catch {
     failure = "could not create the sidecar log or start its script";
   } finally {
     if (fd !== undefined) closeSync(fd);
   }
-  return { logPath, failure: () => failure, stop: () => stop() };
+  return {
+    logPath,
+    failure: () => failure,
+    stop: (stopOptions = {}) => stop(stopOptions),
+  };
 }
 
 /** One owner per Pi session. Calls may come and go without stopping Chrome. */
@@ -185,7 +224,7 @@ export function createBrowserSidecarSession(
       }
       const cause =
         sidecar.failure() ?? "browser controller did not answer in time";
-      await (stopping ?? sidecar.stop());
+      await (stopping ?? sidecar.stop({ keepLog: true }));
       if (owned === sidecar) owned = undefined;
       return {
         owned: false,

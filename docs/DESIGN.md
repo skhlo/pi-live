@@ -195,14 +195,22 @@ stop operations for tests. The package payload includes the script.
 Sidecar ownership belongs to the Pi binding, independent of voice ownership.
 Voice stop and later calls keep it running and preserve the current browser.
 With no configured `PI_LIVE_BROWSER_CDP`, an owned running sidecar supplies
-`http://127.0.0.1:9333` for `live_browser`. `session_shutdown` signals the script
-and awaits its exit; the script's traps stop and await both children. Shutdown
-is idempotent and cancels pending readiness or consent without a late launch.
-The script bounds each DevTools HTTP probe to one second, so a stalled response
-cannot indefinitely delay its signal trap or Pi's startup failure handling.
-Crash cleanup is intentionally absent: a later session reuses the controller
-and does not own it. Multiple Pi sessions are not coordinated; the owner stops
-the shared sidecar when it exits. Logs remain in the temporary directory.
+`http://127.0.0.1:9333` for `live_browser`. `session_shutdown`, which Pi emits
+for every session ending listed under **Browser sidecar** in CONTEXT.md, signals
+the script and awaits its exit. Pi awaits shutdown handlers without a timeout,
+so the script bounds its own cleanup: it signals both children, waits up to
+`SIDECAR_STOP_SECONDS` (five by default), then kills any still running and notes
+that in its log. As a last resort Pi Live kills the script itself three seconds
+after that bound. The script stays in Pi's process group, so terminal signals
+such as Ctrl-C during a stalled quit still reach Chrome and voice-browser.
+Shutdown is idempotent and cancels pending readiness or consent without a late
+launch. The script bounds each DevTools HTTP probe to one second, so a stalled
+response cannot indefinitely delay its signal trap or Pi's startup failure
+handling. Crash cleanup is intentionally absent: a later session reuses the
+controller and does not own it. Multiple Pi sessions are not coordinated; the
+owner stops the shared sidecar when it exits. A stop deletes the sidecar's log
+unless a notice names it (startup failures and readiness timeouts) or the stop
+had to kill a process.
 
 Browser mode (#16) keeps client delegation and chooses a destination per
 request. `/live browser` selects it for the next call only; the call keeps its

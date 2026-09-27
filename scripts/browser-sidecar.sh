@@ -16,6 +16,7 @@
 # SIDECAR_CHROME          Chrome binary (default: Google Chrome on macOS)
 # SIDECAR_CHROME_PROFILE  Chrome profile
 #                         (default: ${XDG_CACHE_HOME:-~/.cache}/pi-live/browser-profile)
+# SIDECAR_STOP_SECONDS    how long stopping waits before killing (default: 5)
 # Ctrl+C stops voice-browser and Chrome.
 set -euo pipefail
 
@@ -57,12 +58,28 @@ chrome="${SIDECAR_CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google 
 }
 profile="${SIDECAR_CHROME_PROFILE:-${XDG_CACHE_HOME:-$HOME/.cache}/pi-live/browser-profile}"
 mkdir -p "$profile"
+stop_seconds="${SIDECAR_STOP_SECONDS:-5}"
+[[ "$stop_seconds" =~ ^[1-9][0-9]*$ ]] || stop_seconds=5
 chrome_pid=
 voice_browser_pid=
 cleanup() {
-  # Wait for both children so the caller can await this script's shutdown.
-  kill $voice_browser_pid $chrome_pid 2>/dev/null || true
-  wait $voice_browser_pid $chrome_pid 2>/dev/null || true
+  # Stop both children and wait for them, so the caller can await this
+  # script's shutdown. Kill any that outlast the bound; Pi's quit waits here.
+  local pids=()
+  [ -z "$voice_browser_pid" ] || pids+=("$voice_browser_pid")
+  [ -z "$chrome_pid" ] || pids+=("$chrome_pid")
+  # macOS /bin/bash 3.2 treats an empty "${pids[@]}" as unbound under set -u.
+  [ "${#pids[@]}" -gt 0 ] || return 0
+  kill "${pids[@]}" 2>/dev/null || true
+  for _ in $(seq 1 $((stop_seconds * 10))); do
+    kill -0 "${pids[@]}" 2>/dev/null || break
+    sleep 0.1
+  done
+  if kill -0 "${pids[@]}" 2>/dev/null; then
+    echo "browser sidecar: forced to stop after ${stop_seconds}s" >&2
+    kill -9 "${pids[@]}" 2>/dev/null || true
+  fi
+  wait "${pids[@]}" 2>/dev/null || true
 }
 trap cleanup EXIT
 trap 'exit 130' INT

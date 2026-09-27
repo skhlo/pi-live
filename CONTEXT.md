@@ -62,9 +62,10 @@ _Avoid_: Multi-step command
 
 **Browser sidecar**:
 The Chrome and voice-browser processes launched together by
-`scripts/browser-sidecar.sh`. Pi Live offers to start one after confirmation
-and owns it until Pi session shutdown, across voice calls. A controller already
-running is reused without taking ownership. A Pi crash leaves the sidecar running.
+`scripts/browser-sidecar.sh`. Pi Live offers to start one after confirmation and
+owns it until Pi session shutdown (quitting Pi, `/new`, `/resume`, `/fork` or
+`/reload`), across voice calls. A controller already running is reused without
+taking ownership. A Pi crash leaves the sidecar running.
 
 **Browser delegation**:
 A single-step voice request in a browser-mode call, sent to a separately running
