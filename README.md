@@ -225,16 +225,19 @@ same-directory rename. That does **not** guarantee that every concurrent change
 is preserved: another writer can still win after the final observation. A deterministic regression covers a competing update observed before the final
 comparison; the design makes no general compare-and-swap claim.
 
-## Codex hand-off to Pi
+## Codex handoff to Pi
 
 Separate from Pi Live, Codex (including Codex voice) running in this checkout
-can hand requests to Pi. The repository skill `.agents/skills/pi-handoff` tells
-Codex to run `pi -p --session-id codex-voice --thinking low '<request>'` and
-relay Pi's reply; the `codex-voice` Pi session carries context across hand-offs.
-Codex loads both the skill and `.codex/rules/pi-handoff.rules` only for a
-trusted project. That rule lets the command run outside Codex's sandbox without
-an approval, so trusting this checkout in Codex lets any Codex request start Pi
-with Pi's full permissions. Pi has no `live_browser` tool in these runs.
+can hand requests to Pi: the repository skill `.agents/skills/pi-handoff` runs
+Pi in print mode in its own `codex-handoff` Pi session and relays Pi's reply.
+
+Codex loads that skill in any checkout, but loads `.codex/rules/pi-handoff.rules`
+only when it trusts the project. The rule lets the skill's command, with any
+trailing arguments, run outside Codex's sandbox without an approval, so trusting
+this checkout in Codex lets Codex start Pi with Pi's full permissions. Without
+the rule, the sandboxed Pi fails to start and Codex asks for escalation. After a
+handoff, `pi -c` in this checkout resumes the `codex-handoff` session, because
+it is the newest.
 
 ## Development
 
