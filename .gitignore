@@ -9,3 +9,4 @@ preview/
 .pi/npm/
 .pi/git/
 .pi/*.lock
+.env

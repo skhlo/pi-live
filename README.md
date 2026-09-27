@@ -91,21 +91,25 @@ browser controller and everything else to Pi
 [voice-browser](https://github.com/moritzkremb/jev-voice-browser) running
 separately on the same host (for example `npm start` in its checkout). Pi Live
 connects to `ws://127.0.0.1:8787`; set `PI_LIVE_BROWSER_URL` to another `ws://`
-loopback address if needed. Pi needs `TYPESAFE_API_KEY` (or `JEV_API_KEY`) in its
-environment for routing. When voice-browser drives a Chrome started with remote
-debugging, set `PI_LIVE_BROWSER_CDP` (for example `http://127.0.0.1:9333`) to give
-Pi a `live_browser` tool on that Chrome.
+loopback address if needed. Pi needs `TYPESAFE_API_KEY` (or `JEV_API_KEY`) for
+routing. When voice-browser drives a Chrome started with remote debugging, set
+`PI_LIVE_BROWSER_CDP` (for example `http://127.0.0.1:9333`) to give Pi a
+`live_browser` tool on that Chrome. These four settings can live in a
+gitignored `.env` at the checkout's root, as in `.env.example`; Pi Live reads
+it when `/live browser` starts, reads no other variables from it, and prefers
+values set in Pi's environment.
 
 `scripts/browser-sidecar.sh` starts Chrome and voice-browser together on one
 host: a visible Chrome with its own profile and DevTools at
 `http://127.0.0.1:9333`, and voice-browser attached to it on port 8787 (both
 ports fixed). Set `VOICE_BROWSER_DIR` to a voice-browser checkout with its
 dependencies installed (checked with commit `198a076`), and provide the key as
-`TYPESAFE_API_KEY`, `JEV_API_KEY` or an env file named by `SIDECAR_KEY_FILE`.
+`TYPESAFE_API_KEY`, `JEV_API_KEY` or an env file named by `SIDECAR_KEY_FILE`
+(by default the checkout's `.env`).
 The script uses Google Chrome's macOS path unless `SIDECAR_CHROME` names another
 binary, and keeps its profile in `~/.cache/pi-live/browser-profile` unless
-`SIDECAR_CHROME_PROFILE` names another. Then start Pi with the key in its own
-environment and `PI_LIVE_BROWSER_CDP=http://127.0.0.1:9333`. Ctrl+C stops
+`SIDECAR_CHROME_PROFILE` names another. Then start Pi with the key and
+`PI_LIVE_BROWSER_CDP=http://127.0.0.1:9333` in its environment or `.env`. Ctrl+C stops
 voice-browser and Chrome.
 
 For each handoff, Pi Live asks TypeSafe's Jev model what kind of work the user's

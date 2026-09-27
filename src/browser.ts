@@ -5,6 +5,9 @@
 // outcome per request. It never retries or rolls back browser actions.
 // A router asks Jev beforehand what kind of work a request is.
 
+import { readFileSync } from "node:fs";
+import { parseEnv } from "node:util";
+
 export const DEFAULT_BROWSER_URL = "ws://127.0.0.1:8787";
 const RESULT_TIMEOUT_MS = 20_000;
 const PAGE_SETTLE_MS = 3_000;
@@ -90,6 +93,39 @@ export function loopbackUrl(
   )
     return undefined;
   return parsed.href.replace(/\/$/, "");
+}
+
+const BROWSER_VARIABLES = [
+  "PI_LIVE_BROWSER_URL",
+  "PI_LIVE_BROWSER_CDP",
+  "TYPESAFE_API_KEY",
+  "JEV_API_KEY",
+] as const;
+export type BrowserVariable = (typeof BROWSER_VARIABLES)[number];
+
+/**
+ * Browser-mode settings from the environment, falling back to an optional
+ * env file (the checkout's `.env`) for variables the environment leaves unset.
+ * Reads only the browser-mode variables and never changes `process.env`.
+ */
+export function browserEnvironment(
+  environment: Readonly<Record<string, string | undefined>>,
+  envFile: string,
+): { values: Partial<Record<BrowserVariable, string>>; notice?: string } {
+  let file: Record<string, string | undefined> = {};
+  let notice: string | undefined;
+  try {
+    file = parseEnv(readFileSync(envFile, "utf8"));
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT"))
+      notice = `could not read ${envFile}, so its settings are ignored.`;
+  }
+  const values: Partial<Record<BrowserVariable, string>> = {};
+  for (const name of BROWSER_VARIABLES) {
+    const value = environment[name]?.trim() || file[name]?.trim();
+    if (value) values[name] = value;
+  }
+  return notice ? { values, notice } : { values };
 }
 
 /** The controller URL: a plain ws:// loopback address, by default port 8787. */

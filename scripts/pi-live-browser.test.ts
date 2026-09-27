@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
 import {
   browserControllerUrl,
   browserDevToolsUrl,
+  browserEnvironment,
   createBrowserController,
   createBrowserRouter,
   type BrowserSocketEvents,
@@ -61,6 +64,54 @@ const release = (id: string) => ({
 });
 
 const settled = () => new Promise((resolve) => setImmediate(resolve));
+
+test("browser settings fall back to the env file, variable by variable", async () => {
+  const folder = await mkdtemp(path.join(tmpdir(), "pi-live-env-"));
+  const envFile = path.join(folder, ".env");
+  try {
+    assert.deepEqual(browserEnvironment({}, envFile), { values: {} });
+    await writeFile(
+      envFile,
+      [
+        "# browser mode",
+        'TYPESAFE_API_KEY="file-key"',
+        "PI_LIVE_BROWSER_CDP=http://127.0.0.1:9333",
+        "PI_LIVE_BROWSER_URL=ws://127.0.0.1:9000",
+        "OPENAI_API_KEY=not-read",
+        "",
+      ].join("\n"),
+    );
+    assert.deepEqual(
+      browserEnvironment(
+        {
+          PI_LIVE_BROWSER_URL: "ws://127.0.0.1:8787",
+          PI_LIVE_BROWSER_CDP: " ",
+          JEV_API_KEY: "shell-jev",
+        },
+        envFile,
+      ),
+      {
+        values: {
+          PI_LIVE_BROWSER_URL: "ws://127.0.0.1:8787",
+          PI_LIVE_BROWSER_CDP: "http://127.0.0.1:9333",
+          TYPESAFE_API_KEY: "file-key",
+          JEV_API_KEY: "shell-jev",
+        },
+      },
+    );
+    const unreadable = browserEnvironment(
+      { TYPESAFE_API_KEY: "shell-key" },
+      folder,
+    );
+    assert.deepEqual(unreadable.values, { TYPESAFE_API_KEY: "shell-key" });
+    assert.match(
+      unreadable.notice ?? "",
+      /could not read .*so its settings are ignored/,
+    );
+  } finally {
+    await rm(folder, { recursive: true });
+  }
+});
 
 test("browser endpoints are plain loopback addresses", () => {
   assert.equal(browserControllerUrl(undefined), "ws://127.0.0.1:8787");
