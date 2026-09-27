@@ -225,6 +225,22 @@ same-directory rename. That does **not** guarantee that every concurrent change
 is preserved: another writer can still win after the final observation. A deterministic regression covers a competing update observed before the final
 comparison; the design makes no general compare-and-swap claim.
 
+## Codex browser server
+
+Separate from Pi Live, `src/mcp.ts` is a stdio MCP server that gives Codex,
+including Codex voice, one `browser` tool with the same actions and refusals as
+`live_browser`. When Codex trusts this checkout, `.codex/config.toml` starts it
+and the `.agents/skills/voice-browser` skill tells Codex how to use it in voice
+conversations; its tool description asks Codex to prefer it there over other
+browser or computer-use tools. It needs no new dependencies.
+
+It drives the Chrome at `PI_LIVE_BROWSER_CDP` (from the environment, which the
+Codex config forwards, or the checkout's `.env`), or else the browser sidecar's
+at `http://127.0.0.1:9333`. It never starts a browser: when nothing answers, the
+tool says so and names `scripts/browser-sidecar.sh`. It does not use Jev,
+TypeSafe or the voice-browser controller. Page content it returns goes to
+OpenAI through Codex.
+
 ## Development
 
 The compatibility baseline is Node >=22.19.0, pnpm 11.8.0, Pi/TUI 0.87.1, and

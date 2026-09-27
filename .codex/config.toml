@@ -1,0 +1,7 @@
+# Codex loads this only when it trusts the checkout. The browser server drives
+# the Chrome at PI_LIVE_BROWSER_CDP (from the environment or the checkout's
+# .env), or else the browser sidecar's; see src/mcp.ts.
+[mcp_servers.pi_live_browser]
+command = "node"
+args = ["src/mcp.ts"]
+env_vars = ["PI_LIVE_BROWSER_CDP"]

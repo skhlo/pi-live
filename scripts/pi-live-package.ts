@@ -81,6 +81,7 @@ export const PI_LIVE_PAYLOAD_SOURCE_FILES = [
   "src/browser.ts",
   "src/compatibility.ts",
   "src/live.ts",
+  "src/mcp.ts",
   "src/pi-tui.d.ts",
   "src/preferences.ts",
 ] as const;
