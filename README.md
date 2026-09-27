@@ -64,8 +64,11 @@ Pi Live is checked on macOS arm64 with Node 22.19.0 or later, Pi 0.87.1 and
 
 2. Give Pi an OpenAI API key for its `openai` provider, in Pi's credential store
    or as `OPENAI_API_KEY`. Calls are billed to that key.
-3. Start Pi with the extension: `pi -e /path/to/pi-live/index.ts`. Loading it
-   does nothing until you use `/live`; Pi without `-e` is unchanged.
+3. Start Pi in this checkout's root folder with `pi`. Once you trust the
+   project, Pi loads the extension through `.pi/settings.json`. Elsewhere, run
+   `pi -e /path/to/pi-live/index.ts`. Loading it does nothing until you use
+   `/live`. To load a different copy with `-e` from this root, add
+   `--no-approve`; two copies of Pi Live make Pi exit.
 4. Run `/live setup` once. After you confirm, it creates
    `~/.local/state/pi-live`, private to your account, checks that it is on a
    local disk, and records it in `setup.json` there. Calls refuse with
@@ -88,21 +91,25 @@ browser controller and everything else to Pi
 [voice-browser](https://github.com/moritzkremb/jev-voice-browser) running
 separately on the same host (for example `npm start` in its checkout). Pi Live
 connects to `ws://127.0.0.1:8787`; set `PI_LIVE_BROWSER_URL` to another `ws://`
-loopback address if needed. Pi needs `TYPESAFE_API_KEY` (or `JEV_API_KEY`) in its
-environment for routing. When voice-browser drives a Chrome started with remote
-debugging, set `PI_LIVE_BROWSER_CDP` (for example `http://127.0.0.1:9333`) to give
-Pi a `live_browser` tool on that Chrome.
+loopback address if needed. Pi needs `TYPESAFE_API_KEY` (or `JEV_API_KEY`) for
+routing. When voice-browser drives a Chrome started with remote debugging, set
+`PI_LIVE_BROWSER_CDP` (for example `http://127.0.0.1:9333`) to give Pi a
+`live_browser` tool on that Chrome. These four settings can live in a
+gitignored `.env` at the checkout's root, as in `.env.example`; Pi Live reads
+it when `/live browser` starts, reads no other variables from it, and prefers
+values set in Pi's environment.
 
 `scripts/browser-sidecar.sh` starts Chrome and voice-browser together on one
 host: a visible Chrome with its own profile and DevTools at
 `http://127.0.0.1:9333`, and voice-browser attached to it on port 8787 (both
 ports fixed). Set `VOICE_BROWSER_DIR` to a voice-browser checkout with its
 dependencies installed (checked with commit `198a076`), and provide the key as
-`TYPESAFE_API_KEY`, `JEV_API_KEY` or an env file named by `SIDECAR_KEY_FILE`.
+`TYPESAFE_API_KEY`, `JEV_API_KEY` or an env file named by `SIDECAR_KEY_FILE`
+(by default the checkout's `.env`).
 The script uses Google Chrome's macOS path unless `SIDECAR_CHROME` names another
 binary, and keeps its profile in `~/.cache/pi-live/browser-profile` unless
-`SIDECAR_CHROME_PROFILE` names another. Then start Pi with the key in its own
-environment and `PI_LIVE_BROWSER_CDP=http://127.0.0.1:9333`. Ctrl+C stops
+`SIDECAR_CHROME_PROFILE` names another. Then start Pi with the key and
+`PI_LIVE_BROWSER_CDP=http://127.0.0.1:9333` in its environment or `.env`. Ctrl+C stops
 voice-browser and Chrome.
 
 For each handoff, Pi Live asks TypeSafe's Jev model what kind of work the user's
@@ -162,7 +169,8 @@ switches or opens a tab, quick commands still act on voice-browser's tab, so
   the `active.lock` folder. Behind an HTTPS proxy this happens after every
   call. Pi Live never automatically recovers a retained lock; normal confirmed
   shutdown removes the call's own lock.
-- **Going back:** start Pi without `-e` to stop using Pi Live. To use an earlier
+- **Going back:** start Pi outside this checkout's root without `-e`, or with
+  `--no-approve`, to stop using Pi Live. To use an earlier
   version, check out its tag and restore dependencies as in step 1. Before
   v0.1.0 there is no earlier supported version.
 

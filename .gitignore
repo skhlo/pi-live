@@ -6,3 +6,7 @@ preview/
 *.tar
 *.tar.gz
 .DS_Store
+.pi/npm/
+.pi/git/
+.pi/*.lock
+.env

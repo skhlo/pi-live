@@ -37,6 +37,7 @@ import {
 import {
   browserControllerUrl,
   browserDevToolsUrl,
+  browserEnvironment,
   createBrowserController,
   createBrowserRouter,
   describePage,
@@ -4733,18 +4734,22 @@ export function createLiveDependencies(
     packageSources: configuredLivePackageSources,
     setup: () => setupLiveHome(),
     browser: () => {
-      const url = browserControllerUrl(process.env.PI_LIVE_BROWSER_URL);
+      const { values: env, notice } = browserEnvironment(
+        process.env,
+        path.join(import.meta.dirname, "..", ".env"),
+      );
+      const url = browserControllerUrl(env.PI_LIVE_BROWSER_URL);
       if (!url) return undefined;
-      const key =
-        process.env.TYPESAFE_API_KEY?.trim() || process.env.JEV_API_KEY?.trim();
-      const devToolsUrl = browserDevToolsUrl(process.env.PI_LIVE_BROWSER_CDP);
+      const key = env.TYPESAFE_API_KEY || env.JEV_API_KEY;
+      const devToolsUrl = browserDevToolsUrl(env.PI_LIVE_BROWSER_CDP);
       const notices = [
+        ...(notice ? [notice] : []),
         ...(key
           ? []
           : [
               "no TYPESAFE_API_KEY or JEV_API_KEY, so every request tries voice-browser first.",
             ]),
-        ...(process.env.PI_LIVE_BROWSER_CDP?.trim() && !devToolsUrl
+        ...(env.PI_LIVE_BROWSER_CDP && !devToolsUrl
           ? [
               "PI_LIVE_BROWSER_CDP is not an http:// loopback address, so Pi gets no browser tool.",
             ]
