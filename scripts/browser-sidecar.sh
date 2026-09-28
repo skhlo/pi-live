@@ -10,8 +10,9 @@
 # browser settings from the environment or the checkout's .env.
 # VOICE_BROWSER_DIR       voice-browser checkout with dependencies installed
 #                         (github.com/moritzkremb/jev-voice-browser)
-# TYPESAFE_API_KEY        Jev key (or JEV_API_KEY), from the environment or
-# SIDECAR_KEY_FILE        an env file holding one of them
+# TYPESAFE_API_KEY        Jev key (or JEV_API_KEY)
+# SIDECAR_KEY_FILE        env file for the settings above that the
+#                         environment leaves unset
 #                         (default: the checkout's .env, if present)
 # SIDECAR_CHROME          Chrome binary (default: Google Chrome on macOS)
 # SIDECAR_CHROME_PROFILE  Chrome profile
@@ -23,28 +24,32 @@ set -euo pipefail
 cdp_port=9333
 cdp_url="http://127.0.0.1:$cdp_port"
 
-voice_browser_dir="${VOICE_BROWSER_DIR:-}"
-[ -n "$voice_browser_dir" ] && [ -f "$voice_browser_dir/src/server.js" ] || {
-  echo "set VOICE_BROWSER_DIR to a voice-browser checkout" >&2
-  exit 1
-}
+key_file="${SIDECAR_KEY_FILE:-$(dirname "$0")/../.env}"
 
-# Reads NAME=value from an env file: optional `export`, spaces, quotes and a
+# Reads NAME=value from the env file: optional `export`, spaces, quotes and a
 # trailing ` # comment`.
-key_from_file() {
+setting_from_file() {
   sed -nE "s/^[[:space:]]*(export[[:space:]]+)?$1[[:space:]]*=[[:space:]]*//p" "$key_file" |
     head -n 1 | sed -E 's/[[:space:]]+#.*$//' | tr -d '"'"'"'\r' | sed 's/[[:space:]]*$//'
 }
 
+voice_browser_dir="${VOICE_BROWSER_DIR:-}"
+if [ -z "$voice_browser_dir" ] && [ -f "$key_file" ] && [ -r "$key_file" ]; then
+  voice_browser_dir="$(setting_from_file VOICE_BROWSER_DIR)"
+fi
+[ -n "$voice_browser_dir" ] && [ -f "$voice_browser_dir/src/server.js" ] || {
+  echo "set VOICE_BROWSER_DIR to a voice-browser checkout, in the environment or the env file" >&2
+  exit 1
+}
+
 key="${TYPESAFE_API_KEY:-${JEV_API_KEY:-}}"
-key_file="${SIDECAR_KEY_FILE:-$(dirname "$0")/../.env}"
 if [ -z "$key" ] && { [ -n "${SIDECAR_KEY_FILE:-}" ] || [ -e "$key_file" ]; }; then
   [ -f "$key_file" ] && [ -r "$key_file" ] || {
     echo "key file is not a readable file: $key_file" >&2
     exit 1
   }
-  key="$(key_from_file TYPESAFE_API_KEY)"
-  [ -n "$key" ] || key="$(key_from_file JEV_API_KEY)"
+  key="$(setting_from_file TYPESAFE_API_KEY)"
+  [ -n "$key" ] || key="$(setting_from_file JEV_API_KEY)"
 fi
 [ -n "$key" ] || {
   echo "set TYPESAFE_API_KEY or JEV_API_KEY, in the environment, the checkout's .env or SIDECAR_KEY_FILE" >&2

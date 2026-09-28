@@ -178,7 +178,22 @@ test("the real script reports missing checkout, key and Chrome in a private log"
   );
   const keyFile = path.join(root, ".env");
   await writeFile(keyFile, "");
-  for (const [settings, cause] of [
+  // Run by hand, the script finds the checkout in the env file as Pi Live does.
+  const checkoutFile = path.join(root, "checkout.env");
+  await writeFile(
+    checkoutFile,
+    `export VOICE_BROWSER_DIR="${root}" # checkout\n`,
+  );
+  // Each case's settings override the empty key file below.
+  const cases: Array<[Record<string, string>, string]> = [
+    [{ SIDECAR_KEY_FILE: checkoutFile }, "no TypeSafe key is configured"],
+    [
+      {
+        SIDECAR_KEY_FILE: checkoutFile,
+        VOICE_BROWSER_DIR: path.join(root, "missing"),
+      },
+      "voice-browser checkout is missing",
+    ],
     [
       { VOICE_BROWSER_DIR: path.join(root, "missing") },
       "voice-browser checkout is missing",
@@ -192,7 +207,8 @@ test("the real script reports missing checkout, key and Chrome in a private log"
       },
       "Chrome is missing",
     ],
-  ] as const) {
+  ];
+  for (const [settings, cause] of cases) {
     const sidecar = startBrowserSidecar({
       PATH: process.env.PATH,
       HOME: root,

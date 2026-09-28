@@ -67,6 +67,12 @@ owns it until Pi session shutdown (quitting Pi, `/new`, `/resume`, `/fork` or
 `/reload`), across voice calls. A controller already running is reused without
 taking ownership. A Pi crash leaves the sidecar running.
 
+**Codex browser server**:
+The MCP server in `src/mcp.ts` that gives Codex the `live_browser` actions and
+refusals as its `browser` tool, on the same Chrome. It never starts or owns a
+browser and plays no part in Pi Live calls.
+_Avoid_: Codex browser mode
+
 **Browser delegation**:
 A single-step voice request in a browser-mode call, sent to a separately running
 voice-browser controller instead of Pi. The controller decides and acts; voice

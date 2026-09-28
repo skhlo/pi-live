@@ -133,16 +133,16 @@ host: a visible Chrome with its own profile and DevTools at
 `http://127.0.0.1:9333`, and voice-browser attached to it on port 8787 (both
 ports fixed). Set `VOICE_BROWSER_DIR` to a voice-browser checkout with its
 dependencies installed (checked with commit `198a076`), and provide the key as
-`TYPESAFE_API_KEY`, `JEV_API_KEY` or an env file named by `SIDECAR_KEY_FILE`
-(by default the checkout's `.env`).
+`TYPESAFE_API_KEY` or `JEV_API_KEY`. Settings the environment leaves unset come
+from an env file named by `SIDECAR_KEY_FILE`, by default the checkout's `.env`.
 The script uses Google Chrome's macOS path unless `SIDECAR_CHROME` names another
 binary, and keeps its profile in `~/.cache/pi-live/browser-profile` unless
 `SIDECAR_CHROME_PROFILE` names another. Then start Pi with the key and
 `PI_LIVE_BROWSER_CDP=http://127.0.0.1:9333` in its environment or `.env`. Ctrl+C stops
 voice-browser and Chrome.
 
-The script also remains usable directly from a terminal. Set `VOICE_BROWSER_DIR`
-in that terminal's environment; the script itself reads only the key from `.env`.
+The script also remains usable directly from a terminal, with the same `.env`
+that Pi Live reads.
 
 ### Browser requests
 
@@ -224,6 +224,32 @@ The preference writer uses an optimistic read/compare/retry sequence and atomic
 same-directory rename. That does **not** guarantee that every concurrent change
 is preserved: another writer can still win after the final observation. A deterministic regression covers a competing update observed before the final
 comparison; the design makes no general compare-and-swap claim.
+
+## Codex browser server
+
+Separate from Pi Live, `src/mcp.ts` is a stdio MCP server that gives Codex,
+including Codex voice, one `browser` tool with the same actions and refusals as
+`live_browser`. When Codex trusts this checkout, `.codex/config.toml` starts it
+and the `.agents/skills/voice-browser` skill tells Codex how to use it in voice
+conversations; its tool description asks Codex to prefer it there over other
+browser or computer-use tools. It needs no new dependencies. Its calls skip
+Codex's approval review, which added seconds per call by voice, so the tool's
+refusals are the only guard. It runs one action at a time, and an action that
+takes more than 30 seconds is abandoned.
+
+It drives the Chrome at `PI_LIVE_BROWSER_CDP` (from the environment, which the
+Codex config forwards, or the checkout's `.env`), or else the one at
+`http://127.0.0.1:9333`. It never starts a browser. The browser sidecar provides
+that Chrome but also needs voice-browser and a TypeSafe key; without them, start
+Chrome with DevTools and its own profile:
+
+```sh
+open -na "Google Chrome" --args --remote-debugging-port=9333 \
+  --user-data-dir="$HOME/.cache/pi-live/browser-profile"
+```
+
+The server itself does not use Jev, TypeSafe or the voice-browser controller.
+Page content it returns goes to OpenAI through Codex.
 
 ## Development
 
