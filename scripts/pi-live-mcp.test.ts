@@ -290,7 +290,14 @@ function fakeChrome({ ignoreTerm = false } = {}) {
 // DevTools tabs the test sets: a count, or undefined when nothing answers.
 // misses makes that many listings fail first, as a slow reply does.
 function fakePages(tabs?: number) {
-  const state = { tabs, misses: 0, opened: 0, activated: [] as string[] };
+  const state = {
+    tabs,
+    misses: 0,
+    opened: 0,
+    activated: [] as string[],
+    // Makes the next activation fail as a cancel does.
+    cancelNext: false,
+  };
   const pages: DevToolsPages = {
     list: async () => {
       if (state.misses > 0) {
@@ -307,6 +314,10 @@ function fakePages(tabs?: number) {
       return "new";
     },
     activate: async (_url, id) => {
+      if (state.cancelNext) {
+        state.cancelNext = false;
+        throw new DOMException("cancelled", "AbortError");
+      }
       state.activated.push(id);
     },
   };
@@ -400,20 +411,78 @@ test("a Chrome whose starting action was cancelled is shown by the next one", as
     url: "http://127.0.0.1:9444",
     chrome: process.execPath,
     profile: path.join(root, "profile"),
-    // Its first tab appears only after the action is cancelled.
     launch: () => {
       launches++;
       return fakeChrome().chrome;
     },
     pages,
   });
+  // Its first tab appears only after the starting action is cancelled.
   const controller = new AbortController();
   setTimeout(() => controller.abort(), 50);
   await assert.rejects(starter.ensure(controller.signal));
-  state.tabs = 1;
-  await starter.ensure(new AbortController().signal);
+  // Its window was closed before it was shown: the new tab shows it, once.
+  state.tabs = 0;
+  const signal = new AbortController().signal;
+  await starter.ensure(signal);
+  await starter.ensure(signal);
   assert.equal(launches, 1);
+  assert.deepEqual(state.activated, ["new"]);
+});
+
+test("a Chrome is shown again when showing it was cancelled", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "pi-live-mcp-"));
+  t.after(() => rm(root, { recursive: true }));
+  const { state, pages } = fakePages();
+  const starter = createChromeStarter({
+    url: "http://127.0.0.1:9444",
+    chrome: process.execPath,
+    profile: path.join(root, "profile"),
+    launch: () => {
+      state.tabs = 1;
+      return fakeChrome().chrome;
+    },
+    pages,
+  });
+  const signal = new AbortController().signal;
+  state.cancelNext = true;
+  await assert.rejects(starter.ensure(signal));
+  await starter.ensure(signal);
+  await starter.ensure(signal);
   assert.deepEqual(state.activated, ["tab0"]);
+});
+
+test("DevTools replies are read as the browser tool reads them", async (t) => {
+  const page = (id: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    type: "page",
+    title: "",
+    url: "about:blank",
+    webSocketDebuggerUrl: `ws://127.0.0.1:1/devtools/page/${id}`,
+    ...extra,
+  });
+  const listener = createHttpServer((request, response) => {
+    if (request.url === "/json/list")
+      response.end(
+        JSON.stringify([
+          page("devtools", { url: "devtools://devtools/inspector.html" }),
+          page("no-socket", { webSocketDebuggerUrl: undefined }),
+          page("tab"),
+        ]),
+      );
+    else if (request.url?.startsWith("/json/new"))
+      response.end(JSON.stringify(page("created")));
+    else response.end("{}");
+  });
+  await new Promise<void>((resolve) =>
+    listener.listen(0, "127.0.0.1", resolve),
+  );
+  t.after(() => listener.close());
+  const address = listener.address();
+  const url = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}`;
+  const signal = new AbortController().signal;
+  assert.deepEqual(await devToolsPages.list(url, signal), ["tab"]);
+  assert.equal(await devToolsPages.open(url, signal), "created");
 });
 
 test("bringing Chrome forward never fails the action, except by its cancel", async (t) => {

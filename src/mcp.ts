@@ -222,9 +222,12 @@ export interface ChromeProcess {
 export interface DevToolsPages {
   /** Open tabs' ids, or undefined when nothing answers. */
   list(url: string, signal: AbortSignal): Promise<string[] | undefined>;
-  /** Opens a tab and returns its id. */
+  /** Opens a tab and returns its id, when DevTools names it. */
   open(url: string, signal: AbortSignal): Promise<string | undefined>;
-  /** Brings a tab's window to the front if Chrome allows it; never fails. */
+  /**
+   * Brings a tab's window to the front if Chrome allows it. Only a cancel
+   * makes it fail.
+   */
   activate(url: string, id: string, signal: AbortSignal): Promise<void>;
 }
 
@@ -295,7 +298,7 @@ export function createChromeStarter(options: {
 
   // Starts Chrome unless this server's is still starting, and waits for its
   // first tab, so the action has a page.
-  const launched = async (
+  const startAndWait = async (
     signal: AbortSignal,
     started?: () => void,
   ): Promise<string[]> => {
@@ -322,20 +325,20 @@ export function createChromeStarter(options: {
     profile,
     async ensure(signal, started) {
       const [first] =
-        (await pages.list(url, signal)) ?? (await launched(signal, started));
-      // On macOS Chrome keeps running after its last window closes.
-      if (first === undefined) {
-        const id = await pages.open(url, signal);
-        if (id) await pages.activate(url, id, signal);
-        return;
-      }
+        (await pages.list(url, signal)) ??
+        (await startAndWait(signal, started));
+      // On macOS Chrome keeps running after its last window closes, so a new
+      // tab is opened and shown.
+      const opened =
+        first === undefined ? await pages.open(url, signal) : undefined;
       // A Chrome this server started opens behind other apps or on another
       // Space (see docs/DESIGN.md), so it is shown once, even when the action
       // that started it was cancelled.
-      if (owned && !owned.exited && !owned.shown) {
-        owned.shown = true;
-        await pages.activate(url, first, signal);
-      }
+      const current = owned && !owned.exited ? owned : undefined;
+      const tab = opened ?? (current?.shown === false ? first : undefined);
+      if (tab === undefined) return;
+      await pages.activate(url, tab, signal);
+      if (current) current.shown = true;
     },
     async stop() {
       if (!owned || owned.exited) return;
@@ -358,14 +361,17 @@ export const devToolsPages: DevToolsPages = {
       });
       const body: unknown = response.ok ? await response.json() : undefined;
       if (!Array.isArray(body)) return undefined;
-      // The pages the browser tool can drive.
+      // The pages the browser tool can drive, as its listPages decides.
       return body
         .filter(
           (target): target is { id: string } =>
             isRecord(target) &&
             target.type === "page" &&
             typeof target.id === "string" &&
-            !String(target.url).startsWith("devtools://"),
+            typeof target.title === "string" &&
+            typeof target.url === "string" &&
+            typeof target.webSocketDebuggerUrl === "string" &&
+            !target.url.startsWith("devtools://"),
         )
         .map((target) => target.id);
     } catch (error) {
@@ -382,7 +388,7 @@ export const devToolsPages: DevToolsPages = {
     });
     if (!response.ok)
       throw new Error(`Chrome refused a new tab (HTTP ${response.status})`);
-    const created: unknown = await response.json();
+    const created: unknown = await response.json().catch(() => undefined);
     return isRecord(created) && typeof created.id === "string"
       ? created.id
       : undefined;
