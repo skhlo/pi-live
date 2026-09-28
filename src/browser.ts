@@ -113,6 +113,15 @@ export function browserEnvironment(
   environment: Readonly<Record<string, string | undefined>>,
   envFile: string,
 ): { values: Partial<Record<BrowserVariable, string>>; notice?: string } {
+  return envSettings(environment, envFile, BROWSER_VARIABLES);
+}
+
+/** The named settings from the environment, falling back to the env file. */
+export function envSettings<Name extends string>(
+  environment: Readonly<Record<string, string | undefined>>,
+  envFile: string,
+  names: readonly Name[],
+): { values: Partial<Record<Name, string>>; notice?: string } {
   let file: Record<string, string | undefined> = {};
   let notice: string | undefined;
   try {
@@ -121,8 +130,8 @@ export function browserEnvironment(
     if (!(error instanceof Error && "code" in error && error.code === "ENOENT"))
       notice = `could not read ${envFile}, so its settings are ignored.`;
   }
-  const values: Partial<Record<BrowserVariable, string>> = {};
-  for (const name of BROWSER_VARIABLES) {
+  const values: Partial<Record<Name, string>> = {};
+  for (const name of names) {
     const value = environment[name]?.trim() || file[name]?.trim();
     if (value) values[name] = value;
   }

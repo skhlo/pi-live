@@ -17,7 +17,7 @@ import {
   createBrowserTool,
   type BrowserTool,
 } from "./browser-tool.ts";
-import { browserDevToolsUrl, browserEnvironment, isRecord } from "./browser.ts";
+import { browserDevToolsUrl, envSettings, isRecord } from "./browser.ts";
 
 export const MCP_TOOL_NAME = "browser";
 // Newest first; the tools-only subset used here is the same in each.
@@ -25,9 +25,19 @@ const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const ACTION_TIMEOUT_MS = 30_000;
 const CHROME_START_MS = 15_000;
 const CHROME_STOP_MS = 3_000;
+const OTHER_CHROME =
+  "SIDECAR_CHROME, in the environment or the checkout's .env, names another Chrome";
 const DEFAULT_CHROME =
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 export const STARTED_NOTE = "Started a Chrome window for browser actions.";
+// Read from the environment or the checkout's .env, which plain `codex` needs:
+// its background app server does not pass on the shell's variables.
+const SETTINGS = [
+  "PI_LIVE_BROWSER_CDP",
+  "SIDECAR_CHROME",
+  "SIDECAR_CHROME_PROFILE",
+] as const;
+type Settings = Partial<Record<(typeof SETTINGS)[number], string>>;
 
 export const MCP_TOOL = {
   name: MCP_TOOL_NAME,
@@ -50,7 +60,7 @@ export function createMcpServer(
 ): { receive(line: string): void } {
   const running = new Map<Id, AbortController>();
   let queue: Promise<void> = Promise.resolve();
-  // The next reply, success or failure, tells the user Chrome was started.
+  // The next reply after Chrome is launched, whatever its outcome, says so.
   let announce = false;
   const announced = (text: string): string => {
     if (!announce) return text;
@@ -94,7 +104,7 @@ export function createMcpServer(
         // Some DevTools requests ignore the signal, so a cancel or the time
         // bound releases the queue without waiting for them.
         const run = (async () => {
-          if (await browser.starter?.ensure(signal)) announce = true;
+          await browser.starter?.ensure(signal, () => (announce = true));
           return (await browser.tool.run(checked, signal)).text;
         })();
         const stopped = new Promise<never>((_, reject) =>
@@ -178,8 +188,9 @@ function failure(
     error instanceof Error && error.name === "TimeoutError"
       ? `Browser action timed out after ${timeoutMs / 1000} s.`
       : `Browser action failed: ${error instanceof Error ? error.message : String(error)}.`;
+  // The starter's own errors say how to name another Chrome.
   return browser.starter
-    ? `${cause} This server starts Chrome at ${browser.url} itself; if that keeps failing, SIDECAR_CHROME can name the user's Chrome binary.`
+    ? cause
     : `${cause} If no Chrome is running with DevTools at ${browser.url}, tell the user to start one there with --remote-debugging-port and its own --user-data-dir, or use a 127.0.0.1 address, where this server starts Chrome itself.`;
 }
 
@@ -192,10 +203,10 @@ export interface ChromeStarter {
   readonly chrome: string;
   readonly profile: string;
   /**
-   * Makes sure a Chrome with a tab answers, starting one when nothing does;
-   * true when this call started it.
+   * Makes sure a Chrome with a tab answers, starting one when nothing does
+   * and calling started as it launches.
    */
-  ensure(signal: AbortSignal): Promise<boolean>;
+  ensure(signal: AbortSignal, started?: () => void): Promise<void>;
   /** Stops the Chrome this server started, killing it after a bound. */
   stop(): Promise<void>;
 }
@@ -244,7 +255,7 @@ export function createChromeStarter(options: {
       if (!statSync(chrome).isFile()) throw new Error("not a file");
     } catch {
       throw new Error(
-        `Chrome executable is missing: ${chrome}; SIDECAR_CHROME names another`,
+        `Chrome executable is missing: ${chrome}; ${OTHER_CHROME}`,
       );
     }
     mkdirSync(profile, { recursive: true });
@@ -265,10 +276,10 @@ export function createChromeStarter(options: {
     };
     const end = (failure: string): void => {
       state.exited = true;
-      state.failure ??= failure;
+      state.failure ??= `${failure}; ${OTHER_CHROME}`;
       exited();
     };
-    // A failed spawn reports an error and no exit.
+    // A failed spawn may report only an error.
     child.once("error", (error) =>
       end(`Chrome could not start: ${error.message}`),
     );
@@ -279,10 +290,13 @@ export function createChromeStarter(options: {
   return {
     chrome,
     profile,
-    async ensure(signal) {
+    async ensure(signal, started) {
       const open = await pages.count(url, signal);
       if (open === undefined) {
-        if (!owned || owned.exited) owned = start();
+        if (!owned || owned.exited) {
+          owned = start();
+          started?.();
+        }
         const current = owned;
         const deadline = Date.now() + CHROME_START_MS;
         // Ready once its first tab is listed, so the action has a page.
@@ -290,15 +304,14 @@ export function createChromeStarter(options: {
           if (current.failure) throw new Error(current.failure);
           if (Date.now() > deadline)
             throw new Error(
-              `Chrome did not answer at ${url} within ${CHROME_START_MS / 1000} s`,
+              `Chrome did not answer at ${url} within ${CHROME_START_MS / 1000} s; ${OTHER_CHROME}`,
             );
           await delay(200, undefined, { signal });
         }
-        return true;
+        return;
       }
       // On macOS Chrome keeps running after its last window closes.
       if (open === 0) await pages.open(url, signal);
-      return false;
     },
     async stop() {
       if (!owned || owned.exited) return;
@@ -340,12 +353,21 @@ const devToolsPages: DevToolsPages = {
   },
 };
 
+/** The server's settings from the environment, else the env file. */
+export function mcpSettings(
+  environment: Readonly<Record<string, string | undefined>>,
+  envFile: string,
+): { values: Settings; notice?: string } {
+  return envSettings(environment, envFile, SETTINGS);
+}
+
 /**
  * The Chrome to drive: PI_LIVE_BROWSER_CDP, or else the sidecar's. Only a
- * 127.0.0.1 address gets a starter, because Chrome listens there.
+ * 127.0.0.1 address gets a starter, because Chrome listens there; its profile
+ * defaults to the sidecar's, under XDG_CACHE_HOME or HOME.
  */
 export function mcpBrowser(
-  values: { PI_LIVE_BROWSER_CDP?: string },
+  values: Settings,
   environment: Readonly<Record<string, string | undefined>> = {},
   create: (url: string) => BrowserTool = createBrowserTool,
 ): McpBrowser {
@@ -365,16 +387,16 @@ export function mcpBrowser(
     url,
     starter: createChromeStarter({
       url,
-      chrome: environment.SIDECAR_CHROME || DEFAULT_CHROME,
+      chrome: values.SIDECAR_CHROME || DEFAULT_CHROME,
       profile:
-        environment.SIDECAR_CHROME_PROFILE ||
+        values.SIDECAR_CHROME_PROFILE ||
         path.join(cache, "pi-live", "browser-profile"),
     }),
   };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
-  const { values, notice } = browserEnvironment(
+  const { values, notice } = mcpSettings(
     process.env,
     path.join(import.meta.dirname, "..", ".env"),
   );
