@@ -198,65 +198,72 @@ test("a hung browser call releases the queue on cancel or after its bound", asyn
   const timedOut = (sent[0]?.result as { content: Array<{ text: string }> })
     .content[0]?.text;
   assert.match(timedOut ?? "", /^Browser action timed out after 0\.2 s\./);
-  assert.match(timedOut ?? "", /scripts\/browser-sidecar\.sh/);
+  assert.match(timedOut ?? "", /--remote-debugging-port/);
   assert.deepEqual(sent[1]?.result, {
     content: [{ type: "text", text: "did read" }],
   });
 });
 
-test("the first action after starting Chrome says so", async () => {
-  const fake = fakeTool();
+test("the reply after starting Chrome says so, even when the action fails", async () => {
+  const outcomes = [
+    () => Promise.reject(new Error("no tab yet")),
+    () => Promise.resolve({ text: "did tabs" }),
+  ];
+  const tool: BrowserTool = {
+    run: () => outcomes.shift()?.() ?? Promise.resolve({ text: "" }),
+    currentPage: async () => undefined,
+  };
   const starts = [true, false];
   const starter: ChromeStarter = {
     chrome: "chrome",
     profile: "profile",
     ensure: async () => starts.shift() ?? false,
-    stop: () => undefined,
+    stop: async () => undefined,
   };
-  const { sent, request } = server({
-    tool: fake.tool,
-    url: SIDECAR_CDP,
-    starter,
-  });
+  const { sent, request } = server({ tool, url: SIDECAR_CDP, starter });
   request(1, "tools/call", call("look"));
-  await settle();
-  fake.release();
-  await settle();
   request(2, "tools/call", call("tabs"));
   await settle();
-  fake.release();
   await settle();
-  assert.deepEqual(
-    sent.map((message) => message.result),
-    [
-      { content: [{ type: "text", text: `${STARTED_NOTE}\ndid look` }] },
-      { content: [{ type: "text", text: "did tabs" }] },
-    ],
+  const texts = sent.map(
+    (message) =>
+      (message.result as { content: Array<{ text: string }> }).content[0]?.text,
   );
+  assert.match(
+    texts[0] ?? "",
+    /^Started a Chrome window for browser actions\.\nBrowser action failed: no tab yet\. This server starts Chrome/,
+  );
+  assert.equal(texts[1], "did tabs");
 });
 
-// A Chrome process that exits when told to, or on its own.
-function fakeChrome() {
+// A Chrome process that exits when told to, unless it ignores SIGTERM.
+function fakeChrome({ ignoreTerm = false } = {}) {
   const events = new EventEmitter();
   const signals: string[] = [];
   const chrome: ChromeProcess = {
-    kill(signal) {
-      signals.push(signal ?? "SIGTERM");
-      events.emit("exit");
+    kill(signal = "SIGTERM") {
+      signals.push(signal);
+      if (!(ignoreTerm && signal === "SIGTERM")) events.emit("exit");
       return true;
     },
     once(event: string, listener: (error: Error) => void) {
       return events.once(event, listener);
     },
   };
-  return { chrome, signals, exit: () => events.emit("exit") };
+  return {
+    chrome,
+    signals,
+    exit: () => events.emit("exit"),
+    fail: () => events.emit("error", new Error("spawn EACCES")),
+  };
 }
 
-test("the starter launches Chrome only when nothing answers, and stops only its own", async (t) => {
+test("the starter starts Chrome only when nothing answers, and keeps a tab open", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "pi-live-mcp-"));
   t.after(() => rm(root, { recursive: true }));
   const profile = path.join(root, "profile");
-  let answering = false;
+  let tabs: number | undefined = 1;
+  let opened = 0;
   const launches: string[][] = [];
   let current = fakeChrome();
   const starter = createChromeStarter({
@@ -266,23 +273,33 @@ test("the starter launches Chrome only when nothing answers, and stops only its 
     launch: (_command, args) => {
       launches.push(args);
       current = fakeChrome();
-      answering = true;
+      tabs = 1;
       return current.chrome;
     },
-    answers: async () => answering,
+    pages: {
+      count: async () => tabs,
+      open: async () => {
+        opened++;
+        tabs = 1;
+      },
+    },
   });
   const signal = new AbortController().signal;
 
-  answering = true;
   assert.equal(
     await starter.ensure(signal),
     false,
     "a running Chrome is reused",
   );
-  starter.stop();
-  assert.equal(launches.length, 0);
+  await starter.stop();
+  assert.equal(launches.length, 0, "and never stopped");
 
-  answering = false;
+  // Its last window was closed; Chrome keeps running on macOS.
+  tabs = 0;
+  assert.equal(await starter.ensure(signal), false);
+  assert.equal(opened, 1, "a new tab is opened");
+
+  tabs = undefined;
   assert.equal(await starter.ensure(signal), true);
   assert.deepEqual(launches[0], [
     "--remote-debugging-address=127.0.0.1",
@@ -295,39 +312,94 @@ test("the starter launches Chrome only when nothing answers, and stops only its 
   ]);
   assert.equal(await starter.ensure(signal), false, "then it is reused");
 
-  // The user closed the window: the next action starts Chrome again.
+  // Chrome quit: the next action starts it again.
   current.exit();
-  answering = false;
+  tabs = undefined;
   assert.equal(await starter.ensure(signal), true);
   assert.equal(launches.length, 2);
   const second = current;
-  starter.stop();
+  await starter.stop();
   assert.deepEqual(second.signals, ["SIGTERM"]);
+});
+
+test("the server launches Chrome as the sidecar script does", async () => {
+  // The two share a profile, so their Chrome flags and defaults stay in step.
+  const script = await readFile(
+    path.join(import.meta.dirname, "browser-sidecar.sh"),
+    "utf8",
+  );
+  for (const expected of [
+    "--remote-debugging-address=127.0.0.1",
+    '--user-data-dir="$profile" --no-first-run --no-default-browser-check',
+    "--window-size=1280,900 about:blank",
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "${XDG_CACHE_HOME:-$HOME/.cache}/pi-live/browser-profile",
+  ])
+    assert.ok(script.includes(expected), `the script has ${expected}`);
+});
+
+test("the starter kills a Chrome that outlasts its stop", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "pi-live-mcp-"));
+  t.after(() => rm(root, { recursive: true }));
+  let tabs: number | undefined;
+  const stubborn = fakeChrome({ ignoreTerm: true });
+  const starter = createChromeStarter({
+    url: "http://127.0.0.1:9444",
+    chrome: process.execPath,
+    profile: path.join(root, "profile"),
+    launch: () => {
+      tabs = 1;
+      return stubborn.chrome;
+    },
+    pages: { count: async () => tabs, open: async () => undefined },
+    stopMs: 20,
+  });
+  await starter.ensure(new AbortController().signal);
+  await starter.stop();
+  assert.deepEqual(stubborn.signals, ["SIGTERM", "SIGKILL"]);
 });
 
 test("the starter reports a missing or failing Chrome", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "pi-live-mcp-"));
   t.after(() => rm(root, { recursive: true }));
   const signal = new AbortController().signal;
-  const missing = createChromeStarter({
-    url: "http://127.0.0.1:9444",
-    chrome: path.join(root, "no-chrome"),
-    profile: path.join(root, "profile"),
-    answers: async () => false,
-  });
-  await assert.rejects(missing.ensure(signal), /Chrome executable is missing/);
-  const dying = fakeChrome();
+  const none = { count: async () => undefined, open: async () => undefined };
+  for (const chrome of [path.join(root, "no-chrome"), root]) {
+    const missing = createChromeStarter({
+      url: "http://127.0.0.1:9444",
+      chrome,
+      profile: path.join(root, "profile"),
+      pages: none,
+    });
+    await assert.rejects(
+      missing.ensure(signal),
+      /Chrome executable is missing/,
+    );
+  }
+  const launched: Array<ReturnType<typeof fakeChrome>> = [];
   const failing = createChromeStarter({
     url: "http://127.0.0.1:9444",
     chrome: process.execPath,
     profile: path.join(root, "profile"),
     launch: () => {
-      setImmediate(dying.exit);
-      return dying.chrome;
+      const chrome = fakeChrome();
+      launched.push(chrome);
+      // The first dies while starting; the second cannot be spawned at all.
+      setImmediate(launched.length === 1 ? chrome.exit : chrome.fail);
+      return chrome.chrome;
     },
-    answers: async () => false,
+    pages: none,
   });
   await assert.rejects(failing.ensure(signal), /Chrome exited while starting/);
+  await assert.rejects(
+    failing.ensure(signal),
+    /Chrome could not start: spawn EACCES/,
+  );
+  assert.equal(
+    launched.length,
+    2,
+    "each failure is retried by the next action",
+  );
 });
 
 test("the browser comes from PI_LIVE_BROWSER_CDP or the sidecar", () => {
@@ -408,8 +480,10 @@ async function serverProcess(t: import("node:test").TestContext) {
     `#!${process.execPath}
 const http = require("node:http");
 const port = process.argv.find((arg) => arg.startsWith("--remote-debugging-port=")).split("=")[1];
+if (process.env.FAKE_IGNORE_TERM) process.on("SIGTERM", () => undefined);
+const page = [{ id: "1", type: "page", title: "", url: "about:blank", webSocketDebuggerUrl: "ws://127.0.0.1:1/devtools/page/1" }];
 require("node:fs").writeFileSync(${JSON.stringify(record)}, JSON.stringify({ pid: process.pid, args: process.argv.slice(2) }));
-http.createServer((request, response) => response.end(request.url === "/json/version" ? "{}" : "[]")).listen(Number(port), "127.0.0.1");
+http.createServer((request, response) => response.end(JSON.stringify(request.url === "/json/list" ? page : {}))).listen(Number(port), "127.0.0.1");
 `,
   );
   await chmod(chrome, 0o755);
@@ -458,7 +532,7 @@ http.createServer((request, response) => response.end(request.url === "/json/ver
     }
   };
   const gone = async (pid: number) => {
-    for (let i = 0; i < 100 && alive(pid); i++)
+    for (let i = 0; i < 300 && alive(pid); i++)
       await new Promise((resolve) => setTimeout(resolve, 20));
     return !alive(pid);
   };
@@ -468,10 +542,14 @@ http.createServer((request, response) => response.end(request.url === "/json/ver
 test("the server process starts Chrome and closes it when stdin closes", async (t) => {
   const fixture = await serverProcess(t);
   const server = fixture.start({});
-  // The fake has no tabs, so the action fails after Chrome is started.
+  // The fake's tab has no DevTools socket, so the action fails after Chrome
+  // is started, and the reply still says Chrome was started.
   const result = await server.call(1, "look");
   assert.equal(result.isError, true);
-  assert.match(result.content[0]?.text ?? "", /Chrome has no open tab/);
+  assert.match(
+    result.content[0]?.text ?? "",
+    /^Started a Chrome window for browser actions\.\nBrowser action failed: /,
+  );
   const chrome = await fixture.chromeRecord();
   assert.ok(chrome.args.includes(`--remote-debugging-port=${fixture.port}`));
   assert.ok(
@@ -494,6 +572,16 @@ test("the server process closes its Chrome when it is stopped", async (t) => {
   assert.ok(await fixture.gone(chrome.pid), "Chrome stops with the server");
 });
 
+test("the server process kills a Chrome that ignores its stop", async (t) => {
+  const fixture = await serverProcess(t);
+  const server = fixture.start({ FAKE_IGNORE_TERM: "1" });
+  await server.call(1, "look");
+  const chrome = await fixture.chromeRecord();
+  server.child.stdin.end();
+  assert.equal(await server.exited, 0);
+  assert.ok(await fixture.gone(chrome.pid), "Chrome is killed after the bound");
+});
+
 test("the server process explains a missing Chrome", async (t) => {
   const fixture = await serverProcess(t);
   const server = fixture.start({
@@ -503,7 +591,7 @@ test("the server process explains a missing Chrome", async (t) => {
   assert.equal(result.isError, true);
   assert.match(
     result.content[0]?.text ?? "",
-    /^Browser action failed: Chrome executable is missing: .*no-chrome; SIDECAR_CHROME names another\. If no Chrome is running with DevTools at http:\/\/127\.0\.0\.1:\d+/,
+    /^Browser action failed: Chrome executable is missing: .*no-chrome; SIDECAR_CHROME names another\. This server starts Chrome at http:\/\/127\.0\.0\.1:\d+ itself/,
   );
   server.child.stdin.end();
   assert.equal(await server.exited, 0);

@@ -237,16 +237,22 @@ Codex's approval review, which added seconds per call by voice, so the tool's
 refusals are the only guard. It runs one action at a time, and an action that
 takes more than 30 seconds is abandoned.
 
-It drives the Chrome at `PI_LIVE_BROWSER_CDP` (from the environment, which the
-Codex config forwards, or the checkout's `.env`), or else the one at
-`http://127.0.0.1:9333`. When nothing answers at a `127.0.0.1` address, the
-first browser action starts a visible Chrome there, on the browser sidecar's
-profile (`~/.cache/pi-live/browser-profile`, or `SIDECAR_CHROME_PROFILE`) so
-logins carry over, and its reply says so. Quitting Codex closes that Chrome;
-closing its window just means the next action starts another. A Chrome already
-answering, such as the sidecar's, is used as it is and left running. If Codex
-is force-quit, the Chrome it started keeps running and the next session reuses
-it. `SIDECAR_CHROME` names a Chrome other than Google Chrome's macOS path.
+It drives the Chrome at `PI_LIVE_BROWSER_CDP`, or else the one at
+`http://127.0.0.1:9333`. Set it in the checkout's `.env`: the plain `codex`
+command runs MCP servers under its background app server, so variables from the
+shell that started Codex may not reach the server.
+
+When nothing answers at a `127.0.0.1` address, the next browser action starts a
+visible Chrome there, on the browser sidecar's profile
+(`~/.cache/pi-live/browser-profile`) so logins carry over, and its reply says
+so. Closing the window leaves Chrome running on macOS, so the next action opens
+a new tab; quitting Chrome means the next action starts it again. Quitting
+Codex closes the Chrome it started: at once with `codex exec`, and within about
+a minute with the plain `codex` command, whose background app server stops idle
+servers. A Chrome already answering, such as the sidecar's, is used as it is and
+left running. Only a server killed outright leaves its Chrome behind, and the
+next session then reuses it. `SIDECAR_CHROME` and `SIDECAR_CHROME_PROFILE`, in
+the environment Codex gives the server, name another Chrome or profile.
 
 The server itself does not use Jev, TypeSafe or the voice-browser controller.
 Page content it returns goes to OpenAI through Codex.
