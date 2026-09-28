@@ -133,16 +133,16 @@ host: a visible Chrome with its own profile and DevTools at
 `http://127.0.0.1:9333`, and voice-browser attached to it on port 8787 (both
 ports fixed). Set `VOICE_BROWSER_DIR` to a voice-browser checkout with its
 dependencies installed (checked with commit `198a076`), and provide the key as
-`TYPESAFE_API_KEY`, `JEV_API_KEY` or an env file named by `SIDECAR_KEY_FILE`
-(by default the checkout's `.env`).
+`TYPESAFE_API_KEY` or `JEV_API_KEY`. Settings the environment leaves unset come
+from an env file named by `SIDECAR_KEY_FILE`, by default the checkout's `.env`.
 The script uses Google Chrome's macOS path unless `SIDECAR_CHROME` names another
 binary, and keeps its profile in `~/.cache/pi-live/browser-profile` unless
 `SIDECAR_CHROME_PROFILE` names another. Then start Pi with the key and
 `PI_LIVE_BROWSER_CDP=http://127.0.0.1:9333` in its environment or `.env`. Ctrl+C stops
 voice-browser and Chrome.
 
-The script also remains usable directly from a terminal. Set `VOICE_BROWSER_DIR`
-in that terminal's environment; the script itself reads only the key from `.env`.
+The script also remains usable directly from a terminal, with the same `.env`
+that Pi Live reads.
 
 ### Browser requests
 
