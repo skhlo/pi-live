@@ -1,10 +1,15 @@
 // Codex's browser: a stdio MCP server that gives Codex, including Codex voice,
 // Pi Live's browser tool on the Chrome that `live_browser` drives. It speaks
-// newline-delimited JSON-RPC with Node built-ins only, runs one browser action
-// at a time, and never starts or owns a browser.
+// newline-delimited JSON-RPC with Node built-ins only and runs one browser
+// action at a time. When no Chrome answers on loopback, it starts one on the
+// browser sidecar's profile and stops it when Codex closes the server.
 
+import { spawn } from "node:child_process";
+import { accessSync, constants, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import { setTimeout as delay } from "node:timers/promises";
 import { SIDECAR_CDP } from "./browser-sidecar.ts";
 import {
   BROWSER_TOOL_SCHEMA,
@@ -18,6 +23,11 @@ export const MCP_TOOL_NAME = "browser";
 // Newest first; the tools-only subset used here is the same in each.
 const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const ACTION_TIMEOUT_MS = 30_000;
+const CHROME_START_MS = 15_000;
+const DEFAULT_CHROME =
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+export const STARTED_NOTE =
+  "Started a Chrome window for browser actions; it closes when Codex quits.";
 
 export const MCP_TOOL = {
   name: MCP_TOOL_NAME,
@@ -27,7 +37,8 @@ export const MCP_TOOL = {
 };
 
 export type McpBrowser =
-  { tool: BrowserTool; url: string } | { problem: string };
+  | { tool: BrowserTool; url: string; starter?: ChromeStarter }
+  | { problem: string };
 
 type Id = string | number;
 
@@ -75,7 +86,11 @@ export function createMcpServer(
         ]);
         // Some DevTools requests ignore the signal, so a cancel or the time
         // bound releases the queue without waiting for them.
-        const run = browser.tool.run(checked, signal);
+        const run = (async () => {
+          const started = (await browser.starter?.ensure(signal)) ?? false;
+          const result = await browser.tool.run(checked, signal);
+          return started ? `${STARTED_NOTE}\n${result.text}` : result.text;
+        })();
         const stopped = new Promise<never>((_, reject) =>
           signal.addEventListener("abort", () => reject(signal.reason), {
             once: true,
@@ -84,7 +99,7 @@ export function createMcpServer(
         run.catch(() => undefined);
         stopped.catch(() => undefined);
         const result = await Promise.race([run, stopped]);
-        if (!controller.signal.aborted) toolResult(id, result.text);
+        if (!controller.signal.aborted) toolResult(id, result);
       } catch (error) {
         if (!controller.signal.aborted)
           toolResult(id, failure(browser.url, error, timeoutMs), true);
@@ -160,19 +175,137 @@ function isId(value: unknown): value is Id {
   return typeof value === "string" || typeof value === "number";
 }
 
-/** The Chrome to drive: PI_LIVE_BROWSER_CDP, or else the sidecar's. */
+/** A Chrome this server starts, on the browser sidecar's profile. */
+export interface ChromeStarter {
+  readonly chrome: string;
+  readonly profile: string;
+  /** Starts Chrome when nothing answers; true when this call started it. */
+  ensure(signal: AbortSignal): Promise<boolean>;
+  /** Stops the Chrome this server started; a reused one keeps running. */
+  stop(): void;
+}
+
+/** The part of a child process the starter uses, so tests can fake Chrome. */
+export interface ChromeProcess {
+  kill(signal?: NodeJS.Signals): boolean;
+  once(event: "exit", listener: () => void): unknown;
+  once(event: "error", listener: (error: Error) => void): unknown;
+}
+
+export function createChromeStarter(options: {
+  url: string;
+  chrome: string;
+  profile: string;
+  launch?: (chrome: string, args: string[]) => ChromeProcess;
+  answers?: (url: string, signal: AbortSignal) => Promise<boolean>;
+}): ChromeStarter {
+  const { url, chrome, profile } = options;
+  const launch =
+    options.launch ??
+    // Chrome stays in the server's process group, so Codex's stop reaches it.
+    ((command, args) => spawn(command, args, { stdio: "ignore" }));
+  const answers = options.answers ?? devToolsAnswers;
+  let owned:
+    { process: ChromeProcess; exited: boolean; failure?: string } | undefined;
+
+  const start = () => {
+    try {
+      accessSync(chrome, constants.X_OK);
+    } catch {
+      throw new Error(
+        `Chrome executable is missing: ${chrome}; SIDECAR_CHROME names another`,
+      );
+    }
+    mkdirSync(profile, { recursive: true });
+    const child = launch(chrome, [
+      "--remote-debugging-address=127.0.0.1",
+      `--remote-debugging-port=${new URL(url).port}`,
+      `--user-data-dir=${profile}`,
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--window-size=1280,900",
+      "about:blank",
+    ]);
+    const state: NonNullable<typeof owned> = { process: child, exited: false };
+    child.once("error", (error) => {
+      state.failure = `Chrome could not start: ${error.message}`;
+    });
+    child.once("exit", () => {
+      state.exited = true;
+      state.failure ??= "Chrome exited while starting";
+    });
+    return state;
+  };
+
+  return {
+    chrome,
+    profile,
+    async ensure(signal) {
+      if (await answers(url, signal)) return false;
+      if (!owned || owned.exited) owned = start();
+      const current = owned;
+      const deadline = Date.now() + CHROME_START_MS;
+      while (!(await answers(url, signal))) {
+        if (current.failure) throw new Error(current.failure);
+        if (Date.now() > deadline)
+          throw new Error(
+            `Chrome did not answer at ${url} within ${CHROME_START_MS / 1000} s`,
+          );
+        await delay(200, undefined, { signal });
+      }
+      return true;
+    },
+    stop() {
+      if (owned && !owned.exited) owned.process.kill("SIGTERM");
+    },
+  };
+}
+
+async function devToolsAnswers(
+  url: string,
+  signal: AbortSignal,
+): Promise<boolean> {
+  try {
+    const response = await fetch(`${url}/json/version`, {
+      signal: AbortSignal.any([signal, AbortSignal.timeout(1_000)]),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The Chrome to drive: PI_LIVE_BROWSER_CDP, or else the sidecar's. Only a
+ * 127.0.0.1 address gets a starter, because Chrome listens there.
+ */
 export function mcpBrowser(
   values: { PI_LIVE_BROWSER_CDP?: string },
+  environment: Readonly<Record<string, string | undefined>> = {},
   create: (url: string) => BrowserTool = createBrowserTool,
 ): McpBrowser {
   const configured = values.PI_LIVE_BROWSER_CDP;
   const url = configured ? browserDevToolsUrl(configured) : SIDECAR_CDP;
-  return url
-    ? { tool: create(url), url }
-    : {
-        problem:
-          "PI_LIVE_BROWSER_CDP is not an http:// loopback address, so there is no browser to drive.",
-      };
+  if (!url)
+    return {
+      problem:
+        "PI_LIVE_BROWSER_CDP is not an http:// loopback address, so there is no browser to drive.",
+    };
+  if (new URL(url).hostname !== "127.0.0.1") return { tool: create(url), url };
+  const cache =
+    environment.XDG_CACHE_HOME ||
+    path.join(environment.HOME || homedir(), ".cache");
+  return {
+    tool: create(url),
+    url,
+    starter: createChromeStarter({
+      url,
+      chrome: environment.SIDECAR_CHROME || DEFAULT_CHROME,
+      profile:
+        environment.SIDECAR_CHROME_PROFILE ||
+        path.join(cache, "pi-live", "browser-profile"),
+    }),
+  };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
@@ -181,11 +314,19 @@ if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
     path.join(import.meta.dirname, "..", ".env"),
   );
   if (notice) process.stderr.write(`pi-live-browser: ${notice}\n`);
-  const server = createMcpServer(mcpBrowser(values), (message) =>
+  const browser = mcpBrowser(values, process.env);
+  const server = createMcpServer(browser, (message) =>
     process.stdout.write(`${JSON.stringify(message)}\n`),
   );
+  // Codex closing stdin or stopping the server ends it, even with a DevTools
+  // request pending, and closes the Chrome it started.
+  const shutdown = (): void => {
+    if ("starter" in browser) browser.starter?.stop();
+    process.exit(0);
+  };
   createInterface({ input: process.stdin })
     .on("line", (line) => server.receive(line))
-    // Codex closing stdin ends the server, even with a DevTools request pending.
-    .on("close", () => process.exit(0));
+    .on("close", shutdown);
+  for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const)
+    process.on(signal, shutdown);
 }

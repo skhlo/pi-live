@@ -69,8 +69,10 @@ taking ownership. A Pi crash leaves the sidecar running.
 
 **Codex browser server**:
 The MCP server in `src/mcp.ts` that gives Codex the `live_browser` actions and
-refusals as its `browser` tool, on the same Chrome. It never starts or owns a
-browser and plays no part in Pi Live calls.
+refusals as its `browser` tool, on the same Chrome. When none answers, it starts
+one on the sidecar's profile and owns it until Codex closes the server; a Chrome
+already running is reused without taking ownership. It plays no part in Pi Live
+calls.
 _Avoid_: Codex browser mode
 
 **Browser delegation**:

@@ -239,14 +239,14 @@ takes more than 30 seconds is abandoned.
 
 It drives the Chrome at `PI_LIVE_BROWSER_CDP` (from the environment, which the
 Codex config forwards, or the checkout's `.env`), or else the one at
-`http://127.0.0.1:9333`. It never starts a browser. The browser sidecar provides
-that Chrome but also needs voice-browser and a TypeSafe key; without them, start
-Chrome with DevTools and its own profile:
-
-```sh
-open -na "Google Chrome" --args --remote-debugging-port=9333 \
-  --user-data-dir="$HOME/.cache/pi-live/browser-profile"
-```
+`http://127.0.0.1:9333`. When nothing answers at a `127.0.0.1` address, the
+first browser action starts a visible Chrome there, on the browser sidecar's
+profile (`~/.cache/pi-live/browser-profile`, or `SIDECAR_CHROME_PROFILE`) so
+logins carry over, and its reply says so. Quitting Codex closes that Chrome;
+closing its window just means the next action starts another. A Chrome already
+answering, such as the sidecar's, is used as it is and left running. If Codex
+is force-quit, the Chrome it started keeps running and the next session reuses
+it. `SIDECAR_CHROME` names a Chrome other than Google Chrome's macOS path.
 
 The server itself does not use Jev, TypeSafe or the voice-browser controller.
 Page content it returns goes to OpenAI through Codex.

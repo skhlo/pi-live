@@ -290,8 +290,18 @@ releases the queue on cancellation or after 30 seconds, because some DevTools
 requests ignore the abort signal. It ships in the package payload, since the
 source inventory is exact, but Pi never loads it.
 
+When nothing answers at a `127.0.0.1` DevTools address, the first action starts
+Chrome with the sidecar script's flags and profile, without voice-browser or a
+key (#29). It starts without a prompt, because Codex sends MCP approvals to its
+automatic reviewer rather than the user, and says so in its reply. Chrome stays
+in the server's process group: Codex closes the server's input and signals that
+group when it exits, and the server also stops its Chrome on either, so
+quitting Codex closes it. A force-quit Codex leaves it running for the next
+session to reuse. A Chrome already answering is reused and never stopped.
+
 The repository's `.codex/config.toml` starts it from the Git root, forwards
-`PI_LIVE_BROWSER_CDP`, and skips Codex's approval review. The tool description
+`PI_LIVE_BROWSER_CDP` and the sidecar's Chrome settings, and skips Codex's
+approval review. The tool description
 asks Codex to prefer it in voice conversations, and
 `.agents/skills/voice-browser` covers its use; Codex's built-in browser and
 computer-use tools stay enabled.
