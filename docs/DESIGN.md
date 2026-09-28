@@ -296,10 +296,12 @@ key (#29). It starts without a prompt, because Codex sends MCP approvals to its
 automatic reviewer rather than the user. The next reply after the launch says
 so, even when that action fails or is cancelled. Readiness waits for Chrome's
 first tab, and a Chrome with no tab, as macOS leaves one after its last window
-closes, gets a new one. Either way the server then activates that tab through
-DevTools (`/json/activate`), because a Chrome launched from Codex's background
-app server otherwise opens behind other apps or on another Space; activating by
-DevTools raises that Chrome, not the user's everyday one.
+closes, gets a new one. A Chrome launched from Codex's background app server
+opens behind other apps or on another Space, so the server brings each Chrome it
+starts to the front once, through DevTools (`/json/activate`), when it first
+lists a tab, even if the action that started it was cancelled. A new tab it
+opens is activated the same way. DevTools raises that Chrome, not the user's
+everyday one, and a failure to raise it does not fail the action.
 
 Chrome stays in the server's process group. The server stops it on stdin close
 or a stop signal, killing it after 3 seconds, and Codex also signals the group.

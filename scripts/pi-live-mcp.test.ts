@@ -17,12 +17,14 @@ import {
 import {
   createChromeStarter,
   createMcpServer,
+  devToolsPages,
   mcpBrowser,
   mcpSettings,
   MCP_TOOL_NAME,
   STARTED_NOTE,
   type ChromeProcess,
   type ChromeStarter,
+  type DevToolsPages,
   type McpBrowser,
 } from "../src/mcp.ts";
 
@@ -285,13 +287,37 @@ function fakeChrome({ ignoreTerm = false } = {}) {
   };
 }
 
+// DevTools tabs the test sets: a count, or undefined when nothing answers.
+// misses makes that many listings fail first, as a slow reply does.
+function fakePages(tabs?: number) {
+  const state = { tabs, misses: 0, opened: 0, activated: [] as string[] };
+  const pages: DevToolsPages = {
+    list: async () => {
+      if (state.misses > 0) {
+        state.misses--;
+        return undefined;
+      }
+      return state.tabs === undefined
+        ? undefined
+        : Array.from({ length: state.tabs }, (_, i) => `tab${i}`);
+    },
+    open: async () => {
+      state.opened++;
+      state.tabs = 1;
+      return "new";
+    },
+    activate: async (_url, id) => {
+      state.activated.push(id);
+    },
+  };
+  return { state, pages };
+}
+
 test("the starter starts Chrome only when nothing answers, and keeps a tab open", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "pi-live-mcp-"));
   t.after(() => rm(root, { recursive: true }));
   const profile = path.join(root, "profile");
-  let tabs: number | undefined = 1;
-  let opened = 0;
-  let fronted = 0;
+  const { state, pages } = fakePages(1);
   const launches: string[][] = [];
   let current = fakeChrome();
   let started = 0;
@@ -302,67 +328,105 @@ test("the starter starts Chrome only when nothing answers, and keeps a tab open"
     launch: (_command, args) => {
       launches.push(args);
       current = fakeChrome();
-      tabs = 1;
+      state.tabs = 1;
       return current.chrome;
     },
-    pages: {
-      count: async () => tabs,
-      open: async () => {
-        opened++;
-        tabs = 1;
-      },
-      front: async () => {
-        fronted++;
-      },
-    },
+    pages,
   });
   const signal = new AbortController().signal;
   const ensure = () => starter.ensure(signal, () => started++);
 
   await ensure();
   assert.equal(launches.length, 0, "a running Chrome is reused");
-  assert.equal(fronted, 0, "and left where it is");
+  assert.deepEqual(state.activated, [], "and left where it is");
 
   // Its last window was closed; Chrome keeps running on macOS.
-  tabs = 0;
+  state.tabs = 0;
   await ensure();
-  assert.equal(opened, 1, "a new tab is opened");
-  assert.equal(fronted, 1, "and brought to the front");
+  assert.equal(state.opened, 1, "a new tab is opened");
+  assert.deepEqual(state.activated, ["new"], "and brought to the front");
 
-  tabs = undefined;
+  state.tabs = undefined;
   await ensure();
   assert.deepEqual(launches[0]?.slice(0, 3), [
     "--remote-debugging-address=127.0.0.1",
     "--remote-debugging-port=9444",
     `--user-data-dir=${profile}`,
   ]);
-  assert.equal(fronted, 2, "a started Chrome is brought to the front");
+  assert.deepEqual(
+    state.activated,
+    ["new", "tab0"],
+    "a started Chrome is brought to the front",
+  );
+  await ensure();
+  // A slow listing of its own Chrome neither starts nor raises another.
+  state.misses = 1;
   await ensure();
   assert.equal(launches.length, 1, "then it is reused");
-  assert.equal(fronted, 2);
+  assert.equal(state.activated.length, 2, "without taking the front again");
 
-  // Chrome quit: the next action starts it again.
+  // Chrome quit: the next action starts it again and shows it.
   current.exit();
-  tabs = undefined;
+  state.tabs = undefined;
   await ensure();
   assert.equal(launches.length, 2);
   assert.equal(started, 2, "each launch is reported");
+  assert.equal(state.activated.length, 3);
 
   // That Chrome quit too, and another one answers: it is reused, and stopping
   // the starter leaves it alone.
   const second = current;
   second.exit();
-  tabs = 1;
+  state.tabs = 1;
   await ensure();
   await starter.stop();
   assert.equal(launches.length, 2);
+  assert.equal(state.activated.length, 3);
   assert.deepEqual(second.signals, []);
 
-  tabs = undefined;
+  state.tabs = undefined;
   await ensure();
   const third = current;
   await starter.stop();
   assert.deepEqual(third.signals, ["SIGTERM"]);
+});
+
+test("a Chrome whose starting action was cancelled is shown by the next one", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "pi-live-mcp-"));
+  t.after(() => rm(root, { recursive: true }));
+  const { state, pages } = fakePages();
+  let launches = 0;
+  const starter = createChromeStarter({
+    url: "http://127.0.0.1:9444",
+    chrome: process.execPath,
+    profile: path.join(root, "profile"),
+    // Its first tab appears only after the action is cancelled.
+    launch: () => {
+      launches++;
+      return fakeChrome().chrome;
+    },
+    pages,
+  });
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), 50);
+  await assert.rejects(starter.ensure(controller.signal));
+  state.tabs = 1;
+  await starter.ensure(new AbortController().signal);
+  assert.equal(launches, 1);
+  assert.deepEqual(state.activated, ["tab0"]);
+});
+
+test("bringing Chrome forward never fails the action, except by its cancel", async (t) => {
+  // A DevTools address that drops every request.
+  const listener = createHttpServer((request) => request.socket.destroy());
+  await new Promise<void>((resolve) =>
+    listener.listen(0, "127.0.0.1", resolve),
+  );
+  t.after(() => listener.close());
+  const address = listener.address();
+  const url = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}`;
+  await devToolsPages.activate(url, "1", new AbortController().signal);
+  await assert.rejects(devToolsPages.activate(url, "1", AbortSignal.abort()));
 });
 
 test("the server launches Chrome as the sidecar script does", async (t) => {
@@ -389,9 +453,8 @@ test("the server launches Chrome as the sidecar script does", async (t) => {
       return fakeChrome().chrome;
     },
     pages: {
-      count: async () => (args.length ? 1 : undefined),
-      open: async () => undefined,
-      front: async () => undefined,
+      ...fakePages().pages,
+      list: async () => (args.length ? ["tab0"] : undefined),
     },
   });
   await starter.ensure(new AbortController().signal);
@@ -447,21 +510,17 @@ test("a cancelled action never starts Chrome", async (t) => {
 test("the starter kills a Chrome that outlasts its stop", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "pi-live-mcp-"));
   t.after(() => rm(root, { recursive: true }));
-  let tabs: number | undefined;
+  const { state, pages } = fakePages();
   const stubborn = fakeChrome({ ignoreTerm: true });
   const starter = createChromeStarter({
     url: "http://127.0.0.1:9444",
     chrome: process.execPath,
     profile: path.join(root, "profile"),
     launch: () => {
-      tabs = 1;
+      state.tabs = 1;
       return stubborn.chrome;
     },
-    pages: {
-      count: async () => tabs,
-      open: async () => undefined,
-      front: async () => undefined,
-    },
+    pages,
     stopMs: 20,
   });
   await starter.ensure(new AbortController().signal);
@@ -473,11 +532,7 @@ test("the starter reports a missing or failing Chrome", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "pi-live-mcp-"));
   t.after(() => rm(root, { recursive: true }));
   const signal = new AbortController().signal;
-  const none = {
-    count: async () => undefined,
-    open: async () => undefined,
-    front: async () => undefined,
-  };
+  const none = fakePages().pages;
   for (const chrome of [path.join(root, "no-chrome"), root]) {
     const missing = createChromeStarter({
       url: "http://127.0.0.1:9444",

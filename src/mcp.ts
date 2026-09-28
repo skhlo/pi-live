@@ -220,11 +220,12 @@ export interface ChromeProcess {
 
 /** The DevTools HTTP endpoints the starter uses. */
 export interface DevToolsPages {
-  /** Open tabs, or undefined when nothing answers. */
-  count(url: string, signal: AbortSignal): Promise<number | undefined>;
-  open(url: string, signal: AbortSignal): Promise<void>;
-  /** Brings the first tab's window to the front, if Chrome allows it. */
-  front(url: string, signal: AbortSignal): Promise<void>;
+  /** Open tabs' ids, or undefined when nothing answers. */
+  list(url: string, signal: AbortSignal): Promise<string[] | undefined>;
+  /** Opens a tab and returns its id. */
+  open(url: string, signal: AbortSignal): Promise<string | undefined>;
+  /** Brings a tab's window to the front if Chrome allows it; never fails. */
+  activate(url: string, id: string, signal: AbortSignal): Promise<void>;
 }
 
 export function createChromeStarter(options: {
@@ -248,6 +249,8 @@ export function createChromeStarter(options: {
         exited: boolean;
         exit: Promise<void>;
         failure?: string;
+        // Brought to the front once it has a tab.
+        shown: boolean;
       }
     | undefined;
 
@@ -275,6 +278,7 @@ export function createChromeStarter(options: {
       process: child,
       exited: false,
       exit: new Promise((resolve) => (exited = resolve)),
+      shown: false,
     };
     const end = (failure: string): void => {
       state.exited = true;
@@ -289,36 +293,48 @@ export function createChromeStarter(options: {
     return state;
   };
 
+  // Starts Chrome unless this server's is still starting, and waits for its
+  // first tab, so the action has a page.
+  const launched = async (
+    signal: AbortSignal,
+    started?: () => void,
+  ): Promise<string[]> => {
+    if (!owned || owned.exited) {
+      owned = start();
+      started?.();
+    }
+    const current = owned;
+    const deadline = Date.now() + CHROME_START_MS;
+    for (;;) {
+      const tabs = await pages.list(url, signal);
+      if (tabs?.length) return tabs;
+      if (current.failure) throw new Error(current.failure);
+      if (Date.now() > deadline)
+        throw new Error(
+          `Chrome did not answer at ${url} within ${CHROME_START_MS / 1000} s; ${OTHER_CHROME}`,
+        );
+      await delay(200, undefined, { signal });
+    }
+  };
+
   return {
     chrome,
     profile,
     async ensure(signal, started) {
-      const open = await pages.count(url, signal);
-      if (open === undefined) {
-        if (!owned || owned.exited) {
-          owned = start();
-          started?.();
-        }
-        const current = owned;
-        const deadline = Date.now() + CHROME_START_MS;
-        // Ready once its first tab is listed, so the action has a page.
-        while (!((await pages.count(url, signal)) ?? 0)) {
-          if (current.failure) throw new Error(current.failure);
-          if (Date.now() > deadline)
-            throw new Error(
-              `Chrome did not answer at ${url} within ${CHROME_START_MS / 1000} s; ${OTHER_CHROME}`,
-            );
-          await delay(200, undefined, { signal });
-        }
-        // Launched from Codex's background process, Chrome's window would
-        // stay behind other apps or on another Space.
-        await pages.front(url, signal);
+      const [first] =
+        (await pages.list(url, signal)) ?? (await launched(signal, started));
+      // On macOS Chrome keeps running after its last window closes.
+      if (first === undefined) {
+        const id = await pages.open(url, signal);
+        if (id) await pages.activate(url, id, signal);
         return;
       }
-      // On macOS Chrome keeps running after its last window closes.
-      if (open === 0) {
-        await pages.open(url, signal);
-        await pages.front(url, signal);
+      // A Chrome this server started opens behind other apps or on another
+      // Space (see docs/DESIGN.md), so it is shown once, even when the action
+      // that started it was cancelled.
+      if (owned && !owned.exited && !owned.shown) {
+        owned.shown = true;
+        await pages.activate(url, first, signal);
       }
     },
     async stop() {
@@ -334,20 +350,24 @@ export function createChromeStarter(options: {
   };
 }
 
-const devToolsPages: DevToolsPages = {
-  async count(url, signal) {
+export const devToolsPages: DevToolsPages = {
+  async list(url, signal) {
     try {
       const response = await fetch(`${url}/json/list`, {
         signal: AbortSignal.any([signal, AbortSignal.timeout(1_000)]),
       });
       const body: unknown = response.ok ? await response.json() : undefined;
       if (!Array.isArray(body)) return undefined;
-      return body.filter(
-        (target) =>
-          isRecord(target) &&
-          target.type === "page" &&
-          !String(target.url).startsWith("devtools://"),
-      ).length;
+      // The pages the browser tool can drive.
+      return body
+        .filter(
+          (target): target is { id: string } =>
+            isRecord(target) &&
+            target.type === "page" &&
+            typeof target.id === "string" &&
+            !String(target.url).startsWith("devtools://"),
+        )
+        .map((target) => target.id);
     } catch (error) {
       // A cancelled action must not start Chrome.
       if (signal.aborted) throw error;
@@ -362,29 +382,19 @@ const devToolsPages: DevToolsPages = {
     });
     if (!response.ok)
       throw new Error(`Chrome refused a new tab (HTTP ${response.status})`);
+    const created: unknown = await response.json();
+    return isRecord(created) && typeof created.id === "string"
+      ? created.id
+      : undefined;
   },
-  async front(url, signal) {
-    const bounded = () => AbortSignal.any([signal, AbortSignal.timeout(1_000)]);
+  async activate(url, id, signal) {
     try {
-      const response = await fetch(`${url}/json/list`, { signal: bounded() });
-      const body: unknown = await response.json();
-      const page = Array.isArray(body)
-        ? body.find(
-            (target) =>
-              isRecord(target) &&
-              target.type === "page" &&
-              typeof target.id === "string",
-          )
-        : undefined;
-      if (isRecord(page))
-        await fetch(
-          `${url}/json/activate/${encodeURIComponent(String(page.id))}`,
-          {
-            method: "PUT",
-            signal: bounded(),
-          },
-        );
-    } catch {
+      await fetch(`${url}/json/activate/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        signal: AbortSignal.any([signal, AbortSignal.timeout(1_000)]),
+      });
+    } catch (error) {
+      if (signal.aborted) throw error;
       // The action works without it.
     }
   },
