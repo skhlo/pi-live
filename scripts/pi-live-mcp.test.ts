@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
+import path from "node:path";
 import { createInterface } from "node:readline";
 import { test } from "node:test";
 import { SIDECAR_CDP } from "../src/browser-sidecar.ts";
@@ -16,7 +17,7 @@ import {
   type McpBrowser,
 } from "../src/mcp.ts";
 
-const SERVER = new URL("../src/mcp.ts", import.meta.url).pathname;
+const SERVER = path.join(import.meta.dirname, "..", "src", "mcp.ts");
 
 // A browser tool whose actions finish only when the test releases them.
 function fakeTool() {
@@ -34,10 +35,12 @@ function fakeTool() {
   return { tool, calls, release: () => releases.shift()?.() };
 }
 
-function server(browser: McpBrowser) {
+function server(browser: McpBrowser, options?: { timeoutMs?: number }) {
   const sent: Array<Record<string, unknown>> = [];
-  const mcp = createMcpServer(browser, (message) =>
-    sent.push(message as Record<string, unknown>),
+  const mcp = createMcpServer(
+    browser,
+    (message) => sent.push(message as Record<string, unknown>),
+    options,
   );
   const request = (id: number, method: string, params?: unknown) =>
     mcp.receive(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
@@ -55,6 +58,12 @@ test("the MCP server introduces itself and lists the browser tool", () => {
   request(1, "initialize", { protocolVersion: "2025-06-18" });
   request(2, "tools/list");
   request(3, "ping");
+  request(4, "initialize", { protocolVersion: "2099-01-01" });
+  assert.equal(
+    (sent[3]?.result as Record<string, unknown>).protocolVersion,
+    "2025-06-18",
+    "an unknown version gets the newest one the server speaks",
+  );
   assert.equal(
     (sent[0]?.result as Record<string, unknown>).protocolVersion,
     "2025-06-18",
@@ -147,6 +156,47 @@ test("a cancelled browser call stops and gets no reply", async () => {
   );
 });
 
+test("a hung browser call releases the queue on cancel or after its bound", async () => {
+  const fake = fakeTool();
+  const { sent, receive, request } = server(
+    { tool: fake.tool, url: SIDECAR_CDP },
+    { timeoutMs: 200 },
+  );
+  // Calls 1 and 2 never finish; the fake ignores their signals.
+  request(1, "tools/call", call("look"));
+  request(2, "tools/call", call("tabs"));
+  request(3, "tools/call", call("read"));
+  await settle();
+  receive(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      method: "notifications/cancelled",
+      params: { requestId: 1 },
+    }),
+  );
+  await settle();
+  assert.equal(fake.calls.length, 2, "the cancel frees the queue at once");
+  const started = Date.now();
+  while (fake.calls.length < 3 && Date.now() - started < 2_000)
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(fake.calls.length, 3, "the bound frees it again");
+  fake.release();
+  fake.release();
+  fake.release();
+  await settle();
+  assert.deepEqual(
+    sent.map((message) => message.id),
+    [2, 3],
+  );
+  const timedOut = (sent[0]?.result as { content: Array<{ text: string }> })
+    .content[0]?.text;
+  assert.match(timedOut ?? "", /^Browser action timed out after 0\.2 s\./);
+  assert.match(timedOut ?? "", /scripts\/browser-sidecar\.sh/);
+  assert.deepEqual(sent[1]?.result, {
+    content: [{ type: "text", text: "did read" }],
+  });
+});
+
 test("the browser comes from PI_LIVE_BROWSER_CDP or the sidecar", () => {
   const urls: string[] = [];
   const create = (url: string): BrowserTool => {
@@ -170,7 +220,7 @@ test("the browser comes from PI_LIVE_BROWSER_CDP or the sidecar", () => {
   assert.match((bad as { problem: string }).problem, /loopback/);
 });
 
-test("the MCP server runs as a process and names the sidecar when Chrome is absent", async (t) => {
+test("the MCP server runs as a process, explains a missing Chrome and exits with stdin", async (t) => {
   // A port that was free a moment ago stands in for a Chrome that is not running.
   const port = await new Promise<number>((resolve) => {
     const probe = createServer().listen(0, "127.0.0.1", () => {
@@ -208,7 +258,10 @@ test("the MCP server runs as a process and names the sidecar when Chrome is abse
   assert.equal(result.isError, true);
   assert.match(
     result.content[0]?.text ?? "",
-    /No Chrome answers at http:\/\/127\.0\.0\.1:\d+/,
+    /^Browser action failed: fetch failed\. If no Chrome is running with DevTools at http:\/\/127\.0\.0\.1:\d+/,
   );
-  assert.match(result.content[0]?.text ?? "", /scripts\/browser-sidecar\.sh/);
+  assert.match(result.content[0]?.text ?? "", /--remote-debugging-port/);
+  const exited = new Promise((resolve) => child.on("exit", resolve));
+  child.stdin.end();
+  assert.equal(await exited, 0);
 });

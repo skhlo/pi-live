@@ -232,14 +232,24 @@ including Codex voice, one `browser` tool with the same actions and refusals as
 `live_browser`. When Codex trusts this checkout, `.codex/config.toml` starts it
 and the `.agents/skills/voice-browser` skill tells Codex how to use it in voice
 conversations; its tool description asks Codex to prefer it there over other
-browser or computer-use tools. It needs no new dependencies.
+browser or computer-use tools. It needs no new dependencies. Its calls skip
+Codex's approval review, which added seconds per call by voice, so the tool's
+refusals are the only guard. It runs one action at a time, and an action that
+takes more than 30 seconds is abandoned.
 
 It drives the Chrome at `PI_LIVE_BROWSER_CDP` (from the environment, which the
-Codex config forwards, or the checkout's `.env`), or else the browser sidecar's
-at `http://127.0.0.1:9333`. It never starts a browser: when nothing answers, the
-tool says so and names `scripts/browser-sidecar.sh`. It does not use Jev,
-TypeSafe or the voice-browser controller. Page content it returns goes to
-OpenAI through Codex.
+Codex config forwards, or the checkout's `.env`), or else the one at
+`http://127.0.0.1:9333`. It never starts a browser. The browser sidecar provides
+that Chrome but also needs voice-browser and a TypeSafe key; without them, start
+Chrome with DevTools and its own profile:
+
+```sh
+open -na "Google Chrome" --args --remote-debugging-port=9333 \
+  --user-data-dir="$HOME/.cache/pi-live/browser-profile"
+```
+
+The server itself does not use Jev, TypeSafe or the voice-browser controller.
+Page content it returns goes to OpenAI through Codex.
 
 ## Development
 

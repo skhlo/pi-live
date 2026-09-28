@@ -123,7 +123,8 @@ provider request or native addon execution was used for that work.
 ## Accepted decisions
 
 - Pi Live is a standalone extension repository, not a standalone application,
-  monorepo, generic installer, or framework.
+  monorepo, generic installer, or framework. Its one other entry point is the
+  Codex browser server below, which reuses the browser tool.
 - Runtime Pi/TUI dependencies remain wildcard peers; development uses exact
   Pi/TUI 0.87.1. Node >=22.19.0, pnpm 11.8.0, the four runtime dependency pins,
   and native leaf 17.2.9 remain fixed.
@@ -274,6 +275,26 @@ The public GPT-Live API gives client delegations no task text, and its function
 tools exist only under Responses delegation, which is chosen per session and
 adds a backend model. Browser mode therefore does not compose commands;
 Responses delegation with a browser tool remains open in #16.
+
+## Codex browser server
+
+`src/mcp.ts` gives Codex the browser tool as a stdio MCP server (#23). Codex's
+own voice replaces the voice call, and its agent decides what each request
+needs, so neither the Jev router nor browser delegation ports; only
+`createBrowserTool`, its schema and its refusals are shared. Any change to that
+tool's actions, refusals or result text therefore reaches both Pi and Codex.
+
+The server speaks newline-delimited JSON-RPC with Node built-ins, avoiding the
+MCP SDK's dependency and notice inventory. It runs one action at a time and
+releases the queue on cancellation or after 30 seconds, because some DevTools
+requests ignore the abort signal. It ships in the package payload, since the
+source inventory is exact, but Pi never loads it.
+
+The repository's `.codex/config.toml` starts it from the Git root, forwards
+`PI_LIVE_BROWSER_CDP`, and skips Codex's approval review. The tool description
+asks Codex to prefer it in voice conversations, and
+`.agents/skills/voice-browser` covers its use; Codex's built-in browser and
+computer-use tools stay enabled.
 
 ## Remaining limits
 

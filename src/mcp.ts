@@ -5,7 +5,6 @@
 
 import path from "node:path";
 import { createInterface } from "node:readline";
-import { fileURLToPath } from "node:url";
 import { SIDECAR_CDP } from "./browser-sidecar.ts";
 import {
   BROWSER_TOOL_SCHEMA,
@@ -16,7 +15,9 @@ import {
 import { browserDevToolsUrl, browserEnvironment, isRecord } from "./browser.ts";
 
 export const MCP_TOOL_NAME = "browser";
-const PROTOCOL_VERSION = "2025-06-18";
+// Newest first; the tools-only subset used here is the same in each.
+const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
+const ACTION_TIMEOUT_MS = 30_000;
 
 export const MCP_TOOL = {
   name: MCP_TOOL_NAME,
@@ -34,6 +35,7 @@ type Id = string | number;
 export function createMcpServer(
   browser: McpBrowser,
   send: (message: unknown) => void,
+  { timeoutMs = ACTION_TIMEOUT_MS }: { timeoutMs?: number } = {},
 ): { receive(line: string): void } {
   const running = new Map<Id, AbortController>();
   let queue: Promise<void> = Promise.resolve();
@@ -42,7 +44,7 @@ export function createMcpServer(
     send({ jsonrpc: "2.0", id, result });
   const fail = (id: Id | null, code: number, message: string): void =>
     send({ jsonrpc: "2.0", id, error: { code, message } });
-  const answer = (id: Id, text: string, isError = false): void =>
+  const toolResult = (id: Id, text: string, isError = false): void =>
     reply(id, {
       content: [{ type: "text", text }],
       ...(isError ? { isError } : {}),
@@ -54,12 +56,12 @@ export function createMcpServer(
       return;
     }
     if (!("tool" in browser)) {
-      answer(id, browser.problem, true);
+      toolResult(id, browser.problem, true);
       return;
     }
     const checked = browserToolParams(params.arguments);
     if (!checked) {
-      answer(id, "Invalid browser arguments.", true);
+      toolResult(id, "Invalid browser arguments.", true);
       return;
     }
     const controller = new AbortController();
@@ -67,18 +69,25 @@ export function createMcpServer(
     queue = queue.then(async () => {
       try {
         if (controller.signal.aborted) return;
-        const result = await browser.tool.run(checked, controller.signal);
-        if (!controller.signal.aborted) answer(id, result.text);
-      } catch (error) {
-        if (controller.signal.aborted) return;
-        // Node's fetch rejects with this TypeError when nothing listens.
-        answer(
-          id,
-          error instanceof TypeError && error.message === "fetch failed"
-            ? `No Chrome answers at ${browser.url}. Tell the user to start one with scripts/browser-sidecar.sh in the pi-live checkout, or to set PI_LIVE_BROWSER_CDP.`
-            : `Browser action failed: ${error instanceof Error ? error.message : String(error)}`,
-          true,
+        const signal = AbortSignal.any([
+          controller.signal,
+          AbortSignal.timeout(timeoutMs),
+        ]);
+        // Some DevTools requests ignore the signal, so a cancel or the time
+        // bound releases the queue without waiting for them.
+        const run = browser.tool.run(checked, signal);
+        const stopped = new Promise<never>((_, reject) =>
+          signal.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          }),
         );
+        run.catch(() => undefined);
+        stopped.catch(() => undefined);
+        const result = await Promise.race([run, stopped]);
+        if (!controller.signal.aborted) toolResult(id, result.text);
+      } catch (error) {
+        if (!controller.signal.aborted)
+          toolResult(id, failure(browser.url, error, timeoutMs), true);
       } finally {
         running.delete(id);
       }
@@ -114,10 +123,11 @@ export function createMcpServer(
       switch (message.method) {
         case "initialize":
           reply(id, {
-            protocolVersion:
-              typeof params.protocolVersion === "string"
-                ? params.protocolVersion
-                : PROTOCOL_VERSION,
+            protocolVersion: PROTOCOL_VERSIONS.includes(
+              String(params.protocolVersion),
+            )
+              ? params.protocolVersion
+              : PROTOCOL_VERSIONS[0],
             capabilities: { tools: {} },
             serverInfo: { name: "pi-live-browser", version: "0.1.0" },
           });
@@ -136,6 +146,14 @@ export function createMcpServer(
       }
     },
   };
+}
+
+function failure(url: string, error: unknown, timeoutMs: number): string {
+  const cause =
+    error instanceof Error && error.name === "TimeoutError"
+      ? `Browser action timed out after ${timeoutMs / 1000} s.`
+      : `Browser action failed: ${error instanceof Error ? error.message : String(error)}.`;
+  return `${cause} If no Chrome is running with DevTools at ${url}, tell the user to start one there: the browser sidecar (scripts/browser-sidecar.sh), or Chrome with --remote-debugging-port and its own --user-data-dir. PI_LIVE_BROWSER_CDP selects another address.`;
 }
 
 function isId(value: unknown): value is Id {
@@ -157,17 +175,17 @@ export function mcpBrowser(
       };
 }
 
-if (
-  process.argv[1] &&
-  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
-) {
-  const envFile = fileURLToPath(new URL("../.env", import.meta.url));
-  const { values, notice } = browserEnvironment(process.env, envFile);
+if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
+  const { values, notice } = browserEnvironment(
+    process.env,
+    path.join(import.meta.dirname, "..", ".env"),
+  );
   if (notice) process.stderr.write(`pi-live-browser: ${notice}\n`);
   const server = createMcpServer(mcpBrowser(values), (message) =>
     process.stdout.write(`${JSON.stringify(message)}\n`),
   );
-  createInterface({ input: process.stdin }).on("line", (line) =>
-    server.receive(line),
-  );
+  createInterface({ input: process.stdin })
+    .on("line", (line) => server.receive(line))
+    // Codex closing stdin ends the server, even with a DevTools request pending.
+    .on("close", () => process.exit(0));
 }
