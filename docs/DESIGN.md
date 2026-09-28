@@ -294,8 +294,12 @@ When nothing answers at a `127.0.0.1` DevTools address, the next action starts
 Chrome with the sidecar script's flags and profile, without voice-browser or a
 key (#29). It starts without a prompt, because Codex sends MCP approvals to its
 automatic reviewer rather than the user. The next reply after the launch says
-so, even when that action fails or is cancelled. Readiness waits for Chrome's first tab, and a Chrome with no
-tab, as macOS leaves one after its last window closes, gets a new one.
+so, even when that action fails or is cancelled. Readiness waits for Chrome's
+first tab, and a Chrome with no tab, as macOS leaves one after its last window
+closes, gets a new one. Either way the server then activates that tab through
+DevTools (`/json/activate`), because a Chrome launched from Codex's background
+app server otherwise opens behind other apps or on another Space; activating by
+DevTools raises that Chrome, not the user's everyday one.
 
 Chrome stays in the server's process group. The server stops it on stdin close
 or a stop signal, killing it after 3 seconds, and Codex also signals the group.

@@ -223,6 +223,8 @@ export interface DevToolsPages {
   /** Open tabs, or undefined when nothing answers. */
   count(url: string, signal: AbortSignal): Promise<number | undefined>;
   open(url: string, signal: AbortSignal): Promise<void>;
+  /** Brings the first tab's window to the front, if Chrome allows it. */
+  front(url: string, signal: AbortSignal): Promise<void>;
 }
 
 export function createChromeStarter(options: {
@@ -308,10 +310,16 @@ export function createChromeStarter(options: {
             );
           await delay(200, undefined, { signal });
         }
+        // Launched from Codex's background process, Chrome's window would
+        // stay behind other apps or on another Space.
+        await pages.front(url, signal);
         return;
       }
       // On macOS Chrome keeps running after its last window closes.
-      if (open === 0) await pages.open(url, signal);
+      if (open === 0) {
+        await pages.open(url, signal);
+        await pages.front(url, signal);
+      }
     },
     async stop() {
       if (!owned || owned.exited) return;
@@ -354,6 +362,31 @@ const devToolsPages: DevToolsPages = {
     });
     if (!response.ok)
       throw new Error(`Chrome refused a new tab (HTTP ${response.status})`);
+  },
+  async front(url, signal) {
+    const bounded = () => AbortSignal.any([signal, AbortSignal.timeout(1_000)]);
+    try {
+      const response = await fetch(`${url}/json/list`, { signal: bounded() });
+      const body: unknown = await response.json();
+      const page = Array.isArray(body)
+        ? body.find(
+            (target) =>
+              isRecord(target) &&
+              target.type === "page" &&
+              typeof target.id === "string",
+          )
+        : undefined;
+      if (isRecord(page))
+        await fetch(
+          `${url}/json/activate/${encodeURIComponent(String(page.id))}`,
+          {
+            method: "PUT",
+            signal: bounded(),
+          },
+        );
+    } catch {
+      // The action works without it.
+    }
   },
 };
 

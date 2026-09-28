@@ -291,6 +291,7 @@ test("the starter starts Chrome only when nothing answers, and keeps a tab open"
   const profile = path.join(root, "profile");
   let tabs: number | undefined = 1;
   let opened = 0;
+  let fronted = 0;
   const launches: string[][] = [];
   let current = fakeChrome();
   let started = 0;
@@ -310,6 +311,9 @@ test("the starter starts Chrome only when nothing answers, and keeps a tab open"
         opened++;
         tabs = 1;
       },
+      front: async () => {
+        fronted++;
+      },
     },
   });
   const signal = new AbortController().signal;
@@ -317,11 +321,13 @@ test("the starter starts Chrome only when nothing answers, and keeps a tab open"
 
   await ensure();
   assert.equal(launches.length, 0, "a running Chrome is reused");
+  assert.equal(fronted, 0, "and left where it is");
 
   // Its last window was closed; Chrome keeps running on macOS.
   tabs = 0;
   await ensure();
   assert.equal(opened, 1, "a new tab is opened");
+  assert.equal(fronted, 1, "and brought to the front");
 
   tabs = undefined;
   await ensure();
@@ -330,8 +336,10 @@ test("the starter starts Chrome only when nothing answers, and keeps a tab open"
     "--remote-debugging-port=9444",
     `--user-data-dir=${profile}`,
   ]);
+  assert.equal(fronted, 2, "a started Chrome is brought to the front");
   await ensure();
   assert.equal(launches.length, 1, "then it is reused");
+  assert.equal(fronted, 2);
 
   // Chrome quit: the next action starts it again.
   current.exit();
@@ -383,6 +391,7 @@ test("the server launches Chrome as the sidecar script does", async (t) => {
     pages: {
       count: async () => (args.length ? 1 : undefined),
       open: async () => undefined,
+      front: async () => undefined,
     },
   });
   await starter.ensure(new AbortController().signal);
@@ -448,7 +457,11 @@ test("the starter kills a Chrome that outlasts its stop", async (t) => {
       tabs = 1;
       return stubborn.chrome;
     },
-    pages: { count: async () => tabs, open: async () => undefined },
+    pages: {
+      count: async () => tabs,
+      open: async () => undefined,
+      front: async () => undefined,
+    },
     stopMs: 20,
   });
   await starter.ensure(new AbortController().signal);
@@ -460,7 +473,11 @@ test("the starter reports a missing or failing Chrome", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "pi-live-mcp-"));
   t.after(() => rm(root, { recursive: true }));
   const signal = new AbortController().signal;
-  const none = { count: async () => undefined, open: async () => undefined };
+  const none = {
+    count: async () => undefined,
+    open: async () => undefined,
+    front: async () => undefined,
+  };
   for (const chrome of [path.join(root, "no-chrome"), root]) {
     const missing = createChromeStarter({
       url: "http://127.0.0.1:9444",
@@ -586,6 +603,7 @@ test("the server's settings come from the environment, else the checkout's .env"
 async function serverProcess(t: import("node:test").TestContext) {
   const root = await mkdtemp(path.join(tmpdir(), "pi-live-mcp-"));
   const record = path.join(root, "chrome.json");
+  const requests = path.join(root, "requests.log");
   // A failed test must not leave its fake Chrome running.
   t.after(async () => {
     try {
@@ -615,7 +633,10 @@ const port = process.argv.find((arg) => arg.startsWith("--remote-debugging-port=
 if (process.env.FAKE_IGNORE_TERM) process.on("SIGTERM", () => undefined);
 const page = [{ id: "1", type: "page", title: "", url: "about:blank", webSocketDebuggerUrl: "ws://127.0.0.1:1/devtools/page/1" }];
 require("node:fs").writeFileSync(${JSON.stringify(record)}, JSON.stringify({ pid: process.pid, args: process.argv.slice(2) }));
-http.createServer((request, response) => response.end(JSON.stringify(request.url === "/json/list" ? page : {}))).listen(Number(port), "127.0.0.1");
+http.createServer((request, response) => {
+  require("node:fs").appendFileSync(${JSON.stringify(requests)}, request.method + " " + request.url + "\\n");
+  response.end(JSON.stringify(request.url === "/json/list" ? page : {}));
+}).listen(Number(port), "127.0.0.1");
 `,
   );
   await chmod(chrome, 0o755);
@@ -682,7 +703,9 @@ syncBuiltinESMExports();
       await new Promise((resolve) => setTimeout(resolve, 20));
     return !alive(pid);
   };
-  return { root, port, start, chromeRecord, gone };
+  const requested = async () =>
+    (await readFile(requests, "utf8")).trim().split("\n");
+  return { root, port, start, chromeRecord, gone, requested };
 }
 
 test("the server process starts Chrome and closes it when stdin closes", async (t) => {
@@ -698,6 +721,10 @@ test("the server process starts Chrome and closes it when stdin closes", async (
     ),
   );
   const chrome = await fixture.chromeRecord();
+  assert.ok(
+    (await fixture.requested()).includes("PUT /json/activate/1"),
+    "its window is brought to the front",
+  );
   assert.ok(chrome.args.includes(`--remote-debugging-port=${fixture.port}`));
   assert.ok(
     chrome.args.includes(
