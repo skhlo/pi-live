@@ -1,11 +1,17 @@
 # Codex loads this only when it trusts the checkout. The browser server drives
 # the Chrome at PI_LIVE_BROWSER_CDP (from the environment or the checkout's
-# .env), or else the browser sidecar's; see src/mcp.ts. Codex starts it in the
-# folder Codex was started from, so the checkout root comes from Git.
+# .env), or else the browser sidecar's, and starts that Chrome when none
+# answers at a 127.0.0.1 address; see src/mcp.ts. Codex starts the server in the folder Codex was
+# started from, so the checkout root comes from Git.
 [mcp_servers.pi_live_browser]
 command = "sh"
 args = ["-c", 'exec node "$(git rev-parse --show-toplevel)/src/mcp.ts"']
-env_vars = ["PI_LIVE_BROWSER_CDP"]
+env_vars = [
+  "PI_LIVE_BROWSER_CDP",
+  "SIDECAR_CHROME",
+  "SIDECAR_CHROME_PROFILE",
+  "XDG_CACHE_HOME",
+]
 # Browser calls skip Codex's approval review, which adds seconds per call by
 # voice; the tool's own refusals guard buying, paying, deleting, sending,
 # booking and signing in.

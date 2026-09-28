@@ -290,11 +290,35 @@ releases the queue on cancellation or after 30 seconds, because some DevTools
 requests ignore the abort signal. It ships in the package payload, since the
 source inventory is exact, but Pi never loads it.
 
-The repository's `.codex/config.toml` starts it from the Git root, forwards
-`PI_LIVE_BROWSER_CDP`, and skips Codex's approval review. The tool description
-asks Codex to prefer it in voice conversations, and
-`.agents/skills/voice-browser` covers its use; Codex's built-in browser and
-computer-use tools stay enabled.
+When nothing answers at a `127.0.0.1` DevTools address, the next action starts
+Chrome with the sidecar script's flags and profile, without voice-browser or a
+key (#29). It starts without a prompt, because Codex sends MCP approvals to its
+automatic reviewer rather than the user. The next reply after the launch says
+so, even when that action fails or is cancelled. Readiness waits for Chrome's
+first tab, and a Chrome with no tab, as macOS leaves one after its last window
+closes, gets a new one. A Chrome launched from Codex's background app server
+opens behind other apps or on another Space, so the server brings each Chrome it
+starts to the front once, through DevTools (`/json/activate`), when it first
+lists a tab, even if the action that started it was cancelled. A new tab it
+opens is activated the same way. DevTools raises that Chrome, not the user's
+everyday one, and a failure to raise it does not fail the action.
+
+Chrome stays in the server's process group. The server stops it on stdin close
+or a stop signal, killing it after 3 seconds, and Codex also signals the group.
+`codex exec` does this as it exits. The plain `codex` command hosts servers in
+its background app server, which stopped an idle server about 50 seconds after
+the terminal app quit, and shell variables from that app do not reach it, so
+the server also reads `SIDECAR_CHROME` and `SIDECAR_CHROME_PROFILE` from the
+checkout's `.env`, as the sidecar script does. Only a server killed outright
+leaves its Chrome running for the next Codex session to reuse. A Chrome already
+answering is reused and never stopped. Chrome allows one instance per profile,
+so a sidecar started meanwhile attaches to this Chrome instead of its own.
+
+The repository's `.codex/config.toml` starts the server from the Git root,
+forwards `PI_LIVE_BROWSER_CDP` and the sidecar's Chrome settings, and skips
+Codex's approval review. The tool description asks Codex to prefer it in voice
+conversations, and `.agents/skills/voice-browser` covers its use; Codex's
+built-in browser and computer-use tools stay enabled.
 
 ## Remaining limits
 

@@ -11,12 +11,12 @@
 # VOICE_BROWSER_DIR       voice-browser checkout with dependencies installed
 #                         (github.com/moritzkremb/jev-voice-browser)
 # TYPESAFE_API_KEY        Jev key (or JEV_API_KEY)
-# SIDECAR_KEY_FILE        env file for the settings above that the
-#                         environment leaves unset
-#                         (default: the checkout's .env, if present)
 # SIDECAR_CHROME          Chrome binary (default: Google Chrome on macOS)
 # SIDECAR_CHROME_PROFILE  Chrome profile
 #                         (default: ${XDG_CACHE_HOME:-~/.cache}/pi-live/browser-profile)
+# SIDECAR_KEY_FILE        env file for the settings above that the
+#                         environment leaves unset
+#                         (default: the checkout's .env, if present)
 # SIDECAR_STOP_SECONDS    how long stopping waits before killing (default: 5)
 # Ctrl+C stops voice-browser and Chrome.
 set -euo pipefail
@@ -33,10 +33,16 @@ setting_from_file() {
     head -n 1 | sed -E 's/[[:space:]]+#.*$//' | tr -d '"'"'"'\r' | sed 's/[[:space:]]*$//'
 }
 
-voice_browser_dir="${VOICE_BROWSER_DIR:-}"
-if [ -z "$voice_browser_dir" ] && [ -f "$key_file" ] && [ -r "$key_file" ]; then
-  voice_browser_dir="$(setting_from_file VOICE_BROWSER_DIR)"
-fi
+# The environment's value for NAME, else the env file's.
+setting() {
+  local value="${!1:-}"
+  if [ -z "$value" ] && [ -f "$key_file" ] && [ -r "$key_file" ]; then
+    value="$(setting_from_file "$1")"
+  fi
+  printf '%s' "$value"
+}
+
+voice_browser_dir="$(setting VOICE_BROWSER_DIR)"
 [ -n "$voice_browser_dir" ] && [ -f "$voice_browser_dir/src/server.js" ] || {
   echo "set VOICE_BROWSER_DIR to a voice-browser checkout, in the environment or the env file" >&2
   exit 1
@@ -56,12 +62,14 @@ fi
   exit 1
 }
 
-chrome="${SIDECAR_CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
+chrome="$(setting SIDECAR_CHROME)"
+chrome="${chrome:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
 [ -x "$chrome" ] || {
   echo "Chrome executable is missing: $chrome" >&2
   exit 1
 }
-profile="${SIDECAR_CHROME_PROFILE:-${XDG_CACHE_HOME:-$HOME/.cache}/pi-live/browser-profile}"
+profile="$(setting SIDECAR_CHROME_PROFILE)"
+profile="${profile:-${XDG_CACHE_HOME:-$HOME/.cache}/pi-live/browser-profile}"
 mkdir -p "$profile"
 stop_seconds="${SIDECAR_STOP_SECONDS:-5}"
 [[ "$stop_seconds" =~ ^[1-9][0-9]*$ ]] || stop_seconds=5
