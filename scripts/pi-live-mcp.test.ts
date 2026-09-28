@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -406,6 +407,34 @@ test("the server launches Chrome as the sidecar script does", async (t) => {
   );
 });
 
+test("a cancelled action never starts Chrome", async (t) => {
+  // A DevTools address that accepts the request and never answers.
+  const listener = createHttpServer(() => undefined);
+  await new Promise<void>((resolve) =>
+    listener.listen(0, "127.0.0.1", resolve),
+  );
+  t.after(() => listener.closeAllConnections());
+  t.after(() => listener.close());
+  const address = listener.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+  const root = await mkdtemp(path.join(tmpdir(), "pi-live-mcp-"));
+  t.after(() => rm(root, { recursive: true }));
+  let launches = 0;
+  const starter = createChromeStarter({
+    url: `http://127.0.0.1:${port}`,
+    chrome: process.execPath,
+    profile: path.join(root, "profile"),
+    launch: () => {
+      launches++;
+      return fakeChrome().chrome;
+    },
+  });
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), 50);
+  await assert.rejects(starter.ensure(controller.signal));
+  assert.equal(launches, 0);
+});
+
 test("the starter kills a Chrome that outlasts its stop", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "pi-live-mcp-"));
   t.after(() => rm(root, { recursive: true }));
@@ -513,11 +542,19 @@ test("the browser comes from PI_LIVE_BROWSER_CDP or the sidecar", () => {
     create,
   );
   assert.equal("starter" in localhost, false);
+  // Without a port Chrome would start with no DevTools to drive.
+  const portless = mcpBrowser(
+    { PI_LIVE_BROWSER_CDP: "http://127.0.0.1" },
+    {},
+    create,
+  );
+  assert.equal("starter" in portless, false);
   assert.deepEqual(urls, [
     SIDECAR_CDP,
     "http://127.0.0.1:9444",
     SIDECAR_CDP,
     "http://localhost:9444",
+    "http://127.0.0.1",
   ]);
   const bad = mcpBrowser({ PI_LIVE_BROWSER_CDP: "http://example.com:9333" });
   assert.match((bad as { problem: string }).problem, /loopback/);

@@ -340,16 +340,20 @@ const devToolsPages: DevToolsPages = {
           target.type === "page" &&
           !String(target.url).startsWith("devtools://"),
       ).length;
-    } catch {
+    } catch (error) {
+      // A cancelled action must not start Chrome.
+      if (signal.aborted) throw error;
       return undefined;
     }
   },
   async open(url, signal) {
     // DevTools refuses GET here.
-    await fetch(`${url}/json/new?about:blank`, {
+    const response = await fetch(`${url}/json/new?about:blank`, {
       method: "PUT",
       signal: AbortSignal.any([signal, AbortSignal.timeout(2_000)]),
     });
+    if (!response.ok)
+      throw new Error(`Chrome refused a new tab (HTTP ${response.status})`);
   },
 };
 
@@ -363,7 +367,7 @@ export function mcpSettings(
 
 /**
  * The Chrome to drive: PI_LIVE_BROWSER_CDP, or else the sidecar's. Only a
- * 127.0.0.1 address gets a starter, because Chrome listens there; its profile
+ * 127.0.0.1 address with a port gets a starter, because Chrome listens there; its profile
  * defaults to the sidecar's, under XDG_CACHE_HOME or HOME.
  */
 export function mcpBrowser(
@@ -378,7 +382,9 @@ export function mcpBrowser(
       problem:
         "PI_LIVE_BROWSER_CDP is not an http:// loopback address, so there is no browser to drive.",
     };
-  if (new URL(url).hostname !== "127.0.0.1") return { tool: create(url), url };
+  const { hostname, port } = new URL(url);
+  // Chrome needs a named port to listen on.
+  if (hostname !== "127.0.0.1" || !port) return { tool: create(url), url };
   const cache =
     environment.XDG_CACHE_HOME ||
     path.join(environment.HOME || homedir(), ".cache");
