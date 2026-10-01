@@ -2756,7 +2756,7 @@ export function createDefaultLiveNativeAdapter(
           } catch {
             return false;
           }
-          // Accepted at the operator's direction (#6). The native close stops
+          // Accepted at the author's direction (#6). The native close stops
           // the speaker device and peer but ignores their errors, joins the
           // send task for at most one second, and never joins the remote-audio
           // task, which cannot play once the speaker is stopped.

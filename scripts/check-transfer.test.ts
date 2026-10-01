@@ -265,10 +265,12 @@ test("the default transfer check rejects the developed working tree", () => {
   const result = check();
   assert.ifError(result.error);
   assert.equal(result.status, 1, result.stdout);
-  // It reports the first developed file it meets: package.json since v0.1.0.
+  // It reports the first developed file it meets, in receipt order: the
+  // provenance record once its wording moved on, else package.json since
+  // v0.1.0.
   assert.match(
     result.stderr,
-    /Transfer bytes differ: (package\.json|src\/live\.ts)/,
+    /Transfer bytes differ: (PROVENANCE\.md|package\.json|src\/live\.ts)/,
   );
 });
 

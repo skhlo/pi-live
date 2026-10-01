@@ -1,59 +1,30 @@
 # pi-live
 
-Private, experimental Pi extension. Voice feeds requests into the current Pi
-conversation and receives Pi's reply. Pi handles typed and spoken input together,
-including its normal extensions, tools and retries.
+Pi Live adds voice to [Pi](https://github.com/earendil-works/pi), the terminal
+coding agent. Say what you want; it lands in the current Pi conversation as an
+ordinary request, Pi works on it with its usual tools and extensions, and the
+reply is spoken back. Typed and spoken input mix freely, and you keep the
+terminal.
 
-It is checked on macOS arm64 only. See [Using Pi Live](#using-pi-live) for
-setup, calls and recovery.
+Before you try it:
 
-## Current behavior
+- **macOS arm64 only.** Checked with Node 22.19.0 or later, Pi 0.87.1 and
+  `@oh-my-pi/pi-natives-darwin-arm64` 17.2.9, which supplies the audio and
+  WebRTC pieces and exists only for that platform. Nothing else is verified.
+- **It costs money and shares data.** Voice runs on OpenAI's GPT-Live API
+  (`gpt-live-1`), billed to the OpenAI API key Pi already uses. Audio,
+  transcripts, the conversation leading to each request, progress notes and
+  Pi's replies go to OpenAI. In browser mode each request and the current page
+  also go to TypeSafe. See [Data sharing](#data-sharing-and-consent).
+- **Experimental, in personal use by its author.** It is loaded from a checkout,
+  not published to npm. Issues and pull requests are welcome; there is no
+  support commitment, and the author's test surface is one laptop.
+- **Browser mode and the Codex browser server are optional extras.** Browser
+  mode needs Chrome and the third-party voice-browser controller, and routes
+  best with a TypeSafe key; the Codex server needs only Chrome. Plain voice
+  needs none of them.
 
-The package exports one Pi extension factory. Discovery registers `/live`,
-`Ctrl+Shift+L`, the historical live-message renderer, public lifecycle, dialog
-and delegation listeners, and the `live_browser` tool, which stays inactive
-until a browser-mode call connects it. Discovery does not load the native addon,
-resolve credentials, create call timers, touch ownership or contact a provider.
-
-- `/live` toggles voice; `start` and `stop` are explicit forms, and `end` or
-  `off` also stop. `browser` starts a browser-mode call (see below). Each new attempt requires ordinary TUI consent. The shifted shortcut follows the same path;
-  commands remain the fallback for unsupported shifted-key encoding.
-- `mute` stops microphone capture while speaker playback may continue. `unmute`
-  reopens capture only within the same active call.
-- `setup` prepares this account's home for calls; see below.
-- `voice <name>` changes the host-local preference while off. `status` reports
-  state, mute, voice, compatibility and a fixed last-failure code. `help` explains
-  controls, data sharing and limitations.
-- The render-only `pi-live` widget shows input level, current role transcripts,
-  mute and working state. It does not replace the footer/editor or intercept
-  their keys. Teardown removes it; there is no widget animation timer.
-- Voice requests become visible Pi messages, including while Pi is working.
-  Pi handles follow-ups and typed input normally. When it settles, its successful
-  reply returns to voice; if it has no reply, voice gets a short notice to check
-  the terminal. Stopping voice stops audio and delivery, while Pi work continues.
-
-Voice runs on OpenAI's GPT-Live API (`gpt-live-1`), billed to the OpenAI API
-key Pi uses for its `openai` provider. Audio, speech transcripts, the conversation
-leading to each request, progress notes (Pi's narration and tools used, including
-typed work), and Pi's final replies are shared with OpenAI. While Pi works, voice
-receives short quiet progress notes; when Pi finishes, voice summarizes its reply
-aloud. HTTP/WebSocket proxy settings do not establish WebRTC/ICE media proxying.
-
-Consent identifies the execution host, OpenAI GPT-Live, microphone and speakers,
-the conversation, progress and reply sharing, and proxy limitations. Reported non-live extension dialogs fence
-voice when their delayed notification arrives. Shortcut-opened and unreported
-nested dialogs can leave voice active; stop voice before opening them when
-capture and delivery must stop. Voice never answers or grants an approval.
-
-Do not load another live extension alongside Pi Live. It refuses observed
-conflicts with `@monotykamary/pi-better-openai` 0.2.6 and its pinned Git source,
-and refuses account pooling announced by `pi-multiprovider`. These source and
-command checks cannot inventory every extension or conflicting shortcut.
-
-## Using Pi Live
-
-Pi Live is checked on macOS arm64 with Node 22.19.0 or later, Pi 0.87.1 and
-`@oh-my-pi/pi-natives-darwin-arm64` 17.2.9. Other platforms are unverified.
+## Quick start
 
 1. In a checkout of this repository, restore dependencies with scripts and
    automatic peers disabled:
@@ -77,13 +48,64 @@ Pi Live is checked on macOS arm64 with Node 22.19.0 or later, Pi 0.87.1 and
 5. Run `/live` and accept the consent prompt. macOS asks the terminal app for
    microphone access on first use.
 
+Type `/live help` in Pi for controls, data sharing and limits. Run `/live stop`
+(or `end`, `off`) to hang up; Pi keeps working on anything already handed over.
+
+## How it behaves
+
+The package exports one Pi extension factory. Discovery registers `/live`,
+`Ctrl+Shift+L`, the historical live-message renderer, public lifecycle, dialog
+and delegation listeners, and the `live_browser` tool, which stays inactive
+until a browser-mode call connects it. Discovery does not load the native addon,
+resolve credentials, create call timers, touch ownership or contact a provider.
+
+- `/live` toggles voice; `start` and `stop` are explicit forms, and `end` or
+  `off` also stop. `browser` starts a browser-mode call (see below). Each new attempt requires ordinary TUI consent. The shifted shortcut follows the same path;
+  commands remain the fallback for unsupported shifted-key encoding.
+- `mute` stops microphone capture while speaker playback may continue. `unmute`
+  reopens capture only within the same active call.
+- `setup` prepares this account's home for calls; see [Quick start](#quick-start).
+- `voice <name>` changes the host-local preference while off. `status` reports
+  state, mute, voice, compatibility and a fixed last-failure code. `help` explains
+  controls, data sharing and limitations.
+- The render-only `pi-live` widget shows input level, current role transcripts,
+  mute and working state. It does not replace the footer/editor or intercept
+  their keys. Teardown removes it; there is no widget animation timer.
+- Voice requests become visible Pi messages, including while Pi is working.
+  Pi handles follow-ups and typed input normally. When it settles, its successful
+  reply returns to voice; if it has no reply, voice gets a short notice to check
+  the terminal. Stopping voice stops audio and delivery, while Pi work continues.
+
 Finishing a call releases its lock, so the same Pi session can start another.
 The native audio library's close stops the speaker and the WebRTC connection;
 its remote-audio task is not awaited, which is an accepted limit. Behind an
 HTTPS proxy, the sideband's cleanup cannot be confirmed, so each call there ends
 with `cleanup-blocked`.
 
-### Browser mode (experimental)
+Do not load another live extension alongside Pi Live. It refuses observed
+conflicts with `@monotykamary/pi-better-openai` 0.2.6 and its pinned Git source,
+and refuses account pooling announced by `pi-multiprovider`. These source and
+command checks cannot inventory every extension or conflicting shortcut.
+
+## Data sharing and consent
+
+Voice runs on OpenAI's GPT-Live API (`gpt-live-1`), billed to the OpenAI API
+key Pi uses for its `openai` provider. Audio, speech transcripts, the conversation
+leading to each request, progress notes (Pi's narration and tools used, including
+typed work), and Pi's final replies are shared with OpenAI. While Pi works, voice
+receives short quiet progress notes; when Pi finishes, voice summarizes its reply
+aloud. HTTP/WebSocket proxy settings do not establish WebRTC/ICE media proxying.
+In browser mode, each spoken request and the current page URL and title are also
+sent to TypeSafe's Jev model for routing when a TypeSafe key is set, and page
+content read through `live_browser` reaches OpenAI through Pi.
+
+Consent identifies the execution host, OpenAI GPT-Live, microphone and speakers,
+the conversation, progress and reply sharing, and proxy limitations. Reported non-live extension dialogs fence
+voice when their delayed notification arrives. Shortcut-opened and unreported
+nested dialogs can leave voice active; stop voice before opening them when
+capture and delivery must stop. Voice never answers or grants an approval.
+
+## Browser mode (experimental)
 
 `/live browser` starts a call that sends quick browser commands to a fast
 browser controller and everything else to Pi
@@ -183,7 +205,7 @@ let the user say it. voice-browser follows only tabs it opened itself: after Pi
 switches or opens a tab, quick commands still act on voice-browser's tab, so
 `live_browser` keeps links in the current tab and opens new tabs only on request.
 
-### Recovery
+## Recovery
 
 - **Setup refused:** the message says why, for example a folder that is not
   yours, is reached through a link, or is not on a local disk. Fix that and run
@@ -215,10 +237,11 @@ you no longer need them.
 See [setup and readiness verification](docs/ISSUE-6-VERIFICATION.md),
 [delegation/control verification](docs/ISSUE-5-VERIFICATION.md),
 [transport limits](docs/ISSUE-4-VERIFICATION.md), and
-[lifecycle verification](docs/ISSUE-3-VERIFICATION.md). The operator adopted
-`v0.1.0` for personal MBA use after the [canary](docs/ISSUE-7-VERIFICATION.md),
-with the real denied-microphone-permission check explicitly waived. This is
-explicit loading only, not global registration or dotfiles integration.
+[lifecycle verification](docs/ISSUE-3-VERIFICATION.md). The author adopted
+`v0.1.0` for personal use on a MacBook Air after the
+[canary](docs/ISSUE-7-VERIFICATION.md), with the real
+denied-microphone-permission check explicitly waived. Loading is explicit; there
+is no global registration or installer.
 
 The preference writer uses an optimistic read/compare/retry sequence and atomic
 same-directory rename. That does **not** guarantee that every concurrent change
@@ -306,7 +329,8 @@ repository receipt, and proves tamper rejection. Missing local history is a
 prerequisite error, never an implicit fetch.
 
 Default `check:transfer` is an initial-snapshot diagnostic, not a green current
-runtime gate: it now intentionally rejects developed `src/live.ts`. Its explicit
+runtime gate: it intentionally rejects the developed tree, naming the first
+changed file in receipt order. Its explicit
 `--root <snapshot-directory>` option redirects verified file bytes, never the
 trusted receipt. Private research stays unchecked unless its custody directory
 is explicitly supplied with `--private-evidence`.
@@ -351,6 +375,19 @@ bootstrap, not permission for local installs or real-home adoption. Branch
 protection and required-check policy are separate follow-ups. A configured
 workflow is not passing hosted evidence until its jobs have actually run.
 
-See [the current design](docs/DESIGN.md), [provenance](PROVENANCE.md), and
-[third-party notices](THIRD_PARTY_NOTICES.md). Historical research is archived
-behind [an explicit index](docs/history/extraction/README.md).
+## Provenance and license
+
+Pi Live is MIT licensed. It adapts the live design and voice list of
+[`monotykamary/pi-better-openai`](https://github.com/monotykamary/pi-better-openai)
+0.2.6, which credits original work by Matt Leong, and portions derive from
+`can1357/oh-my-pi`; the exact upstream snapshot under `upstream/` is provenance
+material and is never loaded at runtime. The native audio package is fetched
+from npm during install and is not committed, mirrored or republished here.
+[Provenance](PROVENANCE.md) records the extraction, pins and hashes;
+[third-party notices](THIRD_PARTY_NOTICES.md) and the `notices/` corpus carry
+the gathered attributions and the disclosed gaps. Those records are the author's
+diligence, not legal clearance.
+
+See [the current design](docs/DESIGN.md) for status and accepted decisions.
+Historical research is archived behind
+[an explicit index](docs/history/extraction/README.md).

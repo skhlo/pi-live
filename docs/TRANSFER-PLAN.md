@@ -1,6 +1,7 @@
 # Transfer Pi Live out of dotfiles
 
-Status: local execution authorized by the operator after reviewing this plan.
+Status: historical. The author authorized local execution after reviewing this
+plan; the transfer is complete.
 Publication remains separate. See `VERIFICATION.md` for execution results; the
 original scope below remains the transfer contract.
 
@@ -18,21 +19,21 @@ monorepo, generic installer, or framework.
 
 ## Baselines and custody
 
-- Destination: private `skhlo/pi-live`, repository ID `1385761841`, local clone
-  `/Users/skhl/Repositories/pi-live`; initial main commit
+- Destination: `skhlo/pi-live`, repository ID `1385761841`; initial main commit
   `ca92eba6072edd210c046b0290d4fa06360a5095`.
-- Implementation source: `skhlo/dotfiles` (repository ID `1228109764`), local
-  `/tmp/dotfiles-pi-live-package`, branch `feat/pi-live-package`, commit
-  `db2c57f13c274d66d79287fda8de177c016f0c02`.
-- [Dotfiles PR #522](https://github.com/skhlo/dotfiles/pull/522) is open, unmerged,
+- Implementation source: `skhlo/dotfiles` (repository ID `1228109764`, a
+  private repository), branch `feat/pi-live-package`, commit
+  `db2c57f13c274d66d79287fda8de177c016f0c02`, in a local worktree.
+- [Dotfiles PR #522](https://github.com/skhlo/dotfiles/pull/522) (private
+  repository) is open, unmerged,
   and published only through `d66287e4c6046ae61fb42133958c46655480434e`.
   Its CI failed. The later local commit contains a recovered, unpublished
   test-only CI repair; it is not a green remote result.
-- The old no-mistakes run `01M39VVQ5AMZEMJWYCE8PT5RGS` is cancelled. Leave it
-  cancelled. Do not restart its review or use it to deliver the new repository.
-- Research is under
-  `/Users/skhl/dotfiles/docs/research/harnesses/pi/live-extraction/`.
-  It is ignored local data, not part of the source commit.
+- The old dotfiles delivery pipeline run is cancelled. Leave it cancelled. Do
+  not restart its review or use it to deliver the new repository.
+- Research is under the dotfiles checkout's
+  `docs/research/harnesses/pi/live-extraction/` directory. It is ignored local
+  data, not part of the source commit.
 
 Use a new `feat/initial-extraction` branch for implementation. Read committed
 source bytes from the source commit, not mutable worktree contents. Inventory and
@@ -133,10 +134,11 @@ a whole-repository inventory policy or a new deployment system.
 Leave these behind:
 
 - `pi-capabilities.ts`, rollout scripts and their host/transaction tests.
-- `hosts/mba.json`, dotfiles settings, launchers and root tooling configuration.
+- The per-host profile, dotfiles settings, launchers and root tooling
+  configuration.
 - The dotfiles `PI-LIVE.md` installer procedure; replace it with a small
   standalone development README, not a port of plan/apply/setup/recovery.
-- Dotfiles-only GitHub checks, runner policy, no-mistakes configuration, and
+- Dotfiles-only GitHub checks, runner policy, delivery-pipeline configuration, and
   unrelated dependencies.
 
 **Done when:** package tests and checks run from `pi-live` without importing,
@@ -161,7 +163,7 @@ research tree is about 1.3 MB, including about 872 KB of rights evidence. Inspec
 for secrets, personal state, and redistribution terms before publication. Keep
 vetted files byte-for-byte beneath `docs/history/extraction/original/`; the new
 archive index identifies their historical status. Unpublishable raw captures go
-to the private local `/Users/skhl/.local/share/pi-live-transfer/evidence/`, with
+to the private local `~/.local/share/pi-live-transfer/evidence/`, with
 identity and custody recorded in the transfer receipt. Preserve original
 receipt hashes; do not silently redact a file and retain its old identity.
 Do not import native archives or the gigabyte-scale registry/source audit corpus.
@@ -170,17 +172,17 @@ runnable standalone tests.
 
 Put historical text behind a clear archive index. Its old statements that
 "dotfiles owns this", "no new repository is needed", "G0 remains blocked", or
-"no PR exists" are not current instructions. Record the later operator decisions
+"no PR exists" are not current instructions. Record the later author decisions
 and current commit-specific evidence in the owning current documents. Do not
 rewrite historical receipts to make them describe the new package.
 
 Carry forward these distinctions:
 
-- The operator accepted documented native notice/provenance and objc2/Apple
+- The author accepted documented native notice/provenance and objc2/Apple
   uncertainties for personal/open-source use. The exact native dependency stays
   npm-fetched; its binary is not committed, mirrored, or republished. Preserve
   gathered notices and qualifications. This is not legal clearance or a complete
-  target-specific SBOM. Keep the new repository private unless separately asked.
+  target-specific SBOM. Repository visibility is a separate, later decision.
 - The package is inert: discovery, commands, preferences, and presentation exist;
   voice calls, auth/transport, ownership, microphone/speakers and service support
   are not implemented by this transfer.
@@ -249,7 +251,7 @@ Ask separately before publishing the extraction branch or opening its PR.
 Repository-owned CI and delivery configuration belong to that delivery step,
 not to recreating dotfiles' infrastructure during extraction. Keep main
 protected, preserve the user's merge control, and do not restart the cancelled
-no-mistakes run. If a future delivery tool automatically restarts review after
+delivery pipeline run. If a future delivery tool automatically restarts review after
 CI repair, surface that policy before starting it; do not promise an unsupported
 override or change global settings.
 

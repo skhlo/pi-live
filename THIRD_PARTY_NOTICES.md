@@ -1,6 +1,6 @@
 # Pi Live third-party notices
 
-This is the bounded, owned notice and attribution summary for the private
+This is the bounded, owned notice and attribution summary for the
 `pi-live` package. The exact upstream extension notice is also carried,
 byte-for-byte, as `UPSTREAM_THIRD_PARTY_NOTICES.md`. `PROVENANCE.md` binds these
 notices to the reviewed source and native package.
@@ -138,7 +138,7 @@ some Rust/C/resources. The release Actions addon artifact expired, so the npm
 binary was not directly compared with an archived workflow output, and the
 Fulcio/Rekor chain was not independently verified.
 
-On 2026-09-24 the operator accepted these documented residuals for personal and
+On 2026-09-24 the author accepted these documented residuals for personal and
 open-source use only, provided the exact native leaf remains pinned and fetched
 from npm, and neither the binary nor its tarball is committed, mirrored, or
 republished here. This is accepted residual risk, not legal advice or legal

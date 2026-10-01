@@ -603,19 +603,19 @@ Fixtures inject the account-home resolver as well as environment HOME, confine
 writes to their temporary roots, and cannot fall back to real user state. Use
 pipe IPC for child coordination, barriers instead of arbitrary sleeps, bounded
 parent watchdogs, and explicit child joins/cleanup. Watchdog expiry is a failed
-test, not successful runtime cleanup. Long stress runs belong on MBP through
-Paseo if needed; do not substitute Linux results for macOS loader evidence.
+test, not successful runtime cleanup. Long stress runs belong on a separate
+Linux host if needed; do not substitute Linux results for macOS loader evidence.
 
-| Needed action                                                                 | Access/approval point                                                                                                      |
-| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Read code, docs, issue metadata; write/review this plan                       | Available now; no credentials/device access requested                                                                      |
-| Implement #3 with temporary homes/fake adapters/real children                 | Approved after plan review, including delegation; no live credentials or hardware needed                                   |
-| Use another Node version or restore/install dependencies                      | Ask before installing anything; current inspected runtime is Node 26.6.0 with Pi 0.87.1 and pnpm 11.8.0                    |
-| Repeat real frozen production installation                                    | Ask for the exact disposable install/fetch scope first; scripts stay disabled and pins unchanged                           |
-| Remote-host stress execution, if needed                                       | Ask before using another host; use Paseo CLI for authorized MBP work and retain macOS-specific checks on their owning host |
-| Establish real-home/local-storage certification                               | #6's reviewed setup method and explicit real-home scope; no certification is issued by this plan                           |
-| Native import/DeviceCheck, actual auth, microphone/speakers, provider request | Stop and ask before first use; reserve for separately reviewed real-adapter diagnostics/canary                             |
-| Commit/push/PR, issue update/closure                                          | Separate delivery approval; earlier #2 delivery permission does not publish this plan                                      |
+| Needed action                                                                 | Access/approval point                                                                                   |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Read code, docs, issue metadata; write/review this plan                       | Available now; no credentials/device access requested                                                   |
+| Implement #3 with temporary homes/fake adapters/real children                 | Approved after plan review, including delegation; no live credentials or hardware needed                |
+| Use another Node version or restore/install dependencies                      | Ask before installing anything; current inspected runtime is Node 26.6.0 with Pi 0.87.1 and pnpm 11.8.0 |
+| Repeat real frozen production installation                                    | Ask for the exact disposable install/fetch scope first; scripts stay disabled and pins unchanged        |
+| Remote-host stress execution, if needed                                       | Ask before using another host, and retain macOS-specific checks on their owning host                    |
+| Establish real-home/local-storage certification                               | #6's reviewed setup method and explicit real-home scope; no certification is issued by this plan        |
+| Native import/DeviceCheck, actual auth, microphone/speakers, provider request | Stop and ask before first use; reserve for separately reviewed real-adapter diagnostics/canary          |
+| Commit/push/PR, issue update/closure                                          | Separate delivery approval; earlier #2 delivery permission does not publish this plan                   |
 
 No new access is needed to finish planning. Native-close certification, home
 certification and minimum-supported-Node execution remain named future evidence,
