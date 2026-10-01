@@ -12,9 +12,9 @@ export const PI_LIVE_PI_VERSION = "0.87.1";
 export const PI_LIVE_MINIMUM_NODE = [22, 19, 0] as const;
 export const PI_LIVE_PUBLIC_REGISTRY = "https://registry.npmjs.org/";
 export const PI_LIVE_FULL_LOCK_SHA256 =
-  "7230a1cf633b74dc0fe3d7b6ec014f66edb636623a92e060dd75d0adf9d9e597";
+  "64e5cbb3dbb6744c8b80d8ca77cf64b636f4e18f650d2d5e9e84969146bc3869";
 export const PI_LIVE_PRODUCTION_LOCK_SHA256 =
-  "f179cf0d853740aac7469e0ea3a41ae222e4d83d51c6e1a3efa6da88ada6d846";
+  "c126f54af0b1ddc06421c07314aecbf2aa74406c1b8d47d8ba54fc130a19fc5e";
 export const PI_LIVE_NATIVE_MANIFEST_SHA256 =
   "9e985ae0ee2cd229326f9d1fed99ca0341a324720c96fcc2e123eaea4f97a44e";
 export const PI_LIVE_NATIVE_README_SHA256 =
@@ -49,7 +49,7 @@ export const PI_LIVE_PRODUCTION_PACKAGES = [
   ["ms@2.1.3", "ms", "2.1.3"],
   ["proxy-agent-negotiate@1.1.0", "proxy-agent-negotiate", "1.1.0"],
   ["proxy-from-env@2.1.0", "proxy-from-env", "2.1.0"],
-  ["undici@8.10.0", "undici", "8.10.0"],
+  ["undici@8.10.2", "undici", "8.10.2"],
   ["ws@8.21.2", "ws", "8.21.2"],
 ] as const;
 
@@ -112,7 +112,7 @@ export const PI_LIVE_MANIFEST = {
   dependencies: {
     "https-proxy-agent": "9.1.0",
     "proxy-from-env": "2.1.0",
-    undici: "8.10.0",
+    undici: "8.10.2",
     ws: "8.21.2",
   },
   peerDependencies: {
@@ -905,7 +905,7 @@ export function verifyPiLiveProductionInstall(requestedRoot: string): void {
       "https-proxy-agent": "https-proxy-agent@9.1.0",
       "pi-live": ".",
       "proxy-from-env": "proxy-from-env@2.1.0",
-      undici: "undici@8.10.0",
+      undici: "undici@8.10.2",
       ws: "ws@8.21.2",
     },
     "Pi Live pnpm direct package map differs",

@@ -52,7 +52,7 @@ Runtime pins remain exact:
 
 - `https-proxy-agent@9.1.0`
 - `proxy-from-env@2.1.0`
-- `undici@8.10.0`
+- `undici@8.10.2`
 - `ws@8.21.2`
 - optional `@oh-my-pi/pi-natives-darwin-arm64@17.2.9`
 
@@ -65,12 +65,28 @@ The root lock was regenerated for standalone development metadata with automatic
 peer installation disabled. The old full-lock SHA-256
 `5592ea11b80d66ef9d230b021903458d2de8360c28461d4a9a1b220bce0770ba`
 describes only the historical dotfiles package and its historical receipt. It is
-not a current-root guarantee. The standalone full-lock SHA-256 is
-`7230a1cf633b74dc0fe3d7b6ec014f66edb636623a92e060dd75d0adf9d9e597`.
+not a current-root guarantee. The standalone full-lock SHA-256 was
+`7230a1cf633b74dc0fe3d7b6ec014f66edb636623a92e060dd75d0adf9d9e597`
+from extraction through the `v0.1.0` tag and every later commit until the
+2026-10-02 undici bump; since that bump it is
+`64e5cbb3dbb6744c8b80d8ca77cf64b636f4e18f650d2d5e9e84969146bc3869`.
 The disposable production check verifies the same nine-package graph, absent
 private Pi/TUI, disabled installation scripts, and exact native identity. The
-production-lock hash remains
-`f179cf0d853740aac7469e0ea3a41ae222e4d83d51c6e1a3efa6da88ada6d846`.
+production-lock hash was
+`f179cf0d853740aac7469e0ea3a41ae222e4d83d51c6e1a3efa6da88ada6d846`
+over the same span and is
+`c126f54af0b1ddc06421c07314aecbf2aa74406c1b8d47d8ba54fc130a19fc5e`
+since the bump.
+
+The 2026-10-02 bump raised only `undici`, from 8.10.0 to 8.10.2, for eleven
+GitHub advisories fixed in 8.10.2 (GHSA-rfgv-xxqx-mfg5, GHSA-vp8m-p9jh-q5pm,
+GHSA-w293-vg96-wgc3, GHSA-2jfj-6hjv-fm6j, GHSA-3wwx-pv8p-q78v,
+GHSA-3xpg-4rpp-hhhm, GHSA-pmjh-fq2x-6v4x, GHSA-rx4f-c7p8-82vq,
+GHSA-2gqq-gqf2-x968, GHSA-8436-99hf-9mmv, GHSA-r53p-7pc4-xj5r). The renewed
+notice review that a pin change requires found nothing owed: undici's LICENSE
+is byte-identical across the two versions and undici is not in the notices
+corpus. The disposable production check was rerun on macOS arm64 and passed
+with the new production-lock hash.
 Development script invocation also needs explicit automatic-peer and ignored-script
 policy, as documented in the README; bare pnpm can rewrite the full lock.
 
