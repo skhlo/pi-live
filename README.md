@@ -6,7 +6,7 @@ conversation. You ask, Pi works with its usual tools, voice tells you what it
 is doing, you interrupt or follow up, and the result comes back spoken. Typed
 and spoken input share one conversation, and you keep the terminal.
 
-<!-- demo GIF: docs/media/demo.gif -->
+![A Pi terminal session: the user starts /live, speaks a request, Pi runs git and writes a summary, and the voice reply streams in the Pi Live widget.](docs/media/demo.gif)
 
 ## Three ways to use it
 
