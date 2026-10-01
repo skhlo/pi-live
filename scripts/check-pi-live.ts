@@ -4,11 +4,13 @@ import path from "node:path";
 
 import {
   inspectPiLivePackagePayload,
+  PI_LIVE_FULL_LOCK_SHA256,
   PI_LIVE_NATIVE_BINARY_SHA256,
   PI_LIVE_NATIVE_MANIFEST_SHA256,
   PI_LIVE_NATIVE_README_SHA256,
   PI_LIVE_NOTICE_FILE_COUNT,
   PI_LIVE_NOTICE_MANIFEST_SHA256,
+  PI_LIVE_PRODUCTION_LOCK_SHA256,
   piLiveSha256,
 } from "./pi-live-package.ts";
 
@@ -77,6 +79,8 @@ async function verifyPackage(repositoryRoot: string): Promise<number> {
       PI_LIVE_NATIVE_MANIFEST_SHA256,
       PI_LIVE_NATIVE_README_SHA256,
       PI_LIVE_NOTICE_MANIFEST_SHA256,
+      PI_LIVE_FULL_LOCK_SHA256,
+      PI_LIVE_PRODUCTION_LOCK_SHA256,
       "does not claim legal clearance",
       "not committed, mirrored, or republished",
       "complete target-specific SBOM",
