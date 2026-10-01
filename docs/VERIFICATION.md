@@ -8,7 +8,7 @@ remain unchanged, and current tests verify a pinned local-Git historical fixture
 This records the local inert-package transfer, not a voice-runtime release or
 adoption decision. The source was dotfiles commit
 `db2c57f13c274d66d79287fda8de177c016f0c02`; old PR #522 and its cancelled
-no-mistakes run were not resumed or changed.
+delivery pipeline run were not resumed or changed.
 
 ## Result
 

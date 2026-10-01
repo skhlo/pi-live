@@ -1,14 +1,14 @@
 # Pi Live provenance and residual record
 
-This record identifies the source and dependency boundary of the private,
-setup-only extraction. It does not claim legal clearance, a complete
+This record identifies the source and dependency boundary of the
+standalone, setup-only extraction. It does not claim legal clearance, a complete
 platform-specific SBOM, a reproduced native build, live-service support, or
 successful native/audio use.
 
 ## Extraction source
 
 The standalone repository was seeded from `skhlo/dotfiles` (repository ID
-`1228109764`) at local commit
+`1228109764`, a private repository) at local commit
 `db2c57f13c274d66d79287fda8de177c016f0c02` on the retained
 `feat/pi-live-package` branch. That commit contains unpublished work and must not
 be described as available from GitHub.
@@ -113,7 +113,7 @@ The corpus preserves known resource and native-component attribution, including
 public-source author names. Whole-file matches for selected embedded resources
 do not prove the complete linked dependency graph.
 
-On 2026-09-24 the operator accepted the documented notice/provenance residuals
+On 2026-09-24 the author accepted the documented notice/provenance residuals
 for personal and open-source use, subject to the exact native pin, npm-only
 fetching during separately authorized provisioning, no binary/tarball
 republication, preserved notices and qualifications, and renewed review after a

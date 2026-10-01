@@ -10,7 +10,7 @@ The originals contain obsolete instructions and status claims. In particular:
 
 - dotfiles no longer owns Pi Live development;
 - the statement that no new repository is needed is superseded;
-- the evidence-only G0 stop was later removed by the operator's documented
+- the evidence-only G0 stop was later removed by the author's documented
   residual-risk acceptance, not by legal clearance;
 - old no-push/no-PR statements describe their original research turns and are
   not current delivery policy; and
@@ -34,8 +34,12 @@ The 32 retained files comprise:
 - eight archival harness files in `original/harnesses/`; and
 - eight historical logs, scripts, and receipts in `original/verification/`.
 
-The harnesses retain absolute paths to old temporary checkouts and dependencies.
-They are not runnable standalone tests. Verification logs contain synthetic
+Links into `skhlo/dotfiles` point at a private repository and do not resolve
+for other readers. The originals also name the author's machines (MBA, MBP,
+mini), the terminal application used for captures, and the review tooling of
+the time; those are historical context, not requirements. The harnesses retain
+absolute paths to old temporary checkouts and dependencies. They are not
+runnable standalone tests. Verification logs contain synthetic
 session identifiers and historical temporary paths, not current user sessions.
 A bounded review found no credential or private authentication material in the
 repository-retained set. Historical absolute paths remain unchanged because

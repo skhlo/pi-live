@@ -2,15 +2,15 @@
 
 ## Status
 
-Pi Live is a standalone, private Pi extension. The repository owns development;
-dotfiles is only the retained extraction source. Issues #3/#4 supply lifecycle
+Pi Live is a standalone Pi extension. This repository owns development; the
+author's private dotfiles repository is only the retained extraction source. Issues #3/#4 supply lifecycle
 and bounded auth/media/transport. Issue #5 connects public Pi controls and
 ordinary Pi input to those owners. Issue #6 adds `/live setup`, which
 certifies the account home, and trusts the native close so a finished call
-releases its lock. Proxied-sideband cleanup remains unconfirmed. The operator
-accepted `v0.1.0` for personal MBA use after the [#7 canary](ISSUE-7-VERIFICATION.md),
+releases its lock. Proxied-sideband cleanup remains unconfirmed. The author
+accepted `v0.1.0` for personal use on a MacBook Air after the [#7 canary](ISSUE-7-VERIFICATION.md),
 explicitly waiving the real denied-microphone-permission check. Loading remains
-explicit; no global registration or dotfiles integration was added.
+explicit; no global registration or installer integration was added.
 
 ## Implemented behavior
 
@@ -109,7 +109,7 @@ not read session history or schedule Pi work.
 
 The native peer close stops the speaker device and closes the peer, but it
 ignores their errors, joins the microphone send task for at most one second and
-never joins the remote-audio task. At the operator's direction (#6) the real
+never joins the remote-audio task. At the author's direction (#6) the real
 adapter treats a resolved close as confirmed, so the lock is released; the
 unjoined task cannot play once the speaker is stopped. The proxy agent leaves
 CONNECT cleanup uncertain, so a proxied sideband still reports cleanup
@@ -131,7 +131,7 @@ provider request or native addon execution was used for that work.
 - The exact upstream snapshot is provenance-only and never runtime-loaded.
 - The native binary remains npm-fetched only during separately authorized
   provisioning. This repository does not commit, mirror, or republish it.
-- The operator accepted the documented native notice/provenance residuals for
+- The author accepted the documented native notice/provenance residuals for
   personal and open-source use. The acceptance is not legal clearance or a
   complete target-specific SBOM claim.
 - The gathered notice corpus and public author credits remain with the package.
@@ -339,7 +339,7 @@ The user's #5 implementation instruction authorizes local work and fake-resource
 verification. See [issue #5 verification](ISSUE-5-VERIFICATION.md) and
 [issue #6 verification](ISSUE-6-VERIFICATION.md) for implementation evidence.
 [Issue #7 verification](ISSUE-7-VERIFICATION.md) records the real-access canary,
-its explicit waiver and the operator's MBA adoption decision.
+its explicit waiver and the author's MacBook Air adoption decision.
 
 ## Historical statements that are superseded
 
@@ -347,7 +347,7 @@ The archive intentionally preserves old text unchanged. For current work:
 
 - “dotfiles owns this” and “no new repository is needed” are superseded; this
   repository owns development;
-- “G0 remains blocked” is superseded by the operator's later residual-risk
+- “G0 remains blocked” is superseded by the author's later residual-risk
   acceptance, subject to the conditions in `PROVENANCE.md`; this does not become
   legal clearance;
 - old “no PR exists,” “no push,” and issue-gating statements describe their
@@ -370,7 +370,7 @@ evidence and remaining gaps. [Lifecycle verification](ISSUE-3-VERIFICATION.md)
 and [transfer verification](VERIFICATION.md) retain their historical scope.
 [The extraction receipt](history/extraction/transfer-receipt.json) owns copied
 source identity, adaptations, and historical evidence custody. Those are distinct
-from live-runtime or adoption evidence. The [MBA canary](ISSUE-7-VERIFICATION.md)
+from live-runtime or adoption evidence. The [MacBook Air canary](ISSUE-7-VERIFICATION.md)
 owns its bounded real-native/audio/provider observations and adoption decision;
 it does not establish general verification beyond that surface.
 

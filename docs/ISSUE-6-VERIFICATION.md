@@ -1,6 +1,6 @@
 # Issue 6 verification: standalone setup and recovery
 
-## Operator decisions (2026-09-26)
+## Author decisions (2026-09-26)
 
 - **Cleanup between calls:** trust the native close. A resolved native peer
   close now counts as confirmed, so a finished call releases its lock and the
@@ -11,10 +11,10 @@
 - **Home setup:** a one-time `/live setup` command replaces the
   development-only `PI_LIVE_DEV_TRUST_HOME=1` switch, which is removed.
 - **Loading:** Pi Live stays an explicitly loaded extension
-  (`pi -e <checkout>/index.ts`). Adding it to the operator's global extension
-  set in dotfiles comes later, after it passes here.
+  (`pi -e <checkout>/index.ts`). Adding it to the author's global Pi extension
+  set comes later, after it passes here.
 - **Version:** the reviewed version is `0.1.0`, tagged `v0.1.0` once this work
-  merges and the operator confirms the tag.
+  merges and the author confirms the tag.
 
 ## What changed
 
@@ -94,7 +94,7 @@ Guards proven by breaking them once:
 
 ## Real trial and production install (2026-09-26)
 
-On the operator's MBA (macOS arm64, Pi 0.87.1), with Pi Live loaded through
+On the author's MacBook Air (macOS arm64, Pi 0.87.1), with Pi Live loaded through
 `pi -e` from this branch:
 
 - `/live` before setup refused with `setup-required. Run /live setup first.`
@@ -107,7 +107,7 @@ On the operator's MBA (macOS arm64, Pi 0.87.1), with Pi Live loaded through
   `/live off` and `/live stop`. Each later call started without `busy` or
   `cleanup-blocked`, and afterwards the state directory held only `setup.json`.
 
-`check:production` passed with the operator's approval: a disposable frozen
+`check:production` passed with the author's approval: a disposable frozen
 install of pnpm 11.8.0 and the nine exact runtime packages, scripts and
 automatic peers disabled, exact native hashes, and an unchanged closure before
 and after the sandboxed `--no-addons` loader.
@@ -115,6 +115,6 @@ and after the sandboxed `--no-addons` loader.
 ## Subsequent canary and remaining limit
 
 - A proxied (HTTPS proxy) real call remains unverified.
-- [Issue #7 verification](ISSUE-7-VERIFICATION.md) records the subsequent MBA
-  canary and personal-use adoption. The operator explicitly waived the real
+- [Issue #7 verification](ISSUE-7-VERIFICATION.md) records the subsequent
+  MacBook Air canary and personal-use adoption. The author explicitly waived the real
   denied-microphone-permission check; it remains unverified.
