@@ -1,0 +1,22 @@
+# Dependabot security updates stay on for the root manifest. Version-update
+# pull requests are off everywhere: every runtime pin is recorded with lock
+# hashes in PROVENANCE.md and scripts/pi-live-package.ts, so a bump is a
+# reviewed provenance change, not a bot commit.
+#
+# upstream/pi-live/ is a byte-exact provenance snapshot of the extracted
+# upstream extension. It is never installed or loaded and check:source pins
+# its bytes, so Dependabot must not touch it, for security updates either.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 0
+  - package-ecosystem: npm
+    directory: /upstream/pi-live
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 0
+    ignore:
+      - dependency-name: "*"
