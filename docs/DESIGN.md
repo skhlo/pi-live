@@ -197,7 +197,7 @@ Sidecar ownership belongs to the Pi binding, independent of voice ownership.
 Voice stop and later calls keep it running and preserve the current browser.
 With no configured `PI_LIVE_BROWSER_CDP`, an owned running sidecar supplies
 `http://127.0.0.1:9333` for `live_browser`. `session_shutdown`, which Pi emits
-for every session ending listed under **Browser sidecar** in CONTEXT.md, signals
+for every session ending listed under **Browser sidecar** in GLOSSARY.md, signals
 the script and awaits its exit. Pi awaits shutdown handlers without a timeout,
 so the script bounds its own cleanup: it signals both children, waits up to
 `SIDECAR_STOP_SECONDS` (five by default), then kills any still running and notes
