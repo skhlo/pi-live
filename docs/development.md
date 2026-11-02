@@ -1,6 +1,6 @@
 # Development
 
-Pinned dependency policy, checks, and continuous integration.
+Pinned dependency policy, checks, continuous integration, and limits on changes.
 
 The compatibility baseline is Node >=22.19.0, pnpm 11.8.0, Pi/TUI 0.87.1, and
 `@oh-my-pi/pi-natives-darwin-arm64` 17.2.9. Pi and TUI remain wildcard runtime
@@ -86,3 +86,12 @@ or require secrets. Hosted runner tool/dependency downloads are part of CI
 bootstrap, not permission for local installs or real-home adoption. Branch
 protection and required-check policy are separate follow-ups. A configured
 workflow is not passing hosted evidence until its jobs have actually run.
+
+## Limits on changes
+
+Never merge a bot pull request that touches `upstream/pi-live/`: it is a
+byte-exact provenance snapshot, and
+[Dependabot is configured](../.github/dependabot.yml) to leave it alone.
+
+No dotfiles pin, copied code, or integration until the extension is useful. Open
+work is listed in the [status issue](https://github.com/skhlo/pi-live/issues/32).
