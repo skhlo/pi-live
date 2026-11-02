@@ -90,8 +90,9 @@ workflow is not passing hosted evidence until its jobs have actually run.
 ## Limits on changes
 
 Never merge a bot pull request that touches `upstream/pi-live/`: it is a
-byte-exact provenance snapshot, and
-[Dependabot is configured](../.github/dependabot.yml) to leave it alone.
+byte-exact provenance snapshot. [Dependabot is configured](../.github/dependabot.yml)
+not to open one.
 
-No dotfiles pin, copied code, or integration until the extension is useful. Open
-work is listed in the [status issue](https://github.com/skhlo/pi-live/issues/32).
+Do not add a dotfiles pin, copied code, or an integration until the extension is
+useful. Open work is listed in the
+[status issue](https://github.com/skhlo/pi-live/issues/32).
